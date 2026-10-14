@@ -55,7 +55,7 @@ Tesseract 6 worker handle'ını model hazırlanınca verir. Köprü, **yalnız c
 
 ## Tarayıcı/kamera sınırları
 
-Modern WebAssembly/Worker/File API destekli tarayıcı gerekir. Linux Chromium 154.0.8037.57 ile doğrulandı; fiziksel Android Chrome, iOS Safari ve Firefox bu ortamda doğrulanmadı. Desteklenmeyen OCR ortamında manuel/metin akışı kalır.
+Modern WebAssembly/Worker/File API destekli tarayıcı gerekir. Linux Chromium 154.0.8037.57 ve Chrome for Testing 141.0.7390.37 ile doğrulandı; fiziksel Android Chrome, iOS Safari ve Firefox bu ortamda doğrulanmadı. Test sürücüsü `tr-TR` locale kullanır; CI'ın varsayılan locale'i Flutter/Intl başlangıcında `Incorrect locale information provided` hatası oluşturduğu için açıkça sabitlenmiştir. Desteklenmeyen OCR ortamında manuel/metin akışı kalır.
 
 Güvenli bağlamdaki mobil tarayıcıya `accept="image/*" capture="environment"` sistem seçicisi sunulur. HTTPS Pages güvenli bağlamdır; HTTP localhost test için güvenli kabul edilir. Capture davranışı tarayıcı/OS'ye bağlıdır, canlı video önizlemesi yoktur. Masaüstünde kamera düğmesi gösterilmez; **Fotoğraf yükle / galeriden seç** her zaman alternatiftir. İzin hataları Türkçe gösterilir. Bazı OS seçicileri kamera izni reddini sadece seçim iptali olarak bildirir; uygulama olmayan bir izin durumunu tahmin etmez.
 

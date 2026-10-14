@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 module.exports = async (browser, baseUrl, evidence) => {
-  const context = await browser.newContext({viewport: {width: 390, height: 900}, isMobile: true, hasTouch: true,
+  const context = await browser.newContext({locale: 'tr-TR', viewport: {width: 390, height: 900}, isMobile: true, hasTouch: true,
     userAgent: 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36'});
   const page = await context.newPage(), errors = [], expectedFailures = [];
   page.on('pageerror', error => errors.push(error.message));
@@ -14,6 +14,8 @@ module.exports = async (browser, baseUrl, evidence) => {
       await page.mouse.move(195, 650); await page.mouse.wheel(0, 350); await page.waitForTimeout(100);
     }
     await target.click();
+    // Let Flutter commit the action before observing the next/error state.
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   };
   const open = async () => {
     await page.goto(baseUrl, {waitUntil: 'networkidle'});
@@ -86,7 +88,10 @@ module.exports = async (browser, baseUrl, evidence) => {
     await button('İşlemi iptal et');
     await button('Metin yapıştır');
     const field = page.getByRole('textbox', {name: /Etiket metni/});
-    await field.fill('80% CO 20% PES');
+    await field.tap();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.keyboard.insertText('80% CO 20% PES');
+    assert.equal(await field.inputValue(), '80% CO 20% PES');
     await page.waitForTimeout(1500);
     assert.equal(await field.inputValue(), '80% CO 20% PES');
     await context.unroute('**/ocr/core/*');

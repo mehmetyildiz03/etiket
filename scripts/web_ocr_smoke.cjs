@@ -26,7 +26,7 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
     for (const width of [360, 390, 430, 1280]) {
       stage = `${width}: open compiled app`;
       const mobile = width < 500;
-      const context = await browser.newContext({viewport: {width, height: 900}, isMobile: mobile, hasTouch: mobile,
+      const context = await browser.newContext({locale: 'tr-TR', viewport: {width, height: 900}, isMobile: mobile, hasTouch: mobile,
         ...(mobile ? {userAgent: 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36'} : {})});
       const page = await context.newPage();
       const errors = [], failures = [], requests = [], responses = [];
@@ -52,6 +52,7 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
           await page.mouse.move(width / 2, 650); await page.mouse.wheel(0, 450); await page.waitForTimeout(100);
         }
         await target.click();
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       };
       const seen = async text => page.getByText(text).or(page.locator(`[aria-label*="${text}"]`)).first().waitFor({timeout: 120000});
       await page.goto(baseUrl, {waitUntil: 'networkidle'});
