@@ -167,6 +167,7 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         await field.click();
         const raw = await field.inputValue();
         fs.writeFileSync(path.join(evidence, 'angled-raw.txt'), raw);
+        console.log('Synthetic angled-tag raw OCR:', JSON.stringify(raw));
         await page.screenshot({path: path.join(evidence, 'angled-raw.png')});
         assert.match(raw, /80\s*%\s*PAMUK/i, '80% PAMUK on a tilted label');
         assert.match(raw, /20\s*%\s*POLYESTER/i, '20% POLYESTER on a tilted label');
