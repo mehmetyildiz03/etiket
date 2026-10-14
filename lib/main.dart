@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'domain/fabric.dart';
 import 'domain/analysis.dart';
 import 'domain/composition_draft.dart';
+import 'scan/photo_scan.dart';
+import 'scan/scan_services.dart';
+import 'ui/photo_scan_panel.dart';
 
 void main() => runApp(const EtiketApp());
 
@@ -9,7 +13,9 @@ const _green = Color(0xFF254A3F);
 const _cream = Color(0xFFF4F2EC);
 
 class EtiketApp extends StatelessWidget {
-  const EtiketApp({super.key});
+  const EtiketApp({super.key, this.photoSource, this.textRecognizer});
+  final PhotoSourceService? photoSource;
+  final TextRecognitionService? textRecognizer;
 
   @override
   Widget build(BuildContext context) {
@@ -27,7 +33,7 @@ class EtiketApp extends StatelessWidget {
           minimumSize: const Size.fromHeight(54),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)))),
       ),
-      home: const EtiketHome(),
+      home: EtiketHome(photoSource: photoSource, textRecognizer: textRecognizer),
     );
   }
 }
@@ -35,24 +41,61 @@ class EtiketApp extends StatelessWidget {
 enum _Page { home, camera, label, edit, purpose, result }
 
 class EtiketHome extends StatefulWidget {
-  const EtiketHome({super.key});
+  const EtiketHome({super.key, this.photoSource, this.textRecognizer});
+  final PhotoSourceService? photoSource;
+  final TextRecognitionService? textRecognizer;
   @override
   State<EtiketHome> createState() => _EtiketHomeState();
 }
 
-class _EtiketHomeState extends State<EtiketHome> {
+class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   _Page page = _Page.home;
   WearPurpose purpose = WearPurpose.summer;
   final CompositionDraft draft = CompositionDraft.sample();
   final TextEditingController labelController = TextEditingController();
   LabelImportProposal? labelProposal;
   _Page labelReturnPage = _Page.home;
+  late final PhotoScanController scan;
+  bool _recoveringStartup = true;
+  bool _labelFromOcr = false;
+  int _labelEditRevision = 0;
 
   bool get allValid => draft.canAnalyze;
   Garment get garment => draft.verifiedGarment();
 
   @override
+  void initState() {
+    super.initState();
+    final services = createScanServices();
+    scan = PhotoScanController(widget.photoSource ?? services.photos,
+      widget.textRecognizer ?? services.recognizer);
+    scan.onChanged = () {
+      if (!mounted) return;
+      setState(() {
+        if (_recoveringStartup && page == _Page.home &&
+            ((scan.stage == ScanStage.preview && scan.photo != null) || scan.stage == ScanStage.failed)) {
+          page = _Page.camera;
+        }
+      });
+    };
+    WidgetsBinding.instance.addObserver(this);
+    unawaited(scan.recover().whenComplete(() => _recoveringStartup = false));
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // An external camera/picker legitimately backgrounds the activity. Only
+    // suspend OCR; its eventual result must not be applied after suspension.
+    if ((state == AppLifecycleState.paused || state == AppLifecycleState.hidden) &&
+        scan.stage == ScanStage.recognizing) {
+      scan.cancel(message: 'Tarama duraklatıldı. Geri döndüğünde tekrar okuyabilirsin.');
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    scan.dispose();
     labelController.dispose();
     super.dispose();
   }
@@ -61,9 +104,43 @@ class _EtiketHomeState extends State<EtiketHome> {
     FocusScope.of(context).unfocus();
     setState(() {
       labelReturnPage = from;
+      _labelFromOcr = false;
       labelProposal = null;
       page = _Page.label;
     });
+    _recoveringStartup = false;
+    scan.abandon();
+  }
+
+  Future<void> openOcrLabel() async {
+    if (scan.stage != ScanStage.ready) return;
+    final text = scan.text;
+    final scanRevision = scan.revision;
+    final editRevision = _labelEditRevision;
+    if (labelController.text.isNotEmpty && labelController.text != text) {
+      final replace = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Önceki metin değiştirilsin mi?'),
+        content: const Text('Fotoğraftan okunan metin, metin alanının yerini alacak. Kumaş düzenlemelerin bu adımda değişmez.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Metnimi koru')),
+          TextButton(onPressed: () => Navigator.pop(context, true), child: const Text('Fotoğraf metnini kullan')),
+        ],
+      )) ?? false;
+      if (!replace) return;
+    }
+    if (!mounted || page != _Page.camera || scan.revision != scanRevision ||
+        _labelEditRevision != editRevision || scan.stage != ScanStage.ready) {
+      return;
+    }
+    setState(() {
+      labelController.text = text;
+      ++_labelEditRevision;
+      labelProposal = null;
+      _labelFromOcr = true;
+      labelReturnPage = _Page.camera;
+      page = _Page.label;
+    });
+    scan.abandon(); // The private photo is no longer needed after explicit handoff.
   }
 
   Future<void> applyLabel() async {
@@ -105,7 +182,13 @@ class _EtiketHomeState extends State<EtiketHome> {
     });
   }
 
-  void navigate(_Page target) => setState(() => page = target);
+  void navigate(_Page target) {
+    final leaveScan = page == _Page.camera && target != _Page.camera;
+    final cancelRecovery = _recoveringStartup;
+    _recoveringStartup = false;
+    setState(() => page = target);
+    if (leaveScan || cancelRecovery) scan.abandon();
+  }
   void back() {
     FocusScope.of(context).unfocus();
     navigate(switch (page) {
@@ -191,12 +274,17 @@ class _EtiketHomeState extends State<EtiketHome> {
     OutlinedButton.icon(onPressed: () => openLabel(_Page.home),
       icon: const Icon(Icons.content_paste), label: const Text('Etiket metnini yapıştır')),
     const SizedBox(height: 22),
-    const Text('Üyelik gerekmez • Şimdilik örnek tarama kullanılıyor',
+    const Text('Üyelik gerekmez • Etiketini kontrol ederek doğrula',
       textAlign: TextAlign.center, style: TextStyle(color: Colors.black54, fontSize: 12)),
   ]);
 
   Widget camera() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-    pageTitle('Etiketi tara', 'Gerçek kamera bağlantısı sonraki geliştirme aşamasında eklenecek.'),
+    pageTitle('Etiketi tara', 'Etiketi net ve aydınlık çek. Okunan yazıyı kontrol etmeden doğrulamıyoruz.'),
+    PhotoScanPanel(scan: scan, onReview: openOcrLabel,
+      onManual: () => navigate(_Page.edit), onPaste: () => openLabel(_Page.camera)),
+    const SizedBox(height: 24),
+    const Text('DEMO — fotoğraf veya OCR kullanılmaz', style: TextStyle(color: Colors.black54)),
+    const SizedBox(height: 8),
     Container(height: 260, decoration: BoxDecoration(color: const Color(0xFF202824),
         borderRadius: BorderRadius.circular(22)),
       child: const Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -217,8 +305,10 @@ class _EtiketHomeState extends State<EtiketHome> {
   Widget labelEntry() {
     final proposal = labelProposal;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      pageTitle('Etiket metnini yapıştır',
-        'Metni cihazında ayrıştırırız. Eksik oranları veya belirsiz elyafları tahmin etmeyiz.'),
+      pageTitle(_labelFromOcr ? 'Fotoğraftan okunan metin' : 'Etiket metnini yapıştır',
+        _labelFromOcr
+          ? 'OCR hata yapabilir. Metni etiketle karşılaştırıp düzelt. Ayrıştırma ve açık doğrulama sonraki adımlardır.'
+          : 'Metni cihazında ayrıştırırız. Eksik oranları veya belirsiz elyafları tahmin etmeyiz.'),
       TextField(
         key: const ValueKey('label-text'),
         controller: labelController,
@@ -231,7 +321,10 @@ class _EtiketHomeState extends State<EtiketHome> {
           hintText: 'Dış kumaş: %70 Pamuk %30 Polyester\nAstar: Viskon %100',
           border: OutlineInputBorder(),
         ),
-        onChanged: (_) => setState(() => labelProposal = null),
+        onChanged: (_) {
+          ++_labelEditRevision;
+          setState(() => labelProposal = null);
+        },
       ),
       const SizedBox(height: 12),
       primary('Metni ayrıştır', () {
@@ -281,6 +374,10 @@ class _EtiketHomeState extends State<EtiketHome> {
   Widget edit() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     pageTitle('Kumaş içeriğini doğrula',
       'Her bölümün elyaf oranları ayrı ayrı %100 olmalı. Okunamayan bilgileri tahmin etme.'),
+    if (!draft.imported && !draft.hasUserChanges)
+      const Padding(padding: EdgeInsets.only(bottom: 12),
+        child: Text('Başlangıç değerleri örnektir. Kendi etiketindeki bilgileri gir.',
+          style: TextStyle(color: Colors.black54))),
     if (draft.rawText != null)
       ExpansionTile(title: const Text('Ham etiket metni'), children: [
         Padding(padding: const EdgeInsets.all(12), child: SelectableText(draft.rawText!)),

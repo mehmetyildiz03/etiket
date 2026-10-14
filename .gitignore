@@ -16,3 +16,6 @@ android/local.properties
 ios/Pods/
 ios/.symlinks/
 .DS_Store
+# Reproducible Web OCR assets are generated from the npm lockfile.
+node_modules/
+web/ocr/
