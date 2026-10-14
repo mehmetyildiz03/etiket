@@ -6,7 +6,7 @@ const baseUrl = process.argv[2] || 'http://127.0.0.1:8082/etiket/';
 const evidence = path.resolve(process.env.OCR_EVIDENCE_DIR || 'build/web-ocr-evidence');
 fs.mkdirSync(evidence, {recursive: true});
 let stage = 'load browser driver';
-let diagnosticErrors = [], diagnosticFailures = [];
+let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], diagnosticWarnings = [];
 (async () => {
   const {chromium} = require('../tool/web_ocr/node_modules/playwright');
   stage = 'launch Chromium';
@@ -31,14 +31,21 @@ let diagnosticErrors = [], diagnosticFailures = [];
       const page = await context.newPage();
       const errors = [], failures = [], requests = [], responses = [];
       diagnosticErrors = errors; diagnosticFailures = failures;
+      diagnosticResponses = []; diagnosticWarnings = [];
       page.on('pageerror', e => errors.push(e.message));
-      page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
+      page.on('console', message => {
+        if (message.type() === 'error') errors.push(message.text());
+        if (message.type() === 'warning' && diagnosticWarnings.length < 20) diagnosticWarnings.push(message.text());
+      });
       page.on('requestfailed', request => failures.push(request.url()));
       page.on('request', request => {
         requests.push({url: request.url(), method: request.method()});
         assert.ok(['GET', 'HEAD'].includes(request.method()), 'No image/text upload requests');
       });
-      page.on('response', response => { if (response.url().includes('/ocr/')) responses.push({url: response.url(), status: response.status()}); });
+      page.on('response', response => {
+        diagnosticResponses.push({url: response.url(), status: response.status()});
+        if (response.url().includes('/ocr/')) responses.push({url: response.url(), status: response.status()});
+      });
       const button = async name => {
         const target = page.getByRole('button', {name, exact: true});
         for (let i = 0; i < 12 && await target.count() === 0; i++) {
@@ -129,8 +136,11 @@ let diagnosticErrors = [], diagnosticFailures = [];
 })().catch(error => {
   const message = error.stack || String(error);
   fs.writeFileSync(path.join(evidence, 'failure.json'), JSON.stringify({stage, message,
-    errors: diagnosticErrors, failedRequests: diagnosticFailures}, null, 2));
-  const annotation = `${stage}: ${message}`.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+    errors: diagnosticErrors, failedRequests: diagnosticFailures,
+    responses: diagnosticResponses, warnings: diagnosticWarnings}, null, 2));
+  const diagnostics = JSON.stringify({errors: diagnosticErrors, failedRequests: diagnosticFailures,
+    responses: diagnosticResponses, warnings: diagnosticWarnings});
+  const annotation = `${stage}: ${message}\n${diagnostics}`.replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
   console.error(`::error title=Web OCR verification::${annotation}`);
   console.error(error); process.exitCode = 1;
 });
