@@ -1,0 +1,143 @@
+import 'package:flutter/material.dart';
+import '../scan/photo_scan.dart';
+
+class PhotoScanPanel extends StatelessWidget {
+  const PhotoScanPanel({
+    super.key,
+    required this.scan,
+    required this.onReview,
+    required this.onManual,
+    required this.onPaste,
+  });
+  final PhotoScanController scan;
+  final VoidCallback onReview;
+  final VoidCallback onManual;
+  final VoidCallback onPaste;
+
+  @override
+  Widget build(BuildContext context) {
+    final photo = scan.photo;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (scan.photos.supported) ...[
+          FilledButton.icon(
+            onPressed: scan.canPick
+                ? () => scan.pick(PhotoSource.camera)
+                : null,
+            icon: const Icon(Icons.camera_alt_outlined),
+            label: const Text('Fotoğraf çek'),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: scan.canPick
+                ? () => scan.pick(PhotoSource.gallery)
+                : null,
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(54),
+            ),
+            icon: const Icon(Icons.photo_library_outlined),
+            label: const Text('Galeriden seç'),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Fotoğraf ve etiket metni sunucuya gönderilmez. Fotoğraf yalnızca bu tarama için geçici tutulur.',
+            style: TextStyle(color: Colors.black54, fontSize: 12),
+          ),
+        ] else ...[
+          const Text(
+            'Bu platformda kamera ve cihaz üzerindeki OCR desteklenmiyor. Metin yapıştırma ve elle giriş kullanılabilir.',
+          ),
+        ],
+        if (photo != null) ...[
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Image.memory(
+              photo.previewBytes,
+              key: const ValueKey('photo-preview'),
+              height: 200,
+              fit: BoxFit.contain,
+              cacheWidth: 960,
+              semanticLabel: 'Seçilen etiket fotoğrafı',
+              errorBuilder: (_, __, ___) => const SizedBox(
+                height: 100,
+                child: Center(
+                  child: Text(
+                    'Fotoğraf önizlemesi açılamadı. Başka bir fotoğraf seç.',
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          if (!scan.busy && scan.stage != ScanStage.ready)
+            FilledButton.icon(
+              onPressed: scan.recognize,
+              icon: const Icon(Icons.document_scanner_outlined),
+              label: Text(
+                scan.stage == ScanStage.failed
+                    ? 'Tekrar oku'
+                    : 'Fotoğraftaki metni oku',
+              ),
+            ),
+        ],
+        if (scan.busy) ...[
+          const SizedBox(height: 16),
+          const LinearProgressIndicator(),
+          const SizedBox(height: 8),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              scan.stage == ScanStage.recognizing
+                  ? 'Etiket cihazında okunuyor…'
+                  : 'Fotoğraf bekleniyor…',
+            ),
+          ),
+          TextButton.icon(
+            onPressed: scan.cancel,
+            icon: const Icon(Icons.close),
+            label: const Text('İşlemi iptal et'),
+          ),
+        ],
+        if (scan.message != null) ...[
+          const SizedBox(height: 12),
+          Semantics(
+            liveRegion: true,
+            child: Text(
+              scan.message!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        ],
+        if (scan.stage == ScanStage.ready) ...[
+          const SizedBox(height: 16),
+          const Text(
+            'Okunan metin — henüz doğrulanmadı',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(scan.text, maxLines: 4, overflow: TextOverflow.ellipsis),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            onPressed: onReview,
+            icon: const Icon(Icons.edit_note),
+            label: const Text('Metni incele ve düzelt'),
+          ),
+        ],
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: onPaste,
+          icon: const Icon(Icons.content_paste),
+          label: const Text('Metin yapıştır'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: onManual,
+          icon: const Icon(Icons.edit_note),
+          label: const Text('Elle giriş'),
+        ),
+      ],
+    );
+  }
+}

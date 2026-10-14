@@ -3,14 +3,14 @@
 Etiket, kıyafetlerdeki elyaf bileşimlerini anlaşılır hale getirmeyi hedefleyen **mobil öncelikli** bir Flutter projesidir. "Doku" çalışma adı kesinleşmiş bir marka adı değildir.
 
 ## Durum
-İlk aşama: mobil ekran akışı + kural tabanlı kumaş değerlendirmesi. **Gerçek kamera, OCR, bakım sembolleri ve kalıcı kayıt henüz entegre değildir.** İlk prototip örnek etiket ve elle giriş ile çalışır. Tıbbi/alerji veya nesnel kumaş kalitesi iddiası üretmez.
+Android'de sistem kamerası veya galeriden alınan fotoğraf, cihaz üzerindeki Latin OCR ile okunabilir. Ham metin düzenlenir ve mevcut ayrıştırma/etiket doğrulama akışına aktarılır; OCR otomatik onay değildir. Bakım sembolleri, hesap ve kalıcı kayıt yoktur. Tıbbi/alerji veya nesnel kumaş kalitesi iddiası üretmez. Web'de manuel giriş, metin yapıştırma ve açıkça belirtilen demo kullanılabilir; native kamera/OCR kapalıdır.
 
 ## Windows + Android kurulumu
 1. [Flutter SDK](https://docs.flutter.dev/get-started/install/windows/mobile) ve Android Studio'yu kur; Android SDK/emülatörünü hazırla.
 2. PowerShell'de `flutter doctor` çalıştır; Android lisansları sorulursa `flutter doctor --android-licenses` komutunu kullan.
 3. Depoyu klonla: `git clone https://github.com/mehmetyildiz03/etiket.git`
 4. `cd etiket`
-5. Android platform dosyaları depoya dahildir; yeniden `flutter create .` çalıştırman gerekmez. Hedef Flutter stable sürümü `.flutter-version` dosyasında belirtilir. Kullanılan Flutter API'leri en az Flutter 3.35 / Dart 3.9 gerektirir.
+5. Android platform dosyaları depoya dahildir; yeniden `flutter create .` çalıştırman gerekmez. Hedef Flutter stable sürümü `.flutter-version` dosyasında belirtilir. Kamera/OCR paketleri en az Flutter 3.44 / Dart 3.12 gerektirir; doğrulanan hedef Flutter 3.47.7'dir. Android 7.0 (API 24) veya sonrası gerekir.
 6. `flutter pub get`, `flutter analyze`, `flutter test` ve ardından `flutter run` çalıştır.
 
 iOS platformu daha sonra macOS + Xcode üzerinde oluşturulup test edilecek. Kodun yalnızca Flutter API'lerine dayanmasına dikkat ediyoruz.
@@ -24,7 +24,7 @@ Ana sayfa → örnek tarama / elle giriş → oran doğrulama → kullanım amac
 
 Ana sayfadaki **Etiket metnini yapıştır** seçeneği, TR/EN isimleri ve CO/PES/EL gibi açık kısaltmalarla yazılmış oranlar için düzenlenebilir bir öneri üretir. Dış kumaş, astar ve dolgu ayrı kalır; eksik veya belirsiz bilgiler tamamlanmaz. Ham metinle karşılaştırıp hatalı satırları düzeltmek ve **Etiketle karşılaştırdım ve doğruladım** seçeneğini işaretlemek gerekir. Mevcut düzeltmelerin yerini yeni metnin alması ayrıca açıkça seçilir.
 
-Desteklenen biçimler, sınırlamalar ve henüz engelli doğrulama kapıları: [etiket ayrıştırma notları](docs/LABEL_PARSING.md). Kamera/OCR eklenmemiştir; ayrıştırma cihazda saf Dart koduyla yapılır.
+Desteklenen biçimler ve sınırlamalar: [etiket ayrıştırma notları](docs/LABEL_PARSING.md). Ayrıştırma cihazda saf Dart koduyla yapılır. Fotoğraf/OCR akışı, paketler, dosya yaşam döngüsü ve Android telefon test talimatları: [mobil OCR notları](docs/MOBILE_OCR.md).
 
 ## Mühendislik ilkeleri
 - **Etiket verisi ≠ performans ölçümü:** Terletme, nefes alabilirlik, kalite veya alerji kesin puanı üretmeyiz.

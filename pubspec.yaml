@@ -3,11 +3,13 @@ description: Mobil kumaş etiket analizi prototipi
 publish_to: 'none'
 version: 0.1.0+1
 environment:
-  sdk: '>=3.9.0 <4.0.0'
-  flutter: '>=3.35.0'
+  sdk: '>=3.12.0 <4.0.0'
+  flutter: '>=3.44.0'
 dependencies:
   flutter:
     sdk: flutter
+  image_picker: 1.2.4
+  google_mlkit_text_recognition: 0.17.1
 dev_dependencies:
   flutter_test:
     sdk: flutter
