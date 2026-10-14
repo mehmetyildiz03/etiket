@@ -200,7 +200,29 @@
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
       straightenLabel(canvas);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      // When the label takes only a small part of a low-resolution picture,
+      // percent symbols can turn into "96" (80% => 8096). Give the recognizer
+      // enough pixels without inventing or editing any recognized characters.
+      const longSide = Math.max(canvas.width, canvas.height);
+      if (longSide < 1500) {
+        const factor = Math.min(2, 2400 / longSide);
+        const enlarged = document.createElement('canvas');
+        enlarged.width = Math.round(canvas.width * factor);
+        enlarged.height = Math.round(canvas.height * factor);
+        const ec = enlarged.getContext('2d');
+        ec.imageSmoothingEnabled = true;
+        ec.imageSmoothingQuality = 'high';
+        ec.drawImage(canvas, 0, 0, enlarged.width, enlarged.height);
+        canvas.width = enlarged.width;
+        canvas.height = enlarged.height;
+        canvas.getContext('2d').drawImage(enlarged, 0, 0);
+        enlarged.width = enlarged.height = 0;
+      }
+      // Preserve small punctuation and accents losslessly; large camera photos
+      // still use bounded high-quality JPEG to avoid oversized memory usage.
+      const usePng = Math.max(canvas.width, canvas.height) <= 2000;
+      const blob = await new Promise(resolve =>
+        canvas.toBlob(resolve, usePng ? 'image/png' : 'image/jpeg', 0.95));
       if (!blob) throw fail('invalidPhoto');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (disposed) throw fail('canceled');
