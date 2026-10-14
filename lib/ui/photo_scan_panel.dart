@@ -17,17 +17,24 @@ class PhotoScanPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final photo = scan.photo;
+    final presentation = scan.photos is ScanPresentation
+        ? scan.photos as ScanPresentation
+        : null;
+    final progress = scan.recognizer is ScanProgressSource
+        ? scan.recognizer as ScanProgressSource
+        : null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (scan.photos.supported) ...[
-          FilledButton.icon(
-            onPressed: scan.canPick
-                ? () => scan.pick(PhotoSource.camera)
-                : null,
-            icon: const Icon(Icons.camera_alt_outlined),
-            label: const Text('Fotoğraf çek'),
-          ),
+          if (presentation?.cameraAvailable ?? true)
+            FilledButton.icon(
+              onPressed: scan.canPick
+                  ? () => scan.pick(PhotoSource.camera)
+                  : null,
+              icon: const Icon(Icons.camera_alt_outlined),
+              label: const Text('Fotoğraf çek'),
+            ),
           const SizedBox(height: 10),
           OutlinedButton.icon(
             onPressed: scan.canPick
@@ -37,9 +44,16 @@ class PhotoScanPanel extends StatelessWidget {
               minimumSize: const Size.fromHeight(54),
             ),
             icon: const Icon(Icons.photo_library_outlined),
-            label: const Text('Galeriden seç'),
+            label: Text(presentation?.galleryLabel ?? 'Galeriden seç'),
           ),
           const SizedBox(height: 12),
+          if (presentation != null) ...[
+            Text(
+              presentation.preparationMessage,
+              style: const TextStyle(color: Colors.black54, fontSize: 12),
+            ),
+            const SizedBox(height: 8),
+          ],
           const Text(
             'Fotoğraf ve etiket metni sunucuya gönderilmez. Fotoğraf yalnızca bu tarama için geçici tutulur.',
             style: TextStyle(color: Colors.black54, fontSize: 12),
@@ -90,7 +104,7 @@ class PhotoScanPanel extends StatelessWidget {
             liveRegion: true,
             child: Text(
               scan.stage == ScanStage.recognizing
-                  ? 'Etiket cihazında okunuyor…'
+                  ? (progress?.progressMessage ?? 'Etiket cihazında okunuyor…')
                   : 'Fotoğraf bekleniyor…',
             ),
           ),

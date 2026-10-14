@@ -22,6 +22,7 @@ enum ScanFailureKind {
   tooMuchText,
   recognition,
   unsupported,
+  modelLoad,
 }
 
 class ScanFailure implements Exception {
@@ -47,6 +48,8 @@ class ScanFailure implements Exception {
       'Etiket okunamadı. Tekrar deneyebilir veya metni elle girebilirsin.',
     ScanFailureKind.unsupported =>
       'Bu platformda kamera ve cihaz üzerindeki OCR desteklenmiyor. Metin yapıştırma ve elle giriş kullanılabilir.',
+    ScanFailureKind.modelLoad =>
+      'OCR motoru veya dil modeli yüklenemedi. İlk kullanım için internet gerekir. Bağlantını kontrol edip tekrar dene; metin yapıştırma ve elle giriş de kullanılabilir.',
   };
 }
 
@@ -70,8 +73,35 @@ abstract interface class TextRecognitionService {
   Future<String> recognize(ScanPhoto photo);
 }
 
+/// Optional browser capabilities; native and existing fake adapters stay simple.
+abstract interface class ScanPresentation {
+  bool get cameraAvailable;
+  String get galleryLabel;
+  String get preparationMessage;
+}
+
+abstract interface class ScanProgressSource {
+  String? get progressMessage;
+  set onProgress(void Function()? callback);
+}
+
+abstract interface class CancelableRecognition {
+  void cancelRecognition();
+}
+
+abstract interface class DisposablePhotoSource {
+  void cancelSelection();
+  void disposePhotos();
+}
+
 class PhotoScanController {
-  PhotoScanController(this.photos, this.recognizer);
+  PhotoScanController(this.photos, this.recognizer) {
+    if (recognizer case final ScanProgressSource progress) {
+      progress.onProgress = () {
+        if (_stage == ScanStage.recognizing) _notify();
+      };
+    }
+  }
   final PhotoSourceService photos;
   final TextRecognitionService recognizer;
   void Function()? onChanged;
@@ -127,6 +157,7 @@ class PhotoScanController {
       return;
     }
     final revision = ++_revision;
+    _stopRecognition();
     _pickerOpen = true;
     _stage = recovering ? ScanStage.recovering : ScanStage.picking;
     _message = null;
@@ -204,6 +235,7 @@ class PhotoScanController {
   void editText(String value) {
     if (_disposed) return;
     ++_revision;
+    _stopRecognition();
     _text = value;
     _message = null;
     _stage = _photo == null
@@ -215,6 +247,10 @@ class PhotoScanController {
   void cancel({String? message}) {
     if (_disposed) return;
     ++_revision;
+    _stopRecognition();
+    if (photos case final DisposablePhotoSource source) {
+      source.cancelSelection();
+    }
     _message = message ?? 'İşlem iptal edildi.';
     _stage = _photo == null
         ? ScanStage.idle
@@ -225,6 +261,10 @@ class PhotoScanController {
   void abandon() {
     if (_disposed) return;
     ++_revision;
+    _stopRecognition();
+    if (photos case final DisposablePhotoSource source) {
+      source.cancelSelection();
+    }
     final previous = _photo;
     _photo = null;
     _text = '';
@@ -258,11 +298,24 @@ class PhotoScanController {
     if (_disposed) return;
     _disposed = true;
     ++_revision;
+    _stopRecognition();
+    if (recognizer case final ScanProgressSource progress) {
+      progress.onProgress = null;
+    }
+    if (photos case final DisposablePhotoSource source) {
+      source.disposePhotos();
+    }
     onChanged = null;
     final previous = _photo;
     _photo = null;
     _text = '';
     _stage = ScanStage.idle;
     if (previous != null) unawaited(_retire(previous));
+  }
+
+  void _stopRecognition() {
+    if (recognizer case final CancelableRecognition cancelable) {
+      cancelable.cancelRecognition();
+    }
   }
 }

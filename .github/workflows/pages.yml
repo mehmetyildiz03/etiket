@@ -20,6 +20,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tool/web_ocr/package-lock.json
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
@@ -29,8 +36,35 @@ jobs:
         run: flutter create --platforms=web --project-name etiket .
       - name: Install dependencies
         run: flutter pub get
+      - name: Prepare pinned local OCR assets and test bridge
+        run: |
+          npm ci --prefix tool/web_ocr --ignore-scripts --no-audit --no-fund
+          node scripts/prepare_web_ocr.cjs
+          node --test scripts/web_ocr_bridge.test.cjs
+      - name: Flutter regression checks
+        run: |
+          flutter analyze
+          flutter test
       - name: Build web for GitHub Pages project path
         run: flutter build web --release --base-href=/etiket/
+      - name: Install Chromium for real OCR verification
+        run: tool/web_ocr/node_modules/.bin/playwright install --with-deps chromium
+      - name: Read a synthetic label in the compiled browser app
+        run: |
+          mkdir -p /tmp/doku-pages/etiket
+          cp -a build/web/. /tmp/doku-pages/etiket/
+          python3 -m http.server 8082 --bind 127.0.0.1 --directory /tmp/doku-pages > /tmp/doku-pages.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill "$SERVER_PID"' EXIT
+          node scripts/web_ocr_smoke.cjs http://127.0.0.1:8082/etiket/
+      - name: Upload browser OCR evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doku-web-ocr-evidence-${{ github.event.pull_request.head.sha || github.sha }}
+          path: build/web-ocr-evidence
+          if-no-files-found: warn
+          retention-days: 14
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

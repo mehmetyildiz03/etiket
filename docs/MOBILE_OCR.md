@@ -8,7 +8,7 @@ Android'de **Etiket tara → Fotoğraf çek / Galeriden seç → önizleme → F
 
 Fotoğraf seçmek OCR'yi başlatmaz; OCR de ayrıştırma veya doğrulama yapmaz. Ham metin değiştirilebilir. Bozuk `7O%`, bilinmeyen elyaf ve eksik oranlar olduğu gibi korunur. F2-R1'in bölüm bazında %100 doğrulaması, kullanıcı onayı ve düzeltmeleri koruyan import sürümü kullanılır. Önceki ham metnin ve mevcut düzenlemelerin değiştirilmesi ayrı ayrı açıkça seçilir. DEMO akışı fotoğraf veya OCR kullanmadığını belirtir; manuel girişteki başlangıç değerleri örnek olarak işaretlidir.
 
-360–430 dp için dikey, kaydırılabilir düzen, güvenli alan, 54 dp kaynak düğmeleri, fotoğraf önizlemesi, okunma durumu ve Türkçe hata/iptal mesajları vardır. Ham metin ekranı klavye açıkken kaydırılabilir. Web ve desktop'ta native OCR kapalıdır; metin yapıştırma, elle giriş ve açık DEMO korunur. Web OCR eklenmedi.
+360–430 dp için dikey, kaydırılabilir düzen, güvenli alan, 54 dp kaynak düğmeleri, fotoğraf önizlemesi, okunma durumu ve Türkçe hata/iptal mesajları vardır. Ham metin ekranı klavye açıkken kaydırılabilir. Web ve desktop'ta native OCR kapalıdır; F3-W1 tarayıcı adaptörü Tesseract.js ile yerel Web OCR sağlar. Metin yapıştırma, elle giriş ve açık DEMO korunur. Ayrıntılar: [Web OCR](WEB_OCR.md).
 
 ## Paket ve platform seçimi
 
