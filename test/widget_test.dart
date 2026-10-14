@@ -19,6 +19,8 @@ Future<void> launch(WidgetTester tester, {Size size = const Size(800, 1400)}) as
 Future<void> tapText(WidgetTester tester, String text) async {
   final target = find.text(text);
   await tester.ensureVisible(target);
+  // Let the viewport relayout after scrolling, especially with the soft keyboard open.
+  await tester.pumpAndSettle();
   await tester.tap(target);
   await tester.pumpAndSettle();
 }
