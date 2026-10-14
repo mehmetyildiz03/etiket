@@ -16,14 +16,14 @@ List<FabricInsight> analyzeGarment(Garment garment, WearPurpose purpose) {
   for (final section in garment.sections) {
     final cotton = section.fibers
         .where((f) => f.name == 'Pamuk')
-        .fold<int>(0, (s, f) => s + f.percent);
+        .fold<num>(0, (s, f) => s + f.percent);
     final polyester = section.fibers
         .where((f) => f.name == 'Polyester')
-        .fold<int>(0, (s, f) => s + f.percent);
+        .fold<num>(0, (s, f) => s + f.percent);
 
     insights.add(FabricInsight(
       '${section.name}: bileşim',
-      section.fibers.map((f) => '${f.name} %${f.percent}').join(' · '),
+      section.fibers.map((f) => '${f.name} %${formatPercentage(f.percent)}').join(' · '),
       confirmed: true,
     ));
 

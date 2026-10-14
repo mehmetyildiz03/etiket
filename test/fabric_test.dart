@@ -96,4 +96,30 @@ void main() {
       expect(insight.description, contains(entry.value));
     }
   });
+
+  test('decimal composition totals use exact hundredths', () {
+    const section = FabricSection('Ana kumaş', [
+      FiberEntry('Pamuk', 70.25),
+      FiberEntry('Polyester', 29.75),
+    ]);
+    expect(section.isValid, isTrue);
+    expect(analyzeGarment(const Garment('Test', [section]), WearPurpose.daily)
+        .first.description, 'Pamuk %70,25 · Polyester %29,75');
+    expect(const FabricSection('Eksik', [
+      FiberEntry('Pamuk', 70.25), FiberEntry('Polyester', 29.74),
+    ]).isValid, isFalse);
+  });
+
+  test('manual decimal input does not round or repair malformed data', () {
+    expect(parsePercentage('70,25'), 70.25);
+    expect(parsePercentage('29.75'), 29.75);
+    for (final value in ['70.555', '7O', '1,000', 'NaN', 'Infinity', '101', '0', '-1']) {
+      expect(parsePercentage(value), isNull, reason: value);
+    }
+    expect(const FiberEntry('Pamuk', double.nan).isValid, isFalse);
+    expect(const FiberEntry('Pamuk', double.infinity).isValid, isFalse);
+    expect(const FiberEntry('Pamuk', 70.555).isValid, isFalse);
+    expect(formatPercentage(100), '100');
+    expect(formatPercentage(70.5), '70,5');
+  });
 }
