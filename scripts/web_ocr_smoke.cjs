@@ -149,7 +149,7 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
           g.translate(425, 450); g.rotate(-9 * Math.PI / 180);
           g.fillStyle = '#eee9dc'; g.fillRect(-310, -260, 620, 520);
           g.strokeStyle = '#a9a496'; g.lineWidth = 3; g.strokeRect(-310, -260, 620, 520);
-          g.fillStyle = '#525046'; g.font = 'bold 26px Arial';
+          g.fillStyle = '#57534d'; g.font = '20px Arial';
           ['DIŞ KUMAŞ / SHELL', '80% PAMUK / COTTON', '20% POLYESTER',
             'ASTAR / LINING', '100% VİSKON / VISCOSE'].forEach((line, i) => g.fillText(line, -280, -180 + i * 85));
           return canvas.toDataURL('image/png').split(',')[1];
