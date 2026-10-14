@@ -39,7 +39,7 @@ class _EditableFiber {
 
 class _EditableSection {
   String name;
-  List<_EditableFiber> fibers;
+  final List<_EditableFiber> fibers;
   _EditableSection(this.name, this.fibers);
   int get total => fibers.fold(0, (sum, fiber) => sum + fiber.percent);
   bool get valid => name.trim().isNotEmpty && fibers.isNotEmpty &&
@@ -176,12 +176,12 @@ class _EtiketHomeState extends State<EtiketHome> {
 
   Widget sectionEditor(int sectionIndex) {
     final section = sections[sectionIndex];
-    return Card(margin: const EdgeInsets.only(bottom: 12), child: Padding(
+    return Card(key: ObjectKey(section), margin: const EdgeInsets.only(bottom: 12), child: Padding(
       padding: const EdgeInsets.all(16),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Row(children: [
           Expanded(child: TextFormField(
-            key: ValueKey('section-$sectionIndex-${section.name}'),
+            key: ObjectKey(section),
             initialValue: section.name,
             decoration: const InputDecoration(labelText: 'Bölüm adı'),
             onChanged: (value) => setState(() => section.name = value),
@@ -192,7 +192,7 @@ class _EtiketHomeState extends State<EtiketHome> {
         ]),
         const SizedBox(height: 12),
         for (var i = 0; i < section.fibers.length; i++)
-          Padding(padding: const EdgeInsets.only(bottom: 10),
+          Padding(key: ObjectKey(section.fibers[i]), padding: const EdgeInsets.only(bottom: 10),
             child: Row(children: [
               Expanded(flex: 3, child: DropdownButtonFormField<String>(
                 key: ValueKey('fiber-$sectionIndex-$i-${section.fibers[i].name}'),
@@ -201,11 +201,15 @@ class _EtiketHomeState extends State<EtiketHome> {
                 decoration: const InputDecoration(labelText: 'Elyaf', isDense: true),
                 items: knownFibers.map((name) =>
                   DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: (value) { if (value != null) setState(() => section.fibers[i].name = value); },
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => section.fibers[i].name = value);
+                  }
+                },
               )),
               const SizedBox(width: 10),
               Expanded(flex: 2, child: TextFormField(
-                key: ValueKey('percent-$sectionIndex-$i'),
+                key: ObjectKey(section.fibers[i]),
                 initialValue: section.fibers[i].percent.toString(),
                 keyboardType: TextInputType.number,
                 decoration: const InputDecoration(labelText: 'Yüzde', suffixText: '%', isDense: true),
@@ -229,15 +233,22 @@ class _EtiketHomeState extends State<EtiketHome> {
   Widget choosePurpose() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     pageTitle('Nasıl kullanacaksın?',
       'Bu seçim, bilgilerin hangi açıdan yorumlanacağını değiştirir.'),
-    RadioListTile<WearPurpose>(title: const Text('Sıcak havalarda'),
-      secondary: const Icon(Icons.wb_sunny_outlined), value: WearPurpose.summer,
-      groupValue: purpose, onChanged: (v) => setState(() => purpose = v!)),
-    RadioListTile<WearPurpose>(title: const Text('Spor yaparken'),
-      secondary: const Icon(Icons.directions_run), value: WearPurpose.sport,
-      groupValue: purpose, onChanged: (v) => setState(() => purpose = v!)),
-    RadioListTile<WearPurpose>(title: const Text('Günlük kullanım'),
-      secondary: const Icon(Icons.checkroom), value: WearPurpose.daily,
-      groupValue: purpose, onChanged: (v) => setState(() => purpose = v!)),
+    RadioGroup<WearPurpose>(
+      groupValue: purpose,
+      onChanged: (value) {
+        if (value != null) {
+          setState(() => purpose = value);
+        }
+      },
+      child: const Column(children: [
+        RadioListTile<WearPurpose>(title: Text('Sıcak havalarda'),
+          secondary: Icon(Icons.wb_sunny_outlined), value: WearPurpose.summer),
+        RadioListTile<WearPurpose>(title: Text('Spor yaparken'),
+          secondary: Icon(Icons.directions_run), value: WearPurpose.sport),
+        RadioListTile<WearPurpose>(title: Text('Günlük kullanım'),
+          secondary: Icon(Icons.checkroom), value: WearPurpose.daily),
+      ]),
+    ),
     const SizedBox(height: 28),
     primary('Analizi göster', () => navigate(_Page.result)),
   ]);

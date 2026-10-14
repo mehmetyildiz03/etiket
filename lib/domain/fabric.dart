@@ -4,6 +4,8 @@ class FiberEntry {
   final String name;
   final int percent;
   const FiberEntry(this.name, this.percent);
+
+  bool get isValid => name.trim().isNotEmpty && percent > 0 && percent <= 100;
 }
 
 class FabricSection {
@@ -13,8 +15,9 @@ class FabricSection {
 
   int get total => fibers.fold<int>(0, (sum, fiber) => sum + fiber.percent);
   bool get isValid =>
+      name.trim().isNotEmpty &&
       fibers.isNotEmpty &&
-      fibers.every((fiber) => fiber.percent > 0 && fiber.percent <= 100) &&
+      fibers.every((fiber) => fiber.isValid) &&
       total == 100;
 }
 
@@ -25,7 +28,7 @@ class Garment {
 
   bool get isValid =>
       sections.isNotEmpty &&
-      sections.every((section) => section.name.trim().isNotEmpty && section.isValid);
+      sections.every((section) => section.isValid);
 }
 
 const knownFibers = <String>[
