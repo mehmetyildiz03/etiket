@@ -8,6 +8,8 @@
 - [x] Her bölümde %100 doğrulaması
 - [x] Açıklamalı, temkinli kural motoru
 - [x] Alan modeli için temel unit test
+- [x] Android platform dosyaları ve düzenleyici/çoklu bölüm regresyon testleri
+- [ ] Bulutta Flutter SDK indirme engelini giderme; analiz, test ve APK derlemesini doğrulama
 - [ ] Windows makinede `flutter doctor`, `flutter test` ve gerçek Android çalıştırması
 
 ## Milestone 2 — Gerçek fotoğraf

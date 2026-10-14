@@ -10,10 +10,12 @@ Etiket, kıyafetlerdeki elyaf bileşimlerini anlaşılır hale getirmeyi hedefle
 2. PowerShell'de `flutter doctor` çalıştır; Android lisansları sorulursa `flutter doctor --android-licenses` komutunu kullan.
 3. Depoyu klonla: `git clone https://github.com/mehmetyildiz03/etiket.git`
 4. `cd etiket`
-5. Depoya henüz eklenmemiş Flutter platform dosyalarını üret: `flutter create --platforms=android --project-name etiket .` (mevcut `lib/` dosyalarını ezmeden).
-6. `flutter pub get`, `flutter test` ve ardından `flutter run` çalıştır.
+5. Android platform dosyaları depoya dahildir; yeniden `flutter create .` çalıştırman gerekmez. Hedef Flutter stable sürümü `.flutter-version` dosyasında belirtilir. Kullanılan Flutter API'leri en az Flutter 3.35 / Dart 3.9 gerektirir.
+6. `flutter pub get`, `flutter analyze`, `flutter test` ve ardından `flutter run` çalıştır.
 
 iOS platformu daha sonra macOS + Xcode üzerinde oluşturulup test edilecek. Kodun yalnızca Flutter API'lerine dayanmasına dikkat ediyoruz.
+
+Linux bulut ortamı, ağ gereksinimleri ve doğrulama durumu için [geliştirme ortamı notları](docs/DEVELOPMENT.md).
 
 ## İlk akış
 Ana sayfa → örnek tarama / elle giriş → oran doğrulama → kullanım amacı → gerekçeli sonuç. Birden çok kumaş bölümü (ör. dış kumaş/astar) ve sınırsız sayıda elyaf satırı desteklenir; her bölümün kendi toplamı %100 olmalıdır.
