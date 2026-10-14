@@ -165,6 +165,7 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).click();
         const field = page.getByRole('textbox', {name: /Etiket metni/});
         await field.click();
+        await page.waitForTimeout(150); // Flutter attaches the editing value after focus.
         const raw = await field.inputValue();
         fs.writeFileSync(path.join(evidence, 'angled-raw.txt'), raw);
         console.log('Synthetic angled-tag raw OCR:', JSON.stringify(raw));
