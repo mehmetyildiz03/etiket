@@ -20,6 +20,12 @@ Linux bulut ortamı, ağ gereksinimleri ve doğrulama durumu için [geliştirme 
 ## İlk akış
 Ana sayfa → örnek tarama / elle giriş → oran doğrulama → kullanım amacı → gerekçeli sonuç. Birden çok kumaş bölümü (ör. dış kumaş/astar) ve sınırsız sayıda elyaf satırı desteklenir; her bölümün kendi toplamı %100 olmalıdır.
 
+## Etiket metni ayrıştırma (F2-R1)
+
+Ana sayfadaki **Etiket metnini yapıştır** seçeneği, TR/EN isimleri ve CO/PES/EL gibi açık kısaltmalarla yazılmış oranlar için düzenlenebilir bir öneri üretir. Dış kumaş, astar ve dolgu ayrı kalır; eksik veya belirsiz bilgiler tamamlanmaz. Ham metinle karşılaştırıp hatalı satırları düzeltmek ve **Etiketle karşılaştırdım ve doğruladım** seçeneğini işaretlemek gerekir. Mevcut düzeltmelerin yerini yeni metnin alması ayrıca açıkça seçilir.
+
+Desteklenen biçimler, sınırlamalar ve henüz engelli doğrulama kapıları: [etiket ayrıştırma notları](docs/LABEL_PARSING.md). Kamera/OCR eklenmemiştir; ayrıştırma cihazda saf Dart koduyla yapılır.
+
 ## Mühendislik ilkeleri
 - **Etiket verisi ≠ performans ölçümü:** Terletme, nefes alabilirlik, kalite veya alerji kesin puanı üretmeyiz.
 - OCR sonucunu kullanıcıya doğrulatırız; okunmayan oranları uydurmayız.
@@ -29,6 +35,8 @@ Ana sayfa → örnek tarama / elle giriş → oran doğrulama → kullanım amac
 
 ## Yapı
 - `lib/domain/` — elyaf bileşimleri, bölümler ve karar kuralları
+- `lib/domain/label_parser.dart` — ham metin, ayrıştırma önerileri ve kaynak uyarıları
+- `lib/domain/composition_draft.dart` — satır kimlikleri, kullanıcı düzeltmeleri ve doğrulama durumu
 - `lib/main.dart` — mobil ekran akışı (ilk prototip)
 - `test/` — alan modeli ve kural testleri
 - `docs/ROADMAP.md` — sonraki geliştirme adımları

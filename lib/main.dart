@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'domain/fabric.dart';
 import 'domain/analysis.dart';
+import 'domain/composition_draft.dart';
 
 void main() => runApp(const EtiketApp());
 
@@ -31,23 +32,7 @@ class EtiketApp extends StatelessWidget {
   }
 }
 
-class _EditableFiber {
-  String name;
-  int percent;
-  _EditableFiber(this.name, this.percent);
-}
-
-class _EditableSection {
-  String name;
-  final List<_EditableFiber> fibers;
-  _EditableSection(this.name, this.fibers);
-  int get total => fibers.fold(0, (sum, fiber) => sum + fiber.percent);
-  bool get valid => name.trim().isNotEmpty && fibers.isNotEmpty &&
-      fibers.every((fiber) => fiber.percent > 0 && fiber.percent <= 100) &&
-      total == 100;
-}
-
-enum _Page { home, camera, edit, purpose, result }
+enum _Page { home, camera, label, edit, purpose, result }
 
 class EtiketHome extends StatefulWidget {
   const EtiketHome({super.key});
@@ -58,20 +43,76 @@ class EtiketHome extends StatefulWidget {
 class _EtiketHomeState extends State<EtiketHome> {
   _Page page = _Page.home;
   WearPurpose purpose = WearPurpose.summer;
-  final List<_EditableSection> sections = [
-    _EditableSection('Ana kumaş', [_EditableFiber('Pamuk', 70), _EditableFiber('Polyester', 30)])
-  ];
+  final CompositionDraft draft = CompositionDraft.sample();
+  final TextEditingController labelController = TextEditingController();
+  LabelImportProposal? labelProposal;
+  _Page labelReturnPage = _Page.home;
 
-  bool get allValid => sections.isNotEmpty && sections.every((s) => s.valid);
-  Garment get garment => Garment('Kıyafet', sections.map((s) => FabricSection(
-    s.name, s.fibers.map((f) => FiberEntry(f.name, f.percent)).toList())).toList());
+  bool get allValid => draft.canAnalyze;
+  Garment get garment => draft.verifiedGarment();
+
+  @override
+  void dispose() {
+    labelController.dispose();
+    super.dispose();
+  }
+
+  void openLabel(_Page from) {
+    FocusScope.of(context).unfocus();
+    setState(() {
+      labelReturnPage = from;
+      labelProposal = null;
+      page = _Page.label;
+    });
+  }
+
+  Future<void> applyLabel() async {
+    final proposal = labelProposal;
+    if (proposal == null) {
+      return;
+    }
+    var replace = false;
+    if (draft.hasUserChanges) {
+      replace = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Mevcut düzenlemeler değiştirilsin mi?'),
+          content: const Text('Yeni metin mevcut bileşimin yerini alacak. İptal edersen düzeltmelerin korunur.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false),
+              child: const Text('Düzenlemeleri koru')),
+            TextButton(onPressed: () => Navigator.pop(context, true),
+              child: const Text('Yeni metni kullan')),
+          ],
+        ),
+      ) ?? false;
+      if (!replace) {
+        return;
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() {
+      if (draft.applyImport(proposal, replaceUserChanges: replace)) {
+        page = _Page.edit;
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Bileşim değişmiş. Metni tekrar ayrıştırın; düzeltmeler korunuyor.')),
+        );
+      }
+    });
+  }
 
   void navigate(_Page target) => setState(() => page = target);
   void back() {
+    FocusScope.of(context).unfocus();
     navigate(switch (page) {
       _Page.home => _Page.home,
       _Page.camera => _Page.home,
-      _Page.edit => _Page.camera,
+      _Page.label => labelReturnPage,
+      _Page.edit => draft.imported ? _Page.label : _Page.camera,
       _Page.purpose => _Page.edit,
       _Page.result => _Page.purpose,
     });
@@ -94,7 +135,14 @@ class _EtiketHomeState extends State<EtiketHome> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope<Object?>(
+      canPop: page == _Page.home,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) {
+          back();
+        }
+      },
+      child: Scaffold(
       appBar: AppBar(
         leading: page == _Page.home ? const Icon(Icons.checkroom, color: _green)
             : IconButton(icon: const Icon(Icons.arrow_back), onPressed: back,
@@ -109,11 +157,13 @@ class _EtiketHomeState extends State<EtiketHome> {
           children: [
             if (page == _Page.home) home(),
             if (page == _Page.camera) camera(),
+            if (page == _Page.label) labelEntry(),
             if (page == _Page.edit) edit(),
             if (page == _Page.purpose) choosePurpose(),
             if (page == _Page.result) result(),
           ],
         ),
+      ),
       ),
     );
   }
@@ -137,6 +187,9 @@ class _EtiketHomeState extends State<EtiketHome> {
     const SizedBox(height: 12),
     OutlinedButton.icon(onPressed: () => navigate(_Page.edit),
       icon: const Icon(Icons.edit_note), label: const Text('Elle kumaş bilgisi gir')),
+    const SizedBox(height: 12),
+    OutlinedButton.icon(onPressed: () => openLabel(_Page.home),
+      icon: const Icon(Icons.content_paste), label: const Text('Etiket metnini yapıştır')),
     const SizedBox(height: 22),
     const Text('Üyelik gerekmez • Şimdilik örnek tarama kullanılıyor',
       textAlign: TextAlign.center, style: TextStyle(color: Colors.black54, fontSize: 12)),
@@ -161,73 +214,168 @@ class _EtiketHomeState extends State<EtiketHome> {
       child: const Text('Bilgileri elle gir')),
   ]);
 
+  Widget labelEntry() {
+    final proposal = labelProposal;
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      pageTitle('Etiket metnini yapıştır',
+        'Metni cihazında ayrıştırırız. Eksik oranları veya belirsiz elyafları tahmin etmeyiz.'),
+      TextField(
+        key: const ValueKey('label-text'),
+        controller: labelController,
+        minLines: 4,
+        maxLines: 8,
+        maxLength: 20000,
+        keyboardType: TextInputType.multiline,
+        decoration: const InputDecoration(
+          labelText: 'Etiket metni',
+          hintText: 'Dış kumaş: %70 Pamuk %30 Polyester\nAstar: Viskon %100',
+          border: OutlineInputBorder(),
+        ),
+        onChanged: (_) => setState(() => labelProposal = null),
+      ),
+      const SizedBox(height: 12),
+      primary('Metni ayrıştır', () {
+        FocusScope.of(context).unfocus();
+        setState(() => labelProposal = draft.prepareImport(labelController.text));
+      }, icon: Icons.find_in_page_outlined),
+      const SizedBox(height: 12),
+      OutlinedButton(onPressed: () {
+        FocusScope.of(context).unfocus();
+        navigate(_Page.edit);
+      }, child: const Text('Elle girişe dön')),
+      if (proposal != null) ...[
+        const SizedBox(height: 20),
+        const Text('Ayrıştırma önerisi', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        const Text('Henüz doğrulanmadı', style: TextStyle(color: Colors.blueGrey)),
+        for (final issue in proposal.label.issues)
+          Padding(padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(issue.message, style: const TextStyle(color: Colors.red))),
+        for (final section in proposal.label.sections)
+          Card(child: Padding(padding: const EdgeInsets.all(16), child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(section.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+              for (final fiber in section.fibers) ...[
+                const SizedBox(height: 8),
+                Text('${fiber.name ?? (fiber.rawName.isEmpty ? 'Elyaf adı eksik' : fiber.rawName)}'
+                  '${fiber.percent == null ? ' — yüzde eksik/geçersiz' : ' %${formatPercentage(fiber.percent!)}'}'),
+                Text('Kaynak: ${fiber.rawText}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                for (final issue in fiber.issues)
+                  Text(issue.message, style: const TextStyle(color: Colors.red)),
+              ],
+              for (final issue in section.issues)
+                Text(issue.message, style: const TextStyle(color: Colors.red)),
+            ],
+          ))),
+        ExpansionTile(title: const Text('Ham etiket metni'), children: [
+          Padding(padding: const EdgeInsets.all(12), child: SelectableText(proposal.label.rawText)),
+        ]),
+        if (proposal.label.sections.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          primary('Düzenleyicide incele', applyLabel, icon: Icons.edit_note),
+        ],
+      ],
+    ]);
+  }
+
   Widget edit() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     pageTitle('Kumaş içeriğini doğrula',
       'Her bölümün elyaf oranları ayrı ayrı %100 olmalı. Okunamayan bilgileri tahmin etme.'),
-    for (var s = 0; s < sections.length; s++) sectionEditor(s),
+    if (draft.rawText != null)
+      ExpansionTile(title: const Text('Ham etiket metni'), children: [
+        Padding(padding: const EdgeInsets.all(12), child: SelectableText(draft.rawText!)),
+      ]),
+    for (final section in draft.sections) sectionEditor(section),
     const SizedBox(height: 12),
     OutlinedButton.icon(
-      onPressed: () => setState(() => sections.add(
-        _EditableSection('Yeni bölüm', [_EditableFiber('Pamuk', 100)]))),
+      onPressed: () => setState(draft.addSection),
       icon: const Icon(Icons.add), label: const Text('Kumaş bölümü ekle')),
+    const SizedBox(height: 12),
+    OutlinedButton.icon(
+      onPressed: () => openLabel(_Page.edit),
+      icon: const Icon(Icons.content_paste), label: const Text('Başka metin ayrıştır')),
+    if (draft.imported) ...[
+      const SizedBox(height: 12),
+      if (!draft.isValid)
+        const Text('Eksik, belirsiz veya çelişkili bilgileri düzeltmeden doğrulama yapamazsın.',
+          style: TextStyle(color: Colors.red)),
+      CheckboxListTile(
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: const Text('Etiketle karşılaştırdım ve doğruladım'),
+        value: draft.sourceConfirmed,
+        onChanged: draft.isValid ? (value) => setState(() => draft.confirmSource(value ?? false)) : null,
+      ),
+    ],
     const SizedBox(height: 20),
     primary('Devam et', allValid ? () => navigate(_Page.purpose) : null),
   ]);
 
-  Widget sectionEditor(int sectionIndex) {
-    final section = sections[sectionIndex];
-    return Card(key: ObjectKey(section), margin: const EdgeInsets.only(bottom: 12), child: Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Row(children: [
-          Expanded(child: TextFormField(
-            key: ObjectKey(section),
-            initialValue: section.name,
-            decoration: const InputDecoration(labelText: 'Bölüm adı'),
-            onChanged: (value) => setState(() => section.name = value),
-          )),
-          if (sections.length > 1)
-            IconButton(tooltip: 'Bölümü sil', icon: const Icon(Icons.delete_outline),
-              onPressed: () => setState(() => sections.removeAt(sectionIndex))),
+  Widget sectionEditor(DraftSection section) {
+    return Card(key: ValueKey(section.id), margin: const EdgeInsets.only(bottom: 12),
+      child: Padding(padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Row(children: [
+            Expanded(child: TextFormField(
+              key: ValueKey('name-${section.id}'),
+              initialValue: section.name,
+              decoration: InputDecoration(labelText: 'Bölüm adı',
+                errorText: section.headingNeedsReview
+                  ? 'Bölüm adını kontrol edip düzenleyin.' : null),
+              onChanged: (value) => setState(() => draft.setSectionName(section.id, value)),
+            )),
+            if (draft.sections.length > 1)
+              IconButton(tooltip: 'Bölümü sil', icon: const Icon(Icons.delete_outline),
+                onPressed: () => setState(() => draft.removeSection(section.id))),
+          ]),
+          const SizedBox(height: 12),
+          for (final fiber in section.fibers)
+            Padding(key: ValueKey(fiber.id), padding: const EdgeInsets.only(bottom: 10),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                Row(children: [
+                  Expanded(flex: 3, child: DropdownButtonFormField<String>(
+                    key: ValueKey('fiber-${fiber.id}-${fiber.name ?? ''}'),
+                    initialValue: fiber.name ?? '',
+                    isExpanded: true,
+                    decoration: const InputDecoration(labelText: 'Elyaf', isDense: true),
+                    items: [
+                      const DropdownMenuItem(value: '', child: Text('Elyafı seç')),
+                      for (final name in knownFibers)
+                        DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis)),
+                    ],
+                    onChanged: (value) => setState(() => draft.setFiberName(
+                      fiber.id, value == null || value.isEmpty ? null : value)),
+                  )),
+                  const SizedBox(width: 10),
+                  Expanded(flex: 2, child: TextFormField(
+                    key: ValueKey('percent-${fiber.id}'),
+                    initialValue: fiber.percentageText,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: const InputDecoration(labelText: 'Yüzde', suffixText: '%', isDense: true),
+                    onChanged: (text) => setState(() => draft.setPercentage(fiber.id, text)),
+                  )),
+                  IconButton(icon: const Icon(Icons.remove_circle_outline), tooltip: 'Elyafı kaldır',
+                    onPressed: section.fibers.length == 1 ? null : () =>
+                      setState(() => draft.removeFiber(fiber.id))),
+                ]),
+                if (fiber.rawText != null)
+                  Text('Kaynak: ${fiber.rawText}', style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                if (!fiber.isValid)
+                  Text(fiber.name == null
+                    ? 'Elyafı elle seçin; kaynak belirsiz olabilir.'
+                    : 'Geçerli bir yüzde girin (0’dan büyük, en fazla 100; en çok iki ondalık basamak).',
+                    style: const TextStyle(color: Colors.red)),
+              ])),
+          Text('Toplam: %${formatPercentage(section.total)}',
+            style: TextStyle(fontWeight: FontWeight.bold, color: section.isValid ? _green : Colors.red)),
+          if (section.imported && section.hasDuplicateFibers)
+            const Text('Aynı elyaf bu bölümde tekrarlanıyor; satırları kontrol edin.',
+              style: TextStyle(color: Colors.red)),
+          const SizedBox(height: 8),
+          TextButton.icon(onPressed: () => setState(() => draft.addFiber(section.id)),
+            icon: const Icon(Icons.add), label: const Text('Elyaf ekle')),
         ]),
-        const SizedBox(height: 12),
-        for (var i = 0; i < section.fibers.length; i++)
-          Padding(key: ObjectKey(section.fibers[i]), padding: const EdgeInsets.only(bottom: 10),
-            child: Row(children: [
-              Expanded(flex: 3, child: DropdownButtonFormField<String>(
-                key: ValueKey('fiber-$sectionIndex-$i-${section.fibers[i].name}'),
-                initialValue: section.fibers[i].name,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Elyaf', isDense: true),
-                items: knownFibers.map((name) =>
-                  DropdownMenuItem(value: name, child: Text(name, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: (value) {
-                  if (value != null) {
-                    setState(() => section.fibers[i].name = value);
-                  }
-                },
-              )),
-              const SizedBox(width: 10),
-              Expanded(flex: 2, child: TextFormField(
-                key: ObjectKey(section.fibers[i]),
-                initialValue: section.fibers[i].percent.toString(),
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Yüzde', suffixText: '%', isDense: true),
-                onChanged: (text) => setState(() => section.fibers[i].percent = int.tryParse(text) ?? -1),
-              )),
-              IconButton(icon: const Icon(Icons.remove_circle_outline),
-                tooltip: 'Elyafı kaldır',
-                onPressed: section.fibers.length == 1 ? null : () =>
-                  setState(() => section.fibers.removeAt(i))),
-            ])),
-        Text('Toplam: %${section.total}',
-          style: TextStyle(fontWeight: FontWeight.bold, color: section.valid ? _green : Colors.red)),
-        const SizedBox(height: 8),
-        TextButton.icon(onPressed: () => setState(() =>
-            section.fibers.add(_EditableFiber('Diğer', 0))),
-          icon: const Icon(Icons.add), label: const Text('Elyaf ekle')),
-      ]),
-    ));
+      ));
   }
 
   Widget choosePurpose() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
