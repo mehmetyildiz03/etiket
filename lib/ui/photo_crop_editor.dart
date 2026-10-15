@@ -272,6 +272,22 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
                               bytes: widget.source.previewBytes,
                               fit: BoxFit.fill,
                               semanticLabel: 'Orijinal etiket fotoğrafı',
+                              // Never leave a blank crop canvas on decode errors.
+                              errorBuilder: (context, error, stack) => Center(
+                                child: Semantics(
+                                  liveRegion: true,
+                                  child: Text(
+                                    'Orijinal fotoğraf gösterilemedi. '
+                                    'Düzenlemeden geri dönüp başka fotoğraf seç.',
+                                    key: const ValueKey('crop-preview-error'),
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Theme.of(context).colorScheme.error,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
                             ),
                           ),
                         ),
