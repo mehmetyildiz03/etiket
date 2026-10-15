@@ -349,4 +349,43 @@ void main() {
       expect(find.text(rawWarning), findsNothing);
     });
   }
+
+  test('a weak accepted OCR candidate is explicitly marked for correction', () {
+    final weak = OcrObservation(
+      rawText: 'OF 0% Polyester\\n% 40% Cotton',
+      confidence: 48,
+      decision: OcrDecision.candidate,
+    );
+    expect(weak.acceptedText, weak.rawText);
+    expect(weak.candidateWarning, contains('48.0'));
+    expect(weak.candidateWarning, contains('yüzde'));
+    expect(weak.candidateWarning, contains('doğruluk olasılığı'));
+    expect(candidate('60% Polyester\\n40% Cotton').candidateWarning, isNull);
+  });
+
+  testWidgets('48-point accepted candidate visibly warns before manual review', (
+    tester,
+  ) async {
+    bridge.result = OcrObservation(
+      rawText: 'OF 0% Polyester\\n% 40% Cotton',
+      confidence: 48,
+      decision: OcrDecision.candidate,
+    );
+    await tester.pumpWidget(
+      EtiketApp(photoSource: photos, textRecognizer: WebTextRecognizer(bridge)),
+    );
+    await tester.pumpAndSettle();
+    await tapText(tester, 'Etiket tara');
+    await tapText(tester, 'Galeriden seç');
+    await tapText(tester, 'Fotoğraftaki metni oku');
+    expect(find.textContaining('Düşük OCR güveni'), findsOneWidget);
+    expect(find.textContaining('48.0'), findsOneWidget);
+    expect(find.text('Metni incele ve düzelt'), findsOneWidget);
+    await tapText(tester, 'Metni incele ve düzelt');
+    final field = find.byKey(const ValueKey('label-text'));
+    expect(
+      tester.widget<TextField>(field).controller!.text,
+      bridge.result.rawText,
+    );
+  });
 }
