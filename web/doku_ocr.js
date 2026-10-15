@@ -306,7 +306,7 @@
     if (!hasDigits) return false;
     const recognizedFiber = /\b(?:pamuk|cotton|co|polyester|poliester|pes|pet|pl|keten|linen|li|viskon|viskoz|viscose|cv|vi|modal|cmd|liyosel|lyocell|cly|yun|wool|wo|ipek|silk|se|poliamid|polyamide|nylon|naylon|pa|elastan|elastane|spandex|el|ea|akrilik|acrylic|pan|pc|asetat|acetate|ca|kasmir|cashmere|ws|rayon|bamboo|bambu|tencel)\b/i.test(folded);
     if (recognizedFiber) return true;
-    const heading = /\b(?:shell|lining|outer|astar|dolgu|filling|padding|composition|bilesim|kumas|fabric|material)\b/i.test(folded);
+    const heading = /\b(?:shell|lining|outer|astar|dolgu|filling|padding|composition|bilesim|kumas|fabric|material|fiber|fibre|elyaf)\b/i.test(folded);
     const hasWord = /\b[a-z]{4,}\b/.test(folded);
     // Preserve unfamiliar materials when the photographed label actually has
     // a meaningful section header or a clearly printed numeric percentage.
