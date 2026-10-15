@@ -28,17 +28,6 @@ async function main(){
  const page=await ctx.newPage(),req=[],results=[];
  page.on('request',r=>req.push(r.method()));
  try{
-  // Diagnostic instrumentation in this isolated research browser only:
-  // production JS remains unchanged. Preserve the original error stack
-  // before dokuOcr maps an unexpected image failure to invalidPhoto.
-  await page.route('**/doku_ocr.js', async route => {
-    const response=await route.fetch();
-    const js=(await response.text()).replaceAll(
-      '}).catch(error => { throw error instanceof DOMException',
-      '}).catch(error => { globalThis.__roiInternalError=String(error?.stack||error); throw error instanceof DOMException'
-    );
-    await route.fulfill({response,body:js});
-  });
   await page.goto(base,{waitUntil:'networkidle'});
   await page.evaluate(async()=>{
    const a=new URL('./ocr/',location.href);
@@ -85,12 +74,14 @@ async function main(){
    assert.ok(source&&source.path);
    const urls={full:source.path};
    for(const key of Object.keys(crops)){
-    const applied=await page.evaluate(arg=>dokuOcr.editSafe(
-      window.__studyPicked.path,arg),crops[key]);
-    if (applied.code != null) {
-      const diagnostic=await page.evaluate(()=>window.__roiInternalError);
-      throw new Error('ROI crop '+key+' failed: '+applied.code+'; root='+diagnostic);
-    }
+    // window.__studyPicked remains a Promise even though Node's page.evaluate
+    // returns its resolved value. Resolve it again INSIDE the page before
+    // passing its actual Blob URL to the editor.
+    const applied=await page.evaluate(async arg=>{
+      const selected=await window.__studyPicked;
+      return dokuOcr.editSafe(selected.path,arg);
+    },crops[key]);
+    assert.equal(applied.code,null,key);
     assert.ok(applied.photo?.path,key);
     urls[key]=applied.photo.path;
    }
