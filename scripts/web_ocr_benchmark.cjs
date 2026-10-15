@@ -125,7 +125,7 @@ async function main() {
         const worker=await original(...args), recognize=worker.recognize.bind(worker);
         worker.recognize=async (...args)=>{
           const outcome=await recognize(...args);
-          window.__benchmarkRaw={rawText:outcome.data.text,confidence:outcome.data.confidence};
+          if (!window.__benchmarkRaw) window.__benchmarkRaw={rawText:outcome.data.text,confidence:outcome.data.confidence};
           return outcome;
         };
         return worker;
@@ -172,7 +172,8 @@ async function main() {
       // chosen LOCAL private report; CI always runs with synthetic fixtures.
       results.push({...metrics,group:f.group||'unknown',split:f.split||'synthetic',
         groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||'',
-        confidence:output.observation.confidence,decision:output.observation.decision});
+        confidence:output.observation.confidence,decision:output.observation.decision,
+         secondReading:output.observation.secondReading||null});
       await page.evaluate(([source,derived])=>{
         dokuOcr.release(source);
         if(derived!==source)dokuOcr.release(derived);
