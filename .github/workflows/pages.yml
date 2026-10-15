@@ -40,7 +40,7 @@ jobs:
         run: |
           npm ci --prefix tool/web_ocr --ignore-scripts --no-audit --no-fund
           node scripts/prepare_web_ocr.cjs
-          node --test scripts/web_ocr_bridge.test.cjs
+          node --test scripts/web_ocr_bridge.test.cjs scripts/ocr_benchmark_metrics.test.cjs
       - name: Flutter regression checks
         run: |
           flutter analyze
@@ -57,6 +57,7 @@ jobs:
           SERVER_PID=$!
           trap 'kill "$SERVER_PID"' EXIT
           node scripts/web_ocr_smoke.cjs http://127.0.0.1:8082/etiket/
+          node scripts/web_ocr_benchmark.cjs http://127.0.0.1:8082/etiket/ --synthetic
       - name: Upload browser OCR evidence
         if: always()
         uses: actions/upload-artifact@v4
