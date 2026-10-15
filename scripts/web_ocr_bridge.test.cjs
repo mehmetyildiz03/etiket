@@ -200,6 +200,7 @@ test('empty, texture-like and random high-confidence OCR is rejected as unreadab
   for (const [text, confidence] of [
     ['', 0], ['  -  .  / ', 90], ['ooee II ii 4', 24],
     ['QZPJL\nYYNMEZ\nOUIO', 96], ['70% cotton', 18],
+    ['2026 COTTON', 96], ['CARE 40°C CO', 97], ['MATERIAL 2026 XYZ', 94],
   ]) {
     s.result = text; s.confidence = confidence;
     await assert.rejects(s.bridge.recognize(photo.path, () => {}), {message: 'emptyText'});
