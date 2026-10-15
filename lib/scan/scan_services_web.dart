@@ -1,4 +1,5 @@
 import 'dart:js_interop';
+import 'dart:typed_data';
 import 'package:web/web.dart' as web;
 import 'photo_scan.dart';
 import 'web_scan_services.dart';
@@ -100,13 +101,15 @@ class _JsBridge
 
   BrowserPhoto _photo(_PickedPhoto picked) => BrowserPhoto(
     picked.path,
-    picked.bytes.toDart,
+    Uint8List.fromList(picked.bytes.toDart),
     sourceImage: picked.sourceBytes == null
         ? null
         : PhotoImageSource(
             width: picked.sourceWidth!,
             height: picked.sourceHeight!,
-            previewBytes: picked.sourceBytes!.toDart,
+            // Detach the preview from the JS ArrayBuffer lifetime; iOS
+            // WebKit may reclaim/reuse the original Uint8Array after picking.
+            previewBytes: Uint8List.fromList(picked.sourceBytes!.toDart),
           ),
   );
 
