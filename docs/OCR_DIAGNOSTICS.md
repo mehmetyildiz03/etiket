@@ -25,6 +25,12 @@ Reddedilen çıktı `scan.text` veya draft'a aktarılmaz. Ayrıntıyı açmak on
 
 Tanı verisi yeni okuma, fotoğraf seçme (iptal dahil), kırpma/döndürme/sıfırlama, elle düzeltme, iptal, geri/ekrandan ayrılma ve dispose sırasında temizlenir. Sürüm kontrolü eski asenkron sonucu atar. Ayrıntı varsayılan olarak yeniden kapalıdır. Yalnız oturum belleği kullanılır; fotoğraf/ham metin loglanmaz, kalıcı kaydedilmez veya sunucuya yüklenmez. Dil modeli önbelleği kullanıcı verisi içermez.
 
+## Gerçek etiket kaynaklı düşük güvenli aday uyarısı (F3-W5)
+
+İlk kullanıcı fotoğrafı geri bildirimiyle kabul edilmiş bir adayda bile motor güveni yalnızca **48/100** görüldü. Etiketin üzerindeki **60% Polyester / 40% Cotton** satırları, özellikle `60%` basamağı ve `Cotton` başlangıcı bozulmuş olarak okunmuştu. Bu örneğin **fotoğrafı veya kullanıcı ekran görüntüsü açık repo/CI'ya eklenmedi**. Yazı dışındaki bakım sembolleri de sahte harflere dönüşebiliyor.
+
+Kullanıcı akışında `OcrDecision.candidate` durumunda güven puanı **65'in altındaysa** metnin hemen altında belirgin **"Düşük OCR güveni"** uyarısı görünür. Bu yalnızca **inceleme uyarısıdır**; adayın ham metnini, 45 kabul eşiğini, parser'ın toplam yüzde denetimini veya açık kullanıcı onayını değiştirmez. 65 eşiği bir **ürün uyarısı eşik değeridir**, fotoğraf veri setine göre kalibre edilmiş doğruluk olasılığı değildir; başka gerçek fotoğraflarla ayarlanmalı. Metin/OCR yüzdeleri otomatik düzeltilmez. Buna ilişkin yeni regresyon testi eklendi.
+
 ## Tekrarlanabilir kanıt
 
 Başlangıçta 122 Flutter ve 24 JavaScript testi yeşildi. Çözümden önce eklenen 4 JS beklentisi başarısızdı: ham çıktı/karar kayıptı ve negatif yazılı kontrollerin ham CER/WER ölçümü yoktu. Gerçek derlenmiş başlangıç uygulamasında Chromium/Tesseract `PLEASE CLOSE THE DOOR\n` metnini 95 puan ve CER/WER=0 ile okudu; köprü yalnız `text:null, code:emptyText` döndürdü. Yeni tarayıcı testi eksik `observation` beklentisinde kırmızı oldu.

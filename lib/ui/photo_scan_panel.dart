@@ -138,6 +138,30 @@ class PhotoScanPanel extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(scan.text, maxLines: 4, overflow: TextOverflow.ellipsis),
+          if (scan.observation?.candidateWarning != null) ...[
+            const SizedBox(height: 12),
+            Semantics(
+              liveRegion: true,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      color: Theme.of(context).colorScheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      scan.observation!.candidateWarning!,
+                      key: const ValueKey('weak-ocr-warning'),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: onReview,

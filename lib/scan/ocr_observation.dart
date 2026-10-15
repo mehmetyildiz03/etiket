@@ -23,6 +23,18 @@ class OcrObservation {
   final OcrDecision decision;
   String? get acceptedText =>
       decision == OcrDecision.candidate ? rawText : null;
+  /// Accepted OCR text remains editable, but a marginal engine score must
+  /// not be mistaken for a reliable transcription. No automatic correction.
+  bool get weakCandidate =>
+      decision == OcrDecision.candidate &&
+      confidence != null &&
+      confidence! < 65;
+  String? get candidateWarning => weakCandidate
+      ? 'Düşük OCR güveni (${confidence!.toStringAsFixed(1)}/100). '
+        'Okunan yüzde işaretleri, rakamlar ve elyaf adları yanlış olabilir. '
+        'Lütfen etiket fotoğrafıyla karşılaştırıp düzelt. '
+        'Bu puan doğruluk olasılığı değildir.'
+      : null;
   String get explanation => switch (decision) {
     OcrDecision.noText =>
       'OCR motoru bu fotoğrafta okunabilir bir metin çıkaramadı. Daha net bir fotoğraf deneyebilir veya elle giriş yapabilirsin.',
