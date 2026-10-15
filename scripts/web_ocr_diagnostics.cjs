@@ -188,10 +188,6 @@ module.exports = async (browser, baseUrl, evidence) => {
       await visibleText('Ham OCR çıktısı — doğrulanmış kumaş bileşimi değildir').waitFor();
       if (kind === 'label-weak' && output.observation.secondReading) {
         await visibleText('İkinci OCR denemesi — alternatif okuma, doğrulanmamış').waitFor();
-        assert.equal(
-          (await page.locator('flt-semantics').allInnerTexts()).join(' ').includes('doğrulanmamış'),
-          true,
-        );
       }
       await visibleText(
         'Etiket kararı: ' +
