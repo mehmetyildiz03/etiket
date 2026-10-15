@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'session_photo_preview.dart';
+import 'ocr_diagnostics.dart';
 import '../scan/photo_scan.dart';
 
 class PhotoScanPanel extends StatelessWidget {
@@ -150,6 +151,11 @@ class PhotoScanPanel extends StatelessWidget {
               label: const Text('Yeniden oku'),
             ),
         ],
+        if (!scan.busy && scan.observation != null)
+          OcrDiagnostics(
+            key: ValueKey(scan.revision),
+            observation: scan.observation!,
+          ),
         if (scan.canEditPhoto) ...[
           OutlinedButton.icon(
             onPressed: scan.busy ? null : onEdit,

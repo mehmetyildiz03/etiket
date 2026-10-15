@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "example-private-label-001",
+      "kind": "positive",
+      "group": "tr-daylight-fabric-label",
+      "split": "dev",
+      "imagePath": "images/replace-with-your-photo.jpg",
+      "mimeType": "image/jpeg",
+      "sha256": "REPLACE_WITH_ACTUAL_SHA256_LOWERCASE_HEX",
+      "usageConsent": true,
+      "reviewedByHuman": true,
+      "groundTruth": "DIŞ KUMAŞ\n80% PAMUK\n20% POLYESTER\nASTAR\n100% VİSKON",
+      "expectedPairs": [
+        {
+          "fiber": "PAMUK",
+          "percent": "80"
+        },
+        {
+          "fiber": "POLYESTER",
+          "percent": "20"
+        },
+        {
+          "fiber": "VİSKON",
+          "percent": "100"
+        }
+      ],
+      "crop": {
+        "left": 0,
+        "top": 0,
+        "width": 1,
+        "height": 1,
+        "quarterTurns": 0
+      }
+    },
+    {
+      "id": "example-private-no-text-001",
+      "kind": "negative",
+      "group": "fabric-without-label",
+      "split": "holdout",
+      "imagePath": "images/replace-with-no-text.jpg",
+      "mimeType": "image/jpeg",
+      "sha256": "REPLACE_WITH_ACTUAL_SHA256_LOWERCASE_HEX",
+      "usageConsent": true,
+      "reviewedByHuman": true
+    }
+  ]
+}

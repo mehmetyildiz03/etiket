@@ -468,7 +468,21 @@
     return false;
   }
 
-  async function recognize(path, progress) {
+  // Recognition evidence and fabric policy are separate. Confidence is a model
+  // score, not a calibrated probability that the transcription is correct.
+  function observationFor(rawText, score) {
+    const confidence = Number.isFinite(score) && score >= 0 && score <= 100 ? score : null;
+    let decision;
+    if (!/[\p{L}\p{N}]/u.test(rawText)) decision = 'noText';
+    else if (confidence === null || confidence < 45) decision = 'lowConfidence';
+    else if (plausibleLabelText(rawText, confidence)) decision = 'candidate';
+    else if (plausibleLabelText(rawText, 100)) decision = 'lowConfidence';
+    else decision = 'noComposition';
+    return Object.freeze({rawText, confidence, decision,
+      acceptedText: decision === 'candidate' ? rawText : null});
+  }
+
+  async function readObservation(path, progress) {
     if (!supported || disposed) throw fail('unsupported');
     if (!photos.has(path)) throw fail('invalidPhoto');
     if (job) throw fail('busy');
@@ -533,9 +547,11 @@
       const result = await worker.recognize(photos.get(path).blob, {}, {text: true});
       if (job !== current) throw fail('canceled');
       const text = result.data.text;
+      if (typeof text !== 'string') throw fail('recognition');
       if (text.length > 20000) throw fail('tooMuchText');
-      if (!plausibleLabelText(text, result.data.confidence)) throw fail('emptyText');
-      return text;
+      const observation = observationFor(text, result.data.confidence);
+      if (observation.decision !== 'candidate') stopWorker();
+      return observation;
     };
     try { return await Promise.race([run(), signal]); }
     catch (error) {
@@ -546,6 +562,14 @@
       clearTimeout(timeout);
       if (job === current) job = null;
     }
+  }
+
+  // Keep the existing string/emptyText API for benchmark and older callers.
+  // The app consumes recognizeSafe.observation, including rejected raw output.
+  async function recognize(path, progress) {
+    const observation = await readObservation(path, progress);
+    if (observation.decision !== 'candidate') throw fail('emptyText');
+    return observation.acceptedText;
   }
 
   function dispose() {
@@ -562,8 +586,10 @@
     error => ({photo: null, code: error.message || 'invalidPhoto'}));
   const editSafe = (path, options) => edit(path, options).then(photo => ({photo, code:null}),
     error => ({photo:null, code:error.message || 'invalidPhoto'}));
-  const recognizeSafe = (path, progress) => recognize(path, progress).then(text => ({text, code: null}),
-    error => ({text: null, code: error.message || 'recognition'}));
+  const recognizeSafe = (path, progress) => readObservation(path, progress).then(observation => ({
+    text: observation.acceptedText,
+    code: observation.decision === 'candidate' ? null : 'emptyText', observation
+  }), error => ({text: null, code: error.message || 'recognition', observation: null}));
   globalThis.dokuOcr = Object.freeze({supported, cameraAvailable, pick, recognize, pickSafe, recognizeSafe, edit, editSafe, cancelEditing,
     release, cancelSelection, cancelRecognition, dispose});
 })();
