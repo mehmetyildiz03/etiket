@@ -52,6 +52,14 @@ CI artifact'ında `diagnostics-report.json`, sentetik görüntüler/ekran görü
 
 Dokuz örnekli sentetik benchmark'ta etiketler için ham CER %12,5 / WER %23,8; ret dahil sunulan metin CER %21,7 / WER %28,6; yanlış ret **1/4**, yanlış kabul **0/5**. Net yazılı üç negatifte ham CER/WER=0; toplam 7 transkripsiyonun ham CER'i %8,9 / WER'i %16,7. Küçük/eğik pozitif, motor puanı 84 olmasına rağmen hatalı okundu ve filtre tarafından reddedildi; puanın doğruluk garantisi olmadığı somut olarak görülür. Bu küçük sentetik kümeden gerçek fotoğraf başarı yüzdesi çıkarılmaz. Süreler makineye bağlıdır ve artifact raporunda tutulur.
 
+## Düşük güvenli adaylarda bağımsız ikinci okuma
+
+Gerçek etiket ekran görüntüsünün yerel Tesseract 5 denemelerinde `60% Polyester` satırı bazı kırpma/PSM seçeneklerinde doğru, bazılarında hatalı tanındı; ikinci `40% Cotton` satırı ise hâlâ zor. Bu nedenle Web OCR yalnız **ilk okumada etiket adayı kabul edilmiş, motor puanı 65 altında** olduğunda aynı fotoğrafı ikinci defa Tesseract.js `PSM.SPARSE_TEXT` (11) düzeninde tarar ve normal `SINGLE_BLOCK` (6) düzenini geri yükler. İlk okuma aynı kalır; ikinci sonuç farklıysa **yalnızca kullanıcı açıkça “OCR'nin okuduğu ham metni göster” düğmesine basınca** alternatif metin olarak gösterilir.
+
+İki metin arasında yüzde/elyaf eşleştirmesi, toplam %100'a göre düzeltme veya otomatik seçim **yoktur**. İkinci sonuç daha yüksek güven puanı alsa bile bunun daha doğru olduğu kanıtlanmış değildir. İki sonuç çelişiyorsa **orijinal etiketle karşılaştırarak elle doğrulamak zorunludur**; parse/draft/onay akışı değişmez. İlk geçiş güçlü adaysa ekstra okuma yapılmaz. İkinci geçiş başarısızsa ilk geçiş korunur; iptal ve worker temizliği güvenlik kuralları sürer. İşlem süresi düşük güvenli adaylarda uzayabilir ve 120 saniyelik ortak zaman aşımı korunur.
+
+Özel kullanıcı ekran görüntüleri, ham kişisel fotoğraflar ve OCR metni **GitHub'a, Pages'e veya CI artifact'ına eklenmedi**. JS birim testi anonim, sentetik metin eşleştirmelerini sınar. Benchmark varsa birincil ve ikincil OCR sonuçlarını ayrı raporlar; **asıl CER/WER her zaman birinci OCR üzerinden hesaplanır**, iki OCR karıştırılmaz. Gerçek fotoğraflarda hangi yaklaşımın daha iyi olduğu ayrıca ölçülecek (#18). Bu özellik henüz bir OCR başarı artışı garantisi değildir.
+
 ## Açık sınırlamalar
 
 Gerçek kullanıcı fotoğraf veri seti yoktur: `realSampleCount:0`, `realAccuracy:null`. Çizilmiş etiket örneği gerçek kıyafet fotoğrafı değildir. Kontrol cümlesinin doğru okunması genel OCR doğruluk oranı göstermez. Küçük/eğik/dokulu örneklerde yanlış okuma ve yanlış ret sürer; güven puanı bunu her zaman yakalayamaz. Mevcut filtreden geçmiş hatalı yüzde/bölüm/elyaf da mümkündür. Bu görev filtreyi iyileştirmez veya genel amaçlı OCR ürünü yapmaz. Gerçek veri ve bölüm eşleşmesi borçları: [#11](https://github.com/mehmetyildiz03/etiket/issues/11), [#14](https://github.com/mehmetyildiz03/etiket/issues/14).
