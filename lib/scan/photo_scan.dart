@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:typed_data';
+import 'photo_edit.dart';
 
 enum PhotoSource { camera, gallery }
 
@@ -10,6 +11,7 @@ enum ScanStage {
   preview,
   recognizing,
   ready,
+  transforming,
   failed,
 }
 
@@ -23,6 +25,7 @@ enum ScanFailureKind {
   recognition,
   unsupported,
   modelLoad,
+  invalidCrop,
 }
 
 class ScanFailure implements Exception {
@@ -50,16 +53,40 @@ class ScanFailure implements Exception {
       'Bu platformda kamera ve cihaz üzerindeki OCR desteklenmiyor. Metin yapıştırma ve elle giriş kullanılabilir.',
     ScanFailureKind.modelLoad =>
       'OCR motoru veya dil modeli yüklenemedi. İlk kullanım için internet gerekir. Bağlantını kontrol edip tekrar dene; metin yapıştırma ve elle giriş de kullanılabilir.',
+    ScanFailureKind.invalidCrop =>
+      'Kırpma alanı geçersiz veya çok dar. Alanı fotoğrafın içinde, en az 32 piksel genişlik ve yükseklikte seç.',
   };
 }
 
 /// Only the source adapter owns the temporary file. The controller never deletes
 /// a gallery original or sends an image/text to a server.
 class ScanPhoto {
-  ScanPhoto({required this.path, required Uint8List previewBytes})
-    : previewBytes = previewBytes.asUnmodifiableView();
+  ScanPhoto({
+    required this.path,
+    required Uint8List previewBytes,
+    this.sourceImage,
+  }) : previewBytes = previewBytes.asUnmodifiableView();
   final String path;
   final Uint8List previewBytes;
+  final PhotoImageSource? sourceImage;
+}
+
+class PhotoImageSource {
+  PhotoImageSource({
+    required this.width,
+    required this.height,
+    required Uint8List previewBytes,
+  }) : previewBytes = previewBytes.asUnmodifiableView();
+  final int width, height;
+  final Uint8List previewBytes;
+}
+
+abstract interface class PhotoEditingService {
+  Future<ScanPhoto> editPhoto(ScanPhoto original, PhotoEdit edit);
+}
+
+abstract interface class CancelablePhotoEditingService {
+  void cancelPhotoEditing();
 }
 
 abstract interface class PhotoSourceService {
@@ -107,6 +134,9 @@ class PhotoScanController {
   void Function()? onChanged;
   ScanStage _stage = ScanStage.idle;
   ScanPhoto? _photo;
+  ScanPhoto? _originalPhoto;
+  PhotoEdit? _appliedEdit;
+  bool _editingPhoto = false;
   String _text = '';
   String? _message;
   int _revision = 0;
@@ -116,6 +146,14 @@ class PhotoScanController {
   final Set<ScanPhoto> _retired = {};
   ScanStage get stage => _stage;
   ScanPhoto? get photo => _photo;
+  ScanPhoto? get originalPhoto => _originalPhoto;
+  PhotoEdit? get appliedEdit => _appliedEdit;
+  bool get editingPhoto => _editingPhoto;
+  bool get canEditPhoto =>
+      !_disposed &&
+      photos is PhotoEditingService &&
+      _originalPhoto?.sourceImage != null &&
+      !_pickerOpen;
   String get text => _text;
   String? get message => _message;
   bool get canPick => !_disposed && photos.supported && !_pickerOpen;
@@ -123,6 +161,7 @@ class PhotoScanController {
     ScanStage.picking,
     ScanStage.recovering,
     ScanStage.recognizing,
+    ScanStage.transforming,
   }.contains(_stage);
   int get revision => _revision;
 
@@ -158,6 +197,7 @@ class PhotoScanController {
     }
     final revision = ++_revision;
     _stopRecognition();
+    _stopEditing();
     _pickerOpen = true;
     _stage = recovering ? ScanStage.recovering : ScanStage.picking;
     _message = null;
@@ -175,11 +215,20 @@ class PhotoScanController {
         _message = recovering ? null : 'Fotoğraf seçimi iptal edildi.';
       } else {
         final previous = _photo;
+        final oldOriginal = _originalPhoto;
         _photo = selected;
+        _originalPhoto = selected;
+        _appliedEdit = null;
+        _editingPhoto = false;
         _text = '';
         _stage = ScanStage.preview;
         if (previous != null && !identical(previous, selected)) {
           await _retire(previous);
+        }
+        if (oldOriginal != null &&
+            !identical(oldOriginal, previous) &&
+            !identical(oldOriginal, selected)) {
+          await _retire(oldOriginal);
         }
       }
     } catch (error) {
@@ -201,7 +250,13 @@ class PhotoScanController {
       return;
     }
     final input = _photo;
-    if (input == null || _pickerOpen || _stage == ScanStage.recognizing) return;
+    if (input == null ||
+        _pickerOpen ||
+        _editingPhoto ||
+        _stage == ScanStage.recognizing ||
+        _stage == ScanStage.transforming) {
+      return;
+    }
     final revision = ++_revision;
     _stage = ScanStage.recognizing;
     _message = null;
@@ -236,6 +291,8 @@ class PhotoScanController {
     if (_disposed) return;
     ++_revision;
     _stopRecognition();
+    _stopEditing();
+    _editingPhoto = false;
     _text = value;
     _message = null;
     _stage = _photo == null
@@ -248,9 +305,11 @@ class PhotoScanController {
     if (_disposed) return;
     ++_revision;
     _stopRecognition();
+    _stopEditing();
     if (photos case final DisposablePhotoSource source) {
       source.cancelSelection();
     }
+    _editingPhoto = false;
     _message = message ?? 'İşlem iptal edildi.';
     _stage = _photo == null
         ? ScanStage.idle
@@ -262,15 +321,23 @@ class PhotoScanController {
     if (_disposed) return;
     ++_revision;
     _stopRecognition();
+    _stopEditing();
     if (photos case final DisposablePhotoSource source) {
       source.cancelSelection();
     }
     final previous = _photo;
+    final original = _originalPhoto;
     _photo = null;
+    _originalPhoto = null;
+    _appliedEdit = null;
+    _editingPhoto = false;
     _text = '';
     _message = null;
     _stage = ScanStage.idle;
     if (previous != null) unawaited(_retire(previous));
+    if (original != null && !identical(original, previous)) {
+      unawaited(_retire(original));
+    }
     _notify();
   }
 
@@ -299,6 +366,7 @@ class PhotoScanController {
     _disposed = true;
     ++_revision;
     _stopRecognition();
+    _stopEditing();
     if (recognizer case final ScanProgressSource progress) {
       progress.onProgress = null;
     }
@@ -307,10 +375,101 @@ class PhotoScanController {
     }
     onChanged = null;
     final previous = _photo;
+    final original = _originalPhoto;
     _photo = null;
+    _originalPhoto = null;
+    _editingPhoto = false;
     _text = '';
     _stage = ScanStage.idle;
     if (previous != null) unawaited(_retire(previous));
+    if (original != null && !identical(original, previous)) {
+      unawaited(_retire(original));
+    }
+  }
+
+  bool beginPhotoEdit() {
+    if (!canEditPhoto || _stage == ScanStage.transforming) return false;
+    ++_revision;
+    _stopRecognition();
+    _stopEditing();
+    _editingPhoto = true;
+    _stage = _text.isEmpty ? ScanStage.preview : ScanStage.ready;
+    _message = null;
+    _notify();
+    return true;
+  }
+
+  void cancelPhotoEdit() {
+    if (_disposed || !_editingPhoto) return;
+    ++_revision;
+    _stopEditing();
+    _editingPhoto = false;
+    _stage = _text.isEmpty ? ScanStage.preview : ScanStage.ready;
+    _message = 'Fotoğraf düzenleme iptal edildi.';
+    _notify();
+  }
+
+  Future<bool> applyPhotoEdit(PhotoEdit edit) async {
+    final original = _originalPhoto;
+    if (!canEditPhoto ||
+        !_editingPhoto ||
+        original == null ||
+        _stage == ScanStage.transforming) {
+      return false;
+    }
+    final source = original.sourceImage!;
+    if (!edit.isValidFor(source.width, source.height)) {
+      _message = const ScanFailure(ScanFailureKind.invalidCrop).message;
+      _notify();
+      return false;
+    }
+    final revision = ++_revision;
+    _stopRecognition();
+    _stopEditing();
+    _stage = ScanStage.transforming;
+    _message = null;
+    _inFlight[original] = (_inFlight[original] ?? 0) + 1;
+    _notify();
+    try {
+      final edited = await (photos as PhotoEditingService).editPhoto(
+        original,
+        edit,
+      );
+      if (!_current(revision) || !identical(original, _originalPhoto)) {
+        await _retire(edited);
+        return false;
+      }
+      final previous = _photo;
+      _photo = edited;
+      _appliedEdit = edit;
+      _editingPhoto = false;
+      _text = '';
+      _stage = ScanStage.preview;
+      if (previous != null &&
+          !identical(previous, original) &&
+          !identical(previous, edited)) {
+        await _retire(previous);
+      }
+      return true;
+    } catch (error) {
+      if (_current(revision)) _fail(error, ScanFailureKind.invalidPhoto);
+      return false;
+    } finally {
+      final remaining = _inFlight[original]! - 1;
+      if (remaining == 0) {
+        _inFlight.remove(original);
+        if (_retired.remove(original)) await _release(original);
+      } else {
+        _inFlight[original] = remaining;
+      }
+      if (_current(revision)) _notify();
+    }
+  }
+
+  void _stopEditing() {
+    if (photos case final CancelablePhotoEditingService editable) {
+      editable.cancelPhotoEditing();
+    }
   }
 
   void _stopRecognition() {

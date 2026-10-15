@@ -12,7 +12,8 @@ function png(width = 800, height = 600) {
 }
 function setup({mobile = false, secure = true, supported = true} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
-  let options, initialized = 0, decoded = 0, creation, confidence = 93, result = 'Dış kumaş\n70% Pamuk\n30% Polyester';
+  let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester';
+  const canvases = [], imageSources = [];
   class Input {
     events = {}; files = [];
     setAttribute(key, value) { this[key] = value; }
@@ -35,14 +36,23 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
     removeEventListener: key => { delete listeners[key]; },
     Image: class {
       naturalWidth = 800; naturalHeight = 600;
-      async decode() { decoded++; }
+      async decode() {
+        decoded++;
+        const blob = blobs.get(this.src); imageSources.push(blob);
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        if (bytes.length >= 24 && new DataView(bytes.buffer).getUint32(0) === 0x89504e47) {
+          this.naturalWidth = new DataView(bytes.buffer).getUint32(16);
+          this.naturalHeight = new DataView(bytes.buffer).getUint32(20);
+        }
+      }
     },
     document: {baseURI: 'https://example.test/etiket/', body: {appendChild: input => nodes.push(input)},
-      createElement: type => type === 'input' ? new Input() : {
+      createElement: type => type === 'input' ? new Input() : (() => { const canvas = {
         width: 1, height: 1, getContext: () => ({fillRect() {}, drawImage() {}, clearRect() {},
+          scale() {}, translate() {}, rotate() {}, setTransform() {}, putImageData() {},
           getImageData: (x, y, w, h) => ({data: new Uint8ClampedArray(w * h * 4).fill(255)})}),
         toBlob: callback => callback(new Blob([new Uint8Array(32)], {type: 'image/jpeg'}))
-      }},
+      }; canvases.push(canvas); return canvas; })()},
     Tesseract: {createWorker: async (langs, oem, opts) => {
       initialized++; options = opts;
       optionsHistory.push(opts);
@@ -51,13 +61,14 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
       assert.equal(oem, 1);
       if (creation) await creation;
       return {setParameters: async () => {},
-        recognize: async () => { options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: result, confidence}}; },
+        recognize: async image => { recognizedBlob = image; options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: result, confidence}}; },
         terminate: async () => { raw.terminate(); }};
     }}
   });
   vm.runInContext(bridgeSource, context);
   const bridge = context.dokuOcr;
-  return {bridge, context, nodes, revoked, blobs, workers, listeners, optionsHistory,
+  return {bridge, context, nodes, revoked, blobs, workers, listeners, optionsHistory, canvases, imageSources,
+    get recognizedBlob() { return recognizedBlob; },
     get decoded() { return decoded; }, get initialized() { return initialized; }, get options() { return options; },
     set creation(value) { creation = value; }, set result(value) { result = value; },
     set confidence(value) { confidence = value; },
@@ -221,4 +232,65 @@ test('legible fiber labels, abbreviations and clearly marked unknown fiber survi
     assert.equal(await s.bridge.recognize(photo.path, () => {}), text);
   }
   s.bridge.dispose();
+});
+
+test('crop validates original-resolution coordinates and does not allocate on invalid requests', async () => {
+  const s=setup(), original=png(4000,3000), photo=await s.upload(original);
+  assert.equal(photo.sourceWidth,4000); assert.equal(photo.sourceHeight,3000);
+  const allocated=s.canvases.length;
+  for(const edit of [
+    {left:-.1,top:0,width:1,height:1,quarterTurns:0},
+    {left:.9,top:0,width:.2,height:1,quarterTurns:0},
+    {left:0,top:0,width:0,height:1,quarterTurns:0},
+    {left:0,top:0,width:.001,height:1,quarterTurns:0},
+    {left:NaN,top:0,width:1,height:1,quarterTurns:0},
+    {left:0,top:0,width:1,height:1,quarterTurns:8},
+  ]) await assert.rejects(s.bridge.edit(photo.path,edit),{message:'invalidCrop'});
+  assert.equal(s.canvases.length,allocated);
+  const crop=await s.bridge.edit(photo.path,{left:.1,top:.2,width:.3,height:.4,quarterTurns:1});
+  assert.equal(crop.sourceWidth,4000);assert.equal(crop.sourceHeight,3000);
+  assert.equal(s.imageSources.at(-1),original,'Crop decodes original, never the resized/JPEG derivative');
+  await s.bridge.recognize(crop.path,()=>{});
+  assert.equal(s.recognizedBlob,s.blobs.get(crop.path),'OCR receives exact approved preview Blob');
+  s.bridge.release(photo.path);s.bridge.release(crop.path);s.bridge.dispose();
+  assert.equal(s.blobs.size,0);assert.ok(s.canvases.every(c=>c.width===0&&c.height===0));
+});
+
+test('latest crop wins; cancel/dispose prevent late URLs and all canvases are cleared', async () => {
+  const s=setup(),photo=await s.upload();
+  const older=s.bridge.edit(photo.path,{left:0,top:0,width:.7,height:1,quarterTurns:0});
+  const first=assert.rejects(older,{message:'canceled'});
+  const latest=await s.bridge.edit(photo.path,{left:0,top:0,width:1,height:.6,quarterTurns:2});
+  await first;assert.equal(s.blobs.size,2);
+  const abandoned=s.bridge.edit(photo.path,{left:0,top:0,width:.5,height:1,quarterTurns:3});
+  s.bridge.cancelEditing();await assert.rejects(abandoned,{message:'canceled'});
+  const pending=s.bridge.edit(photo.path,{left:0,top:0,width:1,height:1,quarterTurns:0});
+  s.bridge.dispose();await assert.rejects(pending,{message:'canceled'});
+  assert.ok(s.canvases.every(c=>c.width===0&&c.height===0));assert.equal(s.blobs.size,0);
+  assert.ok(latest.bytes instanceof Uint8Array);
+});
+
+test('extreme encoded edges and tiny sources are rejected before image decode', async () => {
+  const s=setup();
+  await assert.rejects(s.upload(png(32769,32)),{message:'tooLarge'});
+  await assert.rejects(s.upload(png(2,1000)),{message:'invalidPhoto'});
+  assert.equal(s.decoded,0);assert.equal(s.canvases.length,0);assert.equal(s.blobs.size,0);
+});
+
+test('blur invalidates an in-flight edit without discarding the committed source', async () => {
+  const s=setup(),photo=await s.upload();
+  const pending=s.bridge.edit(photo.path,{left:0,top:0,width:.5,height:.5,quarterTurns:1});
+  s.listeners.blur();
+  await assert.rejects(pending,{message:'canceled'});
+  assert.equal(s.blobs.size,1);await s.bridge.recognize(photo.path,()=>{});
+  assert.equal(s.recognizedBlob,s.blobs.get(photo.path));s.bridge.dispose();
+  assert.equal(s.blobs.size,0);assert.ok(s.canvases.every(c=>c.width===0&&c.height===0));
+});
+
+test('releasing the last session photo clears worker-owned image buffers', async () => {
+  const s=setup(),photo=await s.upload();
+  await s.bridge.recognize(photo.path,()=>{});
+  s.bridge.release(photo.path);
+  assert.equal(s.workers[0].stopped,true);
+  assert.equal(s.blobs.size,0);
 });

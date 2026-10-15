@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'session_photo_preview.dart';
 import '../scan/photo_scan.dart';
 
 class PhotoScanPanel extends StatelessWidget {
@@ -8,11 +9,13 @@ class PhotoScanPanel extends StatelessWidget {
     required this.onReview,
     required this.onManual,
     required this.onPaste,
+    this.onEdit,
   });
   final PhotoScanController scan;
   final VoidCallback onReview;
   final VoidCallback onManual;
   final VoidCallback onPaste;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -67,8 +70,8 @@ class PhotoScanPanel extends StatelessWidget {
           const SizedBox(height: 16),
           ClipRRect(
             borderRadius: BorderRadius.circular(16),
-            child: Image.memory(
-              photo.previewBytes,
+            child: SessionPhotoPreview(
+              bytes: photo.previewBytes,
               key: const ValueKey('photo-preview'),
               height: 200,
               fit: BoxFit.contain,
@@ -105,6 +108,8 @@ class PhotoScanPanel extends StatelessWidget {
             child: Text(
               scan.stage == ScanStage.recognizing
                   ? (progress?.progressMessage ?? 'Etiket cihazında okunuyor…')
+                  : scan.stage == ScanStage.transforming
+                  ? 'Fotoğraf düzenleniyor…'
                   : 'Fotoğraf bekleniyor…',
             ),
           ),
@@ -137,6 +142,32 @@ class PhotoScanPanel extends StatelessWidget {
             onPressed: onReview,
             icon: const Icon(Icons.edit_note),
             label: const Text('Metni incele ve düzelt'),
+          ),
+          if (scan.canEditPhoto)
+            OutlinedButton.icon(
+              onPressed: scan.recognize,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Yeniden oku'),
+            ),
+        ],
+        if (scan.canEditPhoto) ...[
+          OutlinedButton.icon(
+            onPressed: scan.busy ? null : onEdit,
+            icon: const Icon(Icons.crop_rotate),
+            label: Text(
+              scan.appliedEdit == null ? 'Fotoğrafı düzenle' : 'Tekrar düzenle',
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: scan.canPick
+                ? () => scan.pick(PhotoSource.gallery)
+                : null,
+            icon: const Icon(Icons.add_photo_alternate_outlined),
+            label: const Text('Başka fotoğraf seç'),
+          ),
+          const Text(
+            'Bu önizlemedeki görüntü OCR’ye gönderilir. Kırpma isteğe bağlıdır.',
+            style: TextStyle(fontSize: 12, color: Colors.black54),
           ),
         ],
         const SizedBox(height: 16),

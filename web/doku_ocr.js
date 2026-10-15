@@ -3,6 +3,52 @@
   'use strict';
   const fail = code => new DOMException(code, 'DokuScanError');
   const photos = new Map();
+  const MAX_EDGE = 2400, MAX_PIXELS = 6000000, MAX_CANVAS_PIXELS = 12000000;
+  const canvases = new Map();
+  let canvasPixels = 0, editRevision = 0, imageQueue = Promise.resolve();
+  const serializedImage = action => {
+    const result = imageQueue.then(action, action);
+    imageQueue = result.then(() => {}, () => {});
+    return result;
+  };
+  function resizeCanvas(canvas, width, height) {
+    if (!Number.isInteger(width) || !Number.isInteger(height) || width < 0 || height < 0 ||
+        width > MAX_EDGE || height > MAX_EDGE || width * height > MAX_PIXELS) throw fail('tooLarge');
+    if (canvases.has(canvas)) {
+      const total = canvasPixels - canvases.get(canvas) + width * height;
+      if (total > MAX_CANVAS_PIXELS) throw fail('tooLarge');
+      canvasPixels = total; canvases.set(canvas, width * height);
+    }
+    canvas.width = width; canvas.height = height;
+  }
+  function makeCanvas(width, height) {
+    const canvas = document.createElement('canvas'); canvases.set(canvas, 0);
+    try { resizeCanvas(canvas, width, height); return canvas; }
+    catch (error) { canvases.delete(canvas); throw error; }
+  }
+  function freeCanvas(canvas) {
+    if (!canvas) return;
+    canvasPixels -= canvases.get(canvas) || 0;
+    canvases.delete(canvas); canvas.width = canvas.height = 0;
+  }
+  function rotateExpanded(canvas, radians, border = 24) {
+    const w = canvas.width, h = canvas.height;
+    const sine = Math.abs(Math.sin(radians)), cosine = Math.abs(Math.cos(radians));
+    const boundW = w * cosine + h * sine, boundH = w * sine + h * cosine;
+    const scale = Math.min(1, (MAX_EDGE - 2 * border - 1) / Math.max(boundW, boundH));
+    const width = Math.ceil(boundW * scale) + 2 * border;
+    const height = Math.ceil(boundH * scale) + 2 * border;
+    const copy = makeCanvas(width, height);
+    try {
+      const c = copy.getContext('2d');
+      c.fillStyle = '#fff'; c.fillRect(0, 0, width, height);
+      c.translate(width / 2, height / 2); c.rotate(radians); c.scale(scale, scale);
+      c.drawImage(canvas, -w / 2, -h / 2);
+      resizeCanvas(canvas, width, height);
+      canvas.getContext('2d').drawImage(copy, 0, 0);
+    } finally { freeCanvas(copy); }
+  }
+  const cancelEditing = () => { ++editRevision; };
   let picker = null, worker = null, workerOwner = null, job = null, disposed = false;
   const assetBase = new URL('ocr/', document.baseURI);
   const supported = typeof WebAssembly === 'object' && typeof Worker === 'function'
@@ -75,9 +121,8 @@
     const longest = Math.max(canvas.width, canvas.height);
     if (!longest) return 0;
     const scale = Math.min(1, 360 / longest);
-    const sample = document.createElement('canvas');
-    sample.width = Math.max(1, Math.round(canvas.width * scale));
-    sample.height = Math.max(1, Math.round(canvas.height * scale));
+    const sample = makeCanvas(Math.max(1, Math.round(canvas.width * scale)),
+      Math.max(1, Math.round(canvas.height * scale)));
     const sw = sample.width, sh = sample.height;
     const sc = sample.getContext('2d', {willReadFrequently: true});
     sc.drawImage(canvas, 0, 0, sw, sh);
@@ -139,7 +184,7 @@
       }
     }
     // Too little text: never rotate a picture based on noise.
-    if (points.length < 200) return 0;
+    if (points.length < 200) { freeCanvas(sample); return 0; }
     const histogram = new Int32Array(sh + 100);
     const score = degrees => {
       histogram.fill(0);
@@ -158,85 +203,167 @@
       const current = score(angle);
       if (current > bestScore) { bestScore = current; bestAngle = angle; }
     }
-    sample.width = sample.height = 0;
+    freeCanvas(sample);
     // Require substantial evidence to avoid rotating already-straight labels.
     if (Math.abs(bestAngle) < 2 || bestScore < straightScore * 1.3) return 0;
-    const copy = document.createElement('canvas');
-    copy.width = canvas.width; copy.height = canvas.height;
-    const corrected = copy.getContext('2d');
-    corrected.fillStyle = '#fff';
-    corrected.fillRect(0, 0, copy.width, copy.height);
-    corrected.translate(copy.width / 2, copy.height / 2);
-    corrected.rotate(bestAngle * Math.PI / 180);
-    corrected.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
-    const target = canvas.getContext('2d');
-    target.setTransform(1, 0, 0, 1, 0, 0);
-    target.clearRect(0, 0, canvas.width, canvas.height);
-    target.drawImage(copy, 0, 0);
-    copy.width = copy.height = 0;
+    rotateExpanded(canvas, bestAngle * Math.PI / 180);
     return bestAngle;
   }
 
-  async function adopt(file) {
-    if (!file || !file.size || !file.type.startsWith('image/')) throw fail('invalidPhoto');
-    if (file.size > 20 * 1024 * 1024) throw fail('tooLarge');
-    const size = dimensions(new Uint8Array(await file.arrayBuffer()));
-    if (!size[0] || !size[1]) throw fail('invalidPhoto');
-    if (size[0] * size[1] > 24000000) throw fail('tooLarge');
-    const original = URL.createObjectURL(file);
-    const image = new Image();
-    let canvas;
+  async function withImage(blob, action) {
+    const url = URL.createObjectURL(blob), image = new Image();
+    let timer;
     try {
-      image.src = original;
-      await image.decode();
+      image.src = url;
+      await Promise.race([image.decode(), new Promise((_, reject) => {
+        timer = setTimeout(() => reject(fail('invalidPhoto')), 15000);
+      })]);
       if (!image.naturalWidth || !image.naturalHeight) throw fail('invalidPhoto');
-      if (image.naturalWidth * image.naturalHeight > 24000000) throw fail('tooLarge');
-      const scale = Math.min(1, 2400 / Math.max(image.naturalWidth, image.naturalHeight));
-      canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-      const context = canvas.getContext('2d');
-      context.fillStyle = '#fff';
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      straightenLabel(canvas);
-      // When the label takes only a small part of a low-resolution picture,
-      // percent symbols can turn into "96" (80% => 8096). Give the recognizer
-      // enough pixels without inventing or editing any recognized characters.
-      const longSide = Math.max(canvas.width, canvas.height);
-      if (longSide < 1500) {
-        const factor = Math.min(2, 2400 / longSide);
-        const enlarged = document.createElement('canvas');
-        enlarged.width = Math.round(canvas.width * factor);
-        enlarged.height = Math.round(canvas.height * factor);
-        const ec = enlarged.getContext('2d');
-        ec.imageSmoothingEnabled = true;
-        ec.imageSmoothingQuality = 'high';
-        ec.drawImage(canvas, 0, 0, enlarged.width, enlarged.height);
-        canvas.width = enlarged.width;
-        canvas.height = enlarged.height;
-        canvas.getContext('2d').drawImage(enlarged, 0, 0);
-        enlarged.width = enlarged.height = 0;
-      }
-      // Preserve small punctuation and accents losslessly; large camera photos
-      // still use bounded high-quality JPEG to avoid oversized memory usage.
-      const usePng = Math.max(canvas.width, canvas.height) <= 2000;
-      const blob = await new Promise(resolve =>
-        canvas.toBlob(resolve, usePng ? 'image/png' : 'image/jpeg', 0.95));
-      if (!blob) throw fail('invalidPhoto');
-      const bytes = new Uint8Array(await blob.arrayBuffer());
-      if (disposed) throw fail('canceled');
-      const path = URL.createObjectURL(blob);
-      photos.set(path, blob);
-      return {path, bytes};
-    } catch (error) {
-      throw error instanceof DOMException && error.name === 'DokuScanError'
-        ? error : fail('invalidPhoto');
-    } finally {
-      URL.revokeObjectURL(original);
-      image.src = '';
-      if (canvas) { canvas.width = 0; canvas.height = 0; }
+      if (image.naturalWidth * image.naturalHeight > 24000000 ||
+          Math.max(image.naturalWidth,image.naturalHeight) > 32768) throw fail('tooLarge');
+      return await action(image);
+    } finally { clearTimeout(timer); URL.revokeObjectURL(url); image.src = ''; }
+  }
+  const encode = (canvas, type = 'image/png') => new Promise((resolve, reject) =>
+    canvas.toBlob(blob => blob ? resolve(blob) : reject(fail('invalidPhoto')), type, .95));
+
+  function validateEdit(source, edit) {
+    if (!edit || !Number.isInteger(edit.quarterTurns) || edit.quarterTurns < 0 || edit.quarterTurns > 3 ||
+        ![edit.left, edit.top, edit.width, edit.height].every(Number.isFinite) ||
+        edit.left < 0 || edit.top < 0 || edit.width <= 0 || edit.height <= 0 ||
+        edit.left + edit.width > 1.000000001 || edit.top + edit.height > 1.000000001) throw fail('invalidCrop');
+    const w = edit.quarterTurns % 2 ? source.height : source.width;
+    const h = edit.quarterTurns % 2 ? source.width : source.height;
+    const cw = edit.width * w, ch = edit.height * h;
+    if (cw < 32 || ch < 32 || cw / ch > 40 || ch / cw > 40) throw fail('invalidCrop');
+    return {w, h, cw, ch};
+  }
+  function readablePreview(canvas, deskewed) {
+    // Local mean threshold (Bradley-style) avoids Leptonica selecting a pale
+    // color background instead of print when deskew adds white margins.
+    // Strong deskewed print uses a gentler 12% threshold to keep percent strokes;
+    // faint print uses 25%. Existing strong, unrotated photos stay unchanged.
+    // The EXACT monochrome result is previewed before OCR. No text is inferred.
+    const w=canvas.width, h=canvas.height, pixels=w*h;
+    const stride=Math.ceil(w/4)+1, rows=Math.ceil(h/4)+1;
+    if (canvasPixels + pixels + stride*rows > MAX_CANVAS_PIXELS) throw fail('tooLarge');
+    const context=canvas.getContext('2d', {willReadFrequently:true});
+    const image=context.getImageData(0,0,w,h), data=image.data;
+    // 4x4 block sums then an in-place integral image: <= 361,201 uint32s.
+    // Sum <= 255 * 5,760,000, safely within uint32; include partial edge blocks.
+    const integral=new Uint32Array(stride*rows);
+    let darkest=255;
+    for(let y=0;y<h;y++) for(let x=0;x<w;x++) {
+      const p=(y*w+x)*4;
+      const gray=Math.round(.299*data[p]+.587*data[p+1]+.114*data[p+2]);
+      darkest=Math.min(darkest,gray);
+      integral[(Math.floor(y/4)+1)*stride+Math.floor(x/4)+1]+=gray;
     }
+    // Keep strong, unrotated print untouched. Interpolation during deskew can
+    // otherwise make a percent glyph read as 96 even in high-contrast print.
+    if ((!deskewed && darkest < 16) || darkest > 220) return;
+    for(let y=1;y<rows;y++) {
+      let sum=0;
+      for(let x=1;x<stride;x++) {
+        sum+=integral[y*stride+x];
+        integral[y*stride+x]=sum+integral[(y-1)*stride+x];
+      }
+    }
+    for(let y=0;y<h;y++) {
+      const top=Math.max(0,Math.floor(y/4)-12), bottom=Math.min(rows-1,Math.floor(y/4)+13);
+      for(let x=0;x<w;x++) {
+        const left=Math.max(0,Math.floor(x/4)-12), right=Math.min(stride-1,Math.floor(x/4)+13);
+        const sum=integral[bottom*stride+right]-integral[top*stride+right]
+          -integral[bottom*stride+left]+integral[top*stride+left];
+        const mean=sum/((Math.min(w,right*4)-left*4)*(Math.min(h,bottom*4)-top*4));
+        const p=(y*w+x)*4;
+        const gray=Math.round(.299*data[p]+.587*data[p+1]+.114*data[p+2]);
+        const value=gray<mean-Math.max(8,mean*(darkest<16?.12:.25))?0:255;
+        data[p]=data[p+1]=data[p+2]=value;
+      }
+    }
+    context.putImageData(image,0,0);
+  }
+  async function renderPhoto(source, edit, decodedImage = null) {
+    const {w, h, cw, ch} = validateEdit(source, edit);
+    const render = async image => {
+      if (image.naturalWidth !== source.width || image.naturalHeight !== source.height) throw fail('invalidPhoto');
+      const factor = Math.min(1, MAX_EDGE / Math.max(cw, ch));
+      const canvas = makeCanvas(Math.max(1, Math.round(cw * factor)), Math.max(1, Math.round(ch * factor)));
+      try {
+        const c = canvas.getContext('2d');
+        c.fillStyle = '#fff'; c.fillRect(0, 0, canvas.width, canvas.height);
+        c.scale(factor, factor); c.translate(-edit.left * w, -edit.top * h);
+        if (edit.quarterTurns === 1) { c.translate(source.height, 0); c.rotate(Math.PI / 2); }
+        else if (edit.quarterTurns === 2) { c.translate(source.width, source.height); c.rotate(Math.PI); }
+        else if (edit.quarterTurns === 3) { c.translate(0, source.width); c.rotate(-Math.PI / 2); }
+        c.drawImage(image, 0, 0);
+        // Deskew only the selected region; no second hidden preprocessing in OCR.
+        const angle = straightenLabel(canvas);
+        if (!angle) rotateExpanded(canvas, 0);
+        const longSide = Math.max(canvas.width, canvas.height);
+        if (longSide < 1500) {
+          const scale = Math.min(2, MAX_EDGE / longSide);
+          const enlarged = makeCanvas(Math.round(canvas.width * scale), Math.round(canvas.height * scale));
+          try {
+            const ec = enlarged.getContext('2d');
+            ec.imageSmoothingEnabled = true; ec.imageSmoothingQuality = 'high';
+            ec.drawImage(canvas, 0, 0, enlarged.width, enlarged.height);
+            resizeCanvas(canvas, enlarged.width, enlarged.height);
+            canvas.getContext('2d').drawImage(enlarged, 0, 0);
+          } finally { freeCanvas(enlarged); }
+        }
+        readablePreview(canvas, Boolean(angle));
+        return await encode(canvas);
+      } finally { freeCanvas(canvas); }
+    };
+    return decodedImage ? render(decodedImage) : withImage(source.blob, render);
+  }
+  async function publish(source, blob, current = () => true) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    if (disposed || !current()) throw fail('canceled');
+    const path = URL.createObjectURL(blob);
+    photos.set(path, {blob, source});
+    return {path, bytes, sourceBytes: source.preview, sourceWidth: source.width, sourceHeight: source.height};
+  }
+  function adopt(file) {
+    return serializedImage(async () => {
+      if (!file || !file.size || !file.type.startsWith('image/')) throw fail('invalidPhoto');
+      if (file.size > 20 * 1024 * 1024) throw fail('tooLarge');
+      const size = dimensions(new Uint8Array(await file.arrayBuffer()));
+      if (Math.min(...size) < 32) throw fail('invalidPhoto');
+      if (size[0] * size[1] > 24000000 || Math.max(...size) > 32768) throw fail('tooLarge');
+      return withImage(file, async image => {
+        const width = image.naturalWidth, height = image.naturalHeight;
+        if (width < 32 || height < 32) throw fail('invalidPhoto');
+        const scale = Math.min(1, 960 / Math.max(width, height));
+        const thumbnail = makeCanvas(Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale)));
+        let source;
+        try {
+          const c = thumbnail.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0,0,thumbnail.width,thumbnail.height);
+          c.drawImage(image,0,0,thumbnail.width,thumbnail.height);
+          const preview = new Uint8Array(await (await encode(thumbnail, 'image/jpeg')).arrayBuffer());
+          source = {blob:file, width, height, preview};
+        } finally { freeCanvas(thumbnail); }
+        const blob = await renderPhoto(source, {left:0, top:0, width:1, height:1, quarterTurns:0}, image);
+        return publish(source, blob);
+      });
+    }).catch(error => { throw error instanceof DOMException && error.name === 'DokuScanError' ? error : fail('invalidPhoto'); });
+  }
+  function edit(path, options) {
+    if (!supported || disposed) return Promise.reject(fail('unsupported'));
+    const photo = photos.get(path);
+    if (!photo) return Promise.reject(fail('invalidPhoto'));
+    try { validateEdit(photo.source, options); } catch (error) { return Promise.reject(error); }
+    const revision = ++editRevision;
+    cancelRecognition();
+    return serializedImage(async () => {
+      const current = () => !disposed && revision === editRevision && photos.has(path);
+      if (!current()) throw fail('canceled');
+      const blob = await renderPhoto(photo.source, options);
+      if (!current()) throw fail('canceled');
+      return publish(photo.source, blob, current);
+    }).catch(error => { throw error instanceof DOMException && error.name === 'DokuScanError' ? error : fail('invalidPhoto'); });
   }
 
   function pick(camera) {
@@ -291,7 +418,12 @@
   }
 
   function release(path) {
-    if (photos.delete(path)) URL.revokeObjectURL(path);
+    if (photos.delete(path)) {
+      URL.revokeObjectURL(path);
+      // Tesseract may retain its last page in WASM memory. End it with the
+      // photo session; successful reads within the session still reuse it.
+      if (!photos.size) { cancelRecognition(); stopWorker(); }
+    }
   }
 
   // Tesseract is a general OCR engine, not a detector of actual fabric labels.
@@ -398,7 +530,7 @@
       }
       loading = false;
       if (job !== current) throw fail('canceled');
-      const result = await worker.recognize(photos.get(path), {}, {text: true});
+      const result = await worker.recognize(photos.get(path).blob, {}, {text: true});
       if (job !== current) throw fail('canceled');
       const text = result.data.text;
       if (text.length > 20000) throw fail('tooMuchText');
@@ -418,17 +550,20 @@
 
   function dispose() {
     disposed = true;
-    cancelSelection(); cancelRecognition(); stopWorker();
+    cancelSelection(); cancelRecognition(); cancelEditing(); stopWorker();
     for (const path of photos.keys()) release(path);
   }
+  globalThis.addEventListener('blur', cancelEditing);
   globalThis.addEventListener('pagehide', event => {
-    if (event.persisted) { cancelSelection(); cancelRecognition(); stopWorker(); }
+    if (event.persisted) { cancelSelection(); cancelRecognition(); cancelEditing(); stopWorker(); }
     else dispose();
   });
   const pickSafe = camera => pick(camera).then(photo => ({photo, code: null}),
     error => ({photo: null, code: error.message || 'invalidPhoto'}));
+  const editSafe = (path, options) => edit(path, options).then(photo => ({photo, code:null}),
+    error => ({photo:null, code:error.message || 'invalidPhoto'}));
   const recognizeSafe = (path, progress) => recognize(path, progress).then(text => ({text, code: null}),
     error => ({text: null, code: error.message || 'recognition'}));
-  globalThis.dokuOcr = Object.freeze({supported, cameraAvailable, pick, recognize, pickSafe, recognizeSafe,
+  globalThis.dokuOcr = Object.freeze({supported, cameraAvailable, pick, recognize, pickSafe, recognizeSafe, edit, editSafe, cancelEditing,
     release, cancelSelection, cancelRecognition, dispose});
 })();

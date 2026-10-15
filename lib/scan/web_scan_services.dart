@@ -1,10 +1,12 @@
 import 'dart:typed_data';
 import 'photo_scan.dart';
+import 'photo_edit.dart';
 
 class BrowserPhoto {
-  BrowserPhoto(this.path, this.bytes);
+  BrowserPhoto(this.path, this.bytes, {this.sourceImage});
   final String path;
   final Uint8List bytes;
+  final PhotoImageSource? sourceImage;
 }
 
 class BrowserScanException implements Exception {
@@ -24,6 +26,11 @@ abstract interface class BrowserScanBridge {
   void dispose();
 }
 
+abstract interface class BrowserImageEditor {
+  Future<BrowserPhoto> editPhoto(String path, PhotoEdit edit);
+  void cancelEditing();
+}
+
 ScanFailure _failure(Object error) => ScanFailure(switch (error) {
   BrowserScanException(code: 'permission') => ScanFailureKind.permission,
   BrowserScanException(code: 'unavailableCamera') =>
@@ -34,11 +41,17 @@ ScanFailure _failure(Object error) => ScanFailure(switch (error) {
   BrowserScanException(code: 'unsupported') => ScanFailureKind.unsupported,
   BrowserScanException(code: 'modelLoad') => ScanFailureKind.modelLoad,
   BrowserScanException(code: 'tooMuchText') => ScanFailureKind.tooMuchText,
+  BrowserScanException(code: 'invalidCrop') => ScanFailureKind.invalidCrop,
   _ => ScanFailureKind.recognition,
 });
 
 class WebPhotoSource
-    implements PhotoSourceService, ScanPresentation, DisposablePhotoSource {
+    implements
+        PhotoSourceService,
+        ScanPresentation,
+        DisposablePhotoSource,
+        PhotoEditingService,
+        CancelablePhotoEditingService {
   WebPhotoSource(this.bridge);
   final BrowserScanBridge bridge;
   @override
@@ -62,7 +75,11 @@ class WebPhotoSource
       final picked = await bridge.pick(source == PhotoSource.camera);
       return picked == null
           ? null
-          : ScanPhoto(path: picked.path, previewBytes: picked.bytes);
+          : ScanPhoto(
+              path: picked.path,
+              previewBytes: picked.bytes,
+              sourceImage: picked.sourceImage,
+            );
     } catch (error) {
       throw _failure(error);
     }
@@ -76,6 +93,27 @@ class WebPhotoSource
   void cancelSelection() => bridge.cancelSelection();
   @override
   void disposePhotos() => bridge.dispose();
+  @override
+  Future<ScanPhoto> editPhoto(ScanPhoto original, PhotoEdit edit) async {
+    if (bridge case final BrowserImageEditor editor) {
+      try {
+        final photo = await editor.editPhoto(original.path, edit);
+        return ScanPhoto(
+          path: photo.path,
+          previewBytes: photo.bytes,
+          sourceImage: photo.sourceImage,
+        );
+      } catch (error) {
+        throw _failure(error);
+      }
+    }
+    throw const ScanFailure(ScanFailureKind.unsupported);
+  }
+
+  @override
+  void cancelPhotoEditing() {
+    if (bridge case final BrowserImageEditor editor) editor.cancelEditing();
+  }
 }
 
 class WebTextRecognizer

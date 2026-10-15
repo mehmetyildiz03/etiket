@@ -238,6 +238,12 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
     }
     stage = 'browser safety scenarios';
     await require('./web_ocr_safety.cjs')(browser, baseUrl, evidence);
+    stage = '9–12 degree edge OCR and expanded bounds';
+    await require('./web_ocr_edge_regression.cjs')(browser, baseUrl, evidence);
+    stage = 'real mobile crop/rotate UI and exact preview OCR';
+    await require('./web_ocr_crop_smoke.cjs')(browser, baseUrl, evidence);
+    stage = 'cropped no-text/year and EXIF orientation';
+    await require('./web_ocr_crop_safety.cjs')(browser, baseUrl, evidence);
   } finally { await browser.close(); }
 })().catch(error => {
   const message = error.stack || String(error);
