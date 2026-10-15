@@ -294,6 +294,26 @@
     if (photos.delete(path)) URL.revokeObjectURL(path);
   }
 
+  // Tesseract is a general OCR engine, not a detector of actual fabric labels.
+  // A wall, weave or shadow can generate confident-looking stray characters.
+  // Require BOTH sufficient model confidence AND independent label evidence.
+  // This only accepts/rejects a proposal: never repairs percentages or fibers.
+  function plausibleLabelText(text, confidence) {
+    if (typeof text !== 'string' || !Number.isFinite(confidence) || confidence < 45) return false;
+    const folded = text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/ı/g, 'i');
+    const hasDigits = /\d/.test(folded);
+    if (!hasDigits) return false;
+    const recognizedFiber = /\b(?:pamuk|cotton|co|polyester|poliester|pes|pet|pl|keten|linen|li|viskon|viskoz|viscose|cv|vi|modal|cmd|liyosel|lyocell|cly|yun|wool|wo|ipek|silk|se|poliamid|polyamide|nylon|naylon|pa|elastan|elastane|spandex|el|ea|akrilik|acrylic|pan|pc|asetat|acetate|ca|kasmir|cashmere|ws|rayon|bamboo|bambu|tencel)\b/i.test(folded);
+    if (recognizedFiber) return true;
+    const heading = /\b(?:shell|lining|outer|astar|dolgu|filling|padding|composition|bilesim|kumas|fabric|material)\b/i.test(folded);
+    const hasWord = /\b[a-z]{4,}\b/.test(folded);
+    // Preserve unfamiliar materials when the photographed label actually has
+    // a meaningful section header or a clearly printed numeric percentage.
+    return (heading && hasWord && confidence >= 55) ||
+      (confidence >= 70 && /\d{1,3}(?:[.,]\d{1,2})?\s*%\s*[a-z]{4,}|[a-z]{4,}\s*\d{1,3}\s*%/i.test(folded));
+  }
+
   async function recognize(path, progress) {
     if (!supported || disposed) throw fail('unsupported');
     if (!photos.has(path)) throw fail('invalidPhoto');
@@ -360,6 +380,7 @@
       if (job !== current) throw fail('canceled');
       const text = result.data.text;
       if (text.length > 20000) throw fail('tooMuchText');
+      if (!plausibleLabelText(text, result.data.confidence)) throw fail('emptyText');
       return text;
     };
     try { return await Promise.race([run(), signal]); }
