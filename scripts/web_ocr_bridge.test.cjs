@@ -86,10 +86,11 @@ test('upload normalizes locally; release/dispose revoke every owned URL', async 
   const s = setup(), photo = await s.upload();
   assert.equal(s.nodes.length, 0);
   assert.equal(s.revoked.length, 1);
-  assert.equal(s.blobs.size, 1);
+  assert.equal(s.blobs.size, 2, 'processed OCR image plus native Safari thumbnail');
+  assert.equal(s.blobs.get(photo.sourcePreviewUrl)?.type, 'image/png');
   assert.ok(photo.bytes instanceof Uint8Array);
   s.bridge.release(photo.path); s.bridge.release(photo.path);
-  assert.equal(s.blobs.size, 0); assert.equal(s.revoked.length, 2);
+  assert.equal(s.blobs.size, 0); assert.equal(s.revoked.length, 3);
   await s.upload(); s.bridge.dispose();
   assert.equal(s.blobs.size, 0);
 });
@@ -251,10 +252,14 @@ test('crop validates original-resolution coordinates and does not allocate on in
   assert.equal(s.canvases.length,allocated);
   const crop=await s.bridge.edit(photo.path,{left:.1,top:.2,width:.3,height:.4,quarterTurns:1});
   assert.equal(crop.sourceWidth,4000);assert.equal(crop.sourceHeight,3000);
+  assert.equal(crop.sourcePreviewUrl, photo.sourcePreviewUrl);
+  assert.ok(s.blobs.has(photo.sourcePreviewUrl), 'shared Safari image stays alive until last crop is released');
   assert.equal(s.imageSources.at(-1),original,'Crop decodes original, never the resized/JPEG derivative');
   await s.bridge.recognize(crop.path,()=>{});
   assert.equal(s.recognizedBlob,s.blobs.get(crop.path),'OCR receives exact approved preview Blob');
-  s.bridge.release(photo.path);s.bridge.release(crop.path);s.bridge.dispose();
+  s.bridge.release(photo.path);
+  assert.ok(s.blobs.has(photo.sourcePreviewUrl), 'source native image lives while derivative is in use');
+  s.bridge.release(crop.path);s.bridge.dispose();
   assert.equal(s.blobs.size,0);assert.ok(s.canvases.every(c=>c.width===0&&c.height===0));
 });
 
@@ -263,7 +268,7 @@ test('latest crop wins; cancel/dispose prevent late URLs and all canvases are cl
   const older=s.bridge.edit(photo.path,{left:0,top:0,width:.7,height:1,quarterTurns:0});
   const first=assert.rejects(older,{message:'canceled'});
   const latest=await s.bridge.edit(photo.path,{left:0,top:0,width:1,height:.6,quarterTurns:2});
-  await first;assert.equal(s.blobs.size,2);
+  await first;assert.equal(s.blobs.size,3);
   const abandoned=s.bridge.edit(photo.path,{left:0,top:0,width:.5,height:1,quarterTurns:3});
   s.bridge.cancelEditing();await assert.rejects(abandoned,{message:'canceled'});
   const pending=s.bridge.edit(photo.path,{left:0,top:0,width:1,height:1,quarterTurns:0});
