@@ -2,6 +2,7 @@ import 'dart:js_interop';
 import 'package:web/web.dart' as web;
 import 'photo_scan.dart';
 import 'web_scan_services.dart';
+import 'photo_edit.dart';
 
 @JS('dokuOcr')
 external _OcrBridge? get _bridge;
@@ -10,6 +11,8 @@ extension type _OcrBridge(JSObject _) implements JSObject {
   external bool get supported;
   external bool get cameraAvailable;
   external JSPromise<_PhotoResult> pickSafe(bool camera);
+  external JSPromise<_PhotoResult> editSafe(String path, _EditOptions options);
+  external void cancelEditing();
   external JSPromise<_TextResult> recognizeSafe(
     String path,
     JSFunction progress,
@@ -33,6 +36,19 @@ extension type _TextResult(JSObject _) implements JSObject {
 extension type _PickedPhoto(JSObject _) implements JSObject {
   external String get path;
   external JSUint8Array get bytes;
+  external JSUint8Array? get sourceBytes;
+  external int? get sourceWidth;
+  external int? get sourceHeight;
+}
+
+extension type _EditOptions._(JSObject _) implements JSObject {
+  external factory _EditOptions({
+    double left,
+    double top,
+    double width,
+    double height,
+    int quarterTurns,
+  });
 }
 
 ({PhotoSourceService photos, TextRecognitionService recognizer})
@@ -44,7 +60,7 @@ createScanServices() {
   );
 }
 
-class _JsBridge implements BrowserScanBridge {
+class _JsBridge implements BrowserScanBridge, BrowserImageEditor {
   @override
   bool get supported => _bridge?.supported ?? false;
   @override
@@ -56,13 +72,48 @@ class _JsBridge implements BrowserScanBridge {
       final result = await _bridge!.pickSafe(camera).toDart;
       if (result.code != null) throw BrowserScanException(result.code!);
       final picked = result.photo;
-      return picked == null
-          ? null
-          : BrowserPhoto(picked.path, picked.bytes.toDart);
+      return picked == null ? null : _photo(picked);
     } catch (error) {
       throw _error(error);
     }
   }
+
+  BrowserPhoto _photo(_PickedPhoto picked) => BrowserPhoto(
+    picked.path,
+    picked.bytes.toDart,
+    sourceImage: picked.sourceBytes == null
+        ? null
+        : PhotoImageSource(
+            width: picked.sourceWidth!,
+            height: picked.sourceHeight!,
+            previewBytes: picked.sourceBytes!.toDart,
+          ),
+  );
+
+  @override
+  Future<BrowserPhoto> editPhoto(String path, PhotoEdit edit) async {
+    try {
+      final result = await _bridge!
+          .editSafe(
+            path,
+            _EditOptions(
+              left: edit.left,
+              top: edit.top,
+              width: edit.width,
+              height: edit.height,
+              quarterTurns: edit.quarterTurns,
+            ),
+          )
+          .toDart;
+      if (result.code != null) throw BrowserScanException(result.code!);
+      return _photo(result.photo!);
+    } catch (error) {
+      throw _error(error);
+    }
+  }
+
+  @override
+  void cancelEditing() => _bridge?.cancelEditing();
 
   @override
   Future<String> recognize(String path, void Function(String) progress) async {

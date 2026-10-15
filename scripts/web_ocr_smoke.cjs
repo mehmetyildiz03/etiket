@@ -176,8 +176,74 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         console.log('PASS angled textile label: printed 80%, 20%, and 100% preserved by real OCR.');
       } finally { await context.close(); }
     }
+    // Verify against the REAL WebAssembly recognizer, not a fake service or
+    // Flutter's lazily exposed off-screen semantics tree.
+    for (const pattern of ['blank', 'woven']) {
+      stage = `reject no-text ${pattern} image`;
+      const context = await browser.newContext({locale: 'tr-TR', viewport: {width: 390, height: 844},
+        isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36'});
+      const page = await context.newPage();
+      try {
+        await page.goto(baseUrl, {waitUntil: 'networkidle'});
+        await page.locator('flt-semantics-placeholder').click({force: true});
+        // Intercept only local image blob URL creation, never any image content or
+        // user data; these fixtures contain no letters or sensitive material.
+        await page.evaluate(() => {
+          const original = URL.createObjectURL.bind(URL);
+          URL.createObjectURL = blob => {
+            const url = original(blob);
+            if (blob.type?.startsWith('image/')) window.__dokuSyntheticPhoto = url;
+            return url;
+          };
+        });
+        const png = await page.evaluate(kind => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 900; canvas.height = 900;
+          const g = canvas.getContext('2d');
+          g.fillStyle = kind === 'blank' ? '#deddd8' : '#b2b0a5';
+          g.fillRect(0, 0, 900, 900);
+          if (kind === 'woven') {
+            for (let y = 0; y < 900; y += 7) {
+              g.strokeStyle = y % 14 === 0 ? '#77766e' : '#a09e94';
+              g.lineWidth = 2; g.beginPath(); g.moveTo(0, y);
+              g.lineTo(900, y + 18); g.stroke();
+            }
+            for (let x = 0; x < 900; x += 7) {
+              g.strokeStyle = x % 14 === 0 ? '#c6c4bb' : '#949187';
+              g.lineWidth = 2; g.beginPath(); g.moveTo(x, 0);
+              g.lineTo(x + 13, 900); g.stroke();
+            }
+          }
+          return canvas.toDataURL('image/png').split(',')[1];
+        }, pattern);
+        const fixturePath = path.join(evidence, `non-text-${pattern}.png`);
+        fs.writeFileSync(fixturePath, Buffer.from(png, 'base64'));
+        await page.getByRole('button', {name: 'Etiket tara', exact: true}).click();
+        const chooser = page.waitForEvent('filechooser');
+        await page.getByRole('button', {name: 'Fotoğraf yükle / galeriden seç', exact: true}).click();
+        await (await chooser).setFiles(fixturePath);
+        await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).waitFor({timeout: 20000});
+        const result = await page.evaluate(async () =>
+          window.dokuOcr.recognizeSafe(window.__dokuSyntheticPhoto, () => {}));
+        console.log(`Synthetic no-text ${pattern} OCR result:`, JSON.stringify(result));
+        assert.equal(result.code, 'emptyText', `No-text ${pattern} photo cannot produce accepted label text`);
+        await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).click();
+        // CanvasKit does not always expose off-screen error Text in the
+        // semantics tree. The visible "Tekrar oku" CTA is the failed stage.
+        await page.getByRole('button', {name: 'Tekrar oku', exact: true}).waitFor({timeout: 120000});
+        assert.equal(await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).count(), 0);
+        assert.equal(await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).count(), 0);
+        console.log(`PASS ${pattern}: no fabricated OCR text offered on a no-text image.`);
+      } finally { await context.close(); }
+    }
     stage = 'browser safety scenarios';
     await require('./web_ocr_safety.cjs')(browser, baseUrl, evidence);
+    stage = '9–12 degree edge OCR and expanded bounds';
+    await require('./web_ocr_edge_regression.cjs')(browser, baseUrl, evidence);
+    stage = 'real mobile crop/rotate UI and exact preview OCR';
+    await require('./web_ocr_crop_smoke.cjs')(browser, baseUrl, evidence);
+    stage = 'cropped no-text/year and EXIF orientation';
+    await require('./web_ocr_crop_safety.cjs')(browser, baseUrl, evidence);
   } finally { await browser.close(); }
 })().catch(error => {
   const message = error.stack || String(error);

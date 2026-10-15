@@ -6,6 +6,8 @@ import 'domain/composition_draft.dart';
 import 'scan/photo_scan.dart';
 import 'scan/scan_services.dart';
 import 'ui/photo_scan_panel.dart';
+import 'ui/photo_crop_editor.dart';
+import 'scan/photo_edit.dart';
 
 void main() => runApp(const EtiketApp());
 
@@ -59,6 +61,8 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   bool _recoveringStartup = true;
   bool _labelFromOcr = false;
   int _labelEditRevision = 0;
+  bool _photoChanged = false;
+  ScanPhoto? _lastScanPhoto;
 
   bool get allValid => draft.canAnalyze;
   Garment get garment => draft.verifiedGarment();
@@ -72,6 +76,13 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     scan.onChanged = () {
       if (!mounted) return;
       setState(() {
+        final current = scan.photo;
+        if (current != null && !identical(current, _lastScanPhoto)) {
+          draft.confirmSource(false);
+          labelProposal = null;
+          _photoChanged = true;
+        }
+        _lastScanPhoto = current;
         if (_recoveringStartup && page == _Page.home &&
             ((scan.stage == ScanStage.preview && scan.photo != null) || scan.stage == ScanStage.failed)) {
           page = _Page.camera;
@@ -140,7 +151,51 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
       labelReturnPage = _Page.camera;
       page = _Page.label;
     });
-    scan.abandon(); // The private photo is no longer needed after explicit handoff.
+    // Keep editable Web originals only for this scan session; native cleanup is unchanged.
+    _photoChanged = false;
+    if (!scan.canEditPhoto) scan.abandon();
+  }
+
+  Future<void> openPhotoEditor() async {
+    if (!scan.beginPhotoEdit()) return;
+    final source = scan.originalPhoto!.sourceImage!;
+    var fallback = 0;
+    await showDialog<void>(
+      context: context,
+      useSafeArea: false,
+      builder: (dialogContext) => Dialog.fullscreen(
+        child: PhotoCropEditor(
+          source: source,
+          initial: scan.appliedEdit ?? const PhotoEdit(),
+          onApply: (edit) async {
+            final applied = await scan.applyPhotoEdit(edit);
+            if (applied && mounted) {
+              setState(() {
+                _photoChanged = true;
+                labelProposal = null;
+                draft.confirmSource(false);
+              });
+            }
+            return applied
+                ? null
+                : (scan.message ??
+                      'Düzenleme iptal edildi. Tekrar deneyebilirsin.');
+          },
+          onPaste: () {
+            fallback = 1;
+            Navigator.pop(dialogContext);
+          },
+          onManual: () {
+            fallback = 2;
+            Navigator.pop(dialogContext);
+          },
+        ),
+      ),
+    );
+    scan.cancelPhotoEdit();
+    if (!mounted) return;
+    if (fallback == 1) openLabel(_Page.camera);
+    if (fallback == 2) navigate(_Page.edit);
   }
 
   Future<void> applyLabel() async {
@@ -187,7 +242,7 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     final cancelRecovery = _recoveringStartup;
     _recoveringStartup = false;
     setState(() => page = target);
-    if (leaveScan || cancelRecovery) scan.abandon();
+    if (leaveScan || cancelRecovery || target == _Page.home) scan.abandon();
   }
   void back() {
     FocusScope.of(context).unfocus();
@@ -280,7 +335,7 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
 
   Widget camera() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     pageTitle('Etiketi tara', 'Etiketi net ve aydınlık çek. Okunan yazıyı kontrol etmeden doğrulamıyoruz.'),
-    PhotoScanPanel(scan: scan, onReview: openOcrLabel,
+    PhotoScanPanel(scan: scan, onReview: openOcrLabel, onEdit: openPhotoEditor,
       onManual: () => navigate(_Page.edit), onPaste: () => openLabel(_Page.camera)),
     const SizedBox(height: 24),
     const Text('DEMO — fotoğraf veya OCR kullanılmaz', style: TextStyle(color: Colors.black54)),
@@ -309,6 +364,8 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
         _labelFromOcr
           ? 'OCR hata yapabilir. Metni etiketle karşılaştırıp düzelt. Ayrıştırma ve açık doğrulama sonraki adımlardır.'
           : 'Metni cihazında ayrıştırırız. Eksik oranları veya belirsiz elyafları tahmin etmeyiz.'),
+      if (_photoChanged) const Padding(padding: EdgeInsets.only(bottom: 12),
+        child: Text('Fotoğraf değişti. Önceki metnin korunuyor; yeni görüntüyü tekrar oku veya metni etiketle karşılaştırarak düzelt.')),
       TextField(
         key: const ValueKey('label-text'),
         controller: labelController,
