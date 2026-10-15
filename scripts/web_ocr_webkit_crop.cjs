@@ -36,7 +36,19 @@ const {webkit} = require('../tool/web_ocr/node_modules/playwright');
       });
       await page.goto(base,{waitUntil:'networkidle'});
       await page.locator('flt-semantics-placeholder').evaluate(e=>e.click());
-      await page.getByRole('button',{name:'Etiket tara',exact:true}).click();
+      // Flutter's semantics tree is lazy on narrow, vertically scrolling
+      // pages. Scroll before querying off-screen buttons, as in crop smoke.
+      async function button(name) {
+        const item=page.getByRole('button',{name,exact:true});
+        for(let i=0;i<36 && (await item.count())===0;i++){
+          await page.mouse.move(200,520);
+          await page.mouse.wheel(0,i<20?260:-220);
+          await page.waitForTimeout(75);
+        }
+        await item.waitFor({timeout:15000});
+        await item.click();
+      }
+      await button('Etiket tara');
       const b64 = await page.evaluate(()=>{
         const c=document.createElement('canvas'); c.width=1200;c.height=1400;
         const g=c.getContext('2d');
@@ -49,9 +61,9 @@ const {webkit} = require('../tool/web_ocr/node_modules/playwright');
         return c.toDataURL('image/png').split(',')[1];
       });
       const chooser=page.waitForEvent('filechooser');
-      await page.getByRole('button',{name:'Fotoğraf yükle / galeriden seç',exact:true}).click();
+      await button('Fotoğraf yükle / galeriden seç');
       await (await chooser).setFiles({name:'webkit-photo.png',mimeType:'image/png',buffer:Buffer.from(b64,'base64')});
-      await page.getByRole('button',{name:'Fotoğrafı düzenle',exact:true}).click();
+      await button('Fotoğrafı düzenle');
       await page.getByText('Orijinal fotoğraf',{exact:true}).waitFor();
       let pixels=0;
       for(let retry=0;retry<12;retry++){
