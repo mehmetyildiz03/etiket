@@ -59,9 +59,11 @@ module.exports = async (browser, baseUrl, evidence) => {
       await (await target('button', name)).click();
       await frame();
     };
+    // Activate the real editing client through keyboard focus. Flutter’s
+    // virtual scroll semantics can reflow while a pointer click is targeting it.
     const input = async (name, value) => {
       const field = await target('textbox', name);
-      await field.click();
+      await field.focus();
       await frame();
       await page.keyboard.press('ControlOrMeta+A');
       await page.keyboard.insertText(value);
@@ -197,7 +199,7 @@ module.exports = async (browser, baseUrl, evidence) => {
       const dragged = {};
       for (const name of ['Genişlik (%)', 'Yükseklik (%)']) {
         const field = await target('textbox', name);
-        await field.click();
+        await field.focus();
         await frame();
         for (let n = 0; n < 40 && !(await field.inputValue()); n++) await page.waitForTimeout(25);
         dragged[name] = Number(await field.inputValue());
@@ -244,7 +246,7 @@ module.exports = async (browser, baseUrl, evidence) => {
       await review.click();
       await frame();
       const field = page.getByRole('textbox', { name: /Etiket metni/ });
-      await field.click();
+      await field.focus();
       await frame();
       const raw = await field.inputValue();
       assert.match(raw, /80\s*%\s*PAMUK/i);
@@ -272,7 +274,7 @@ module.exports = async (browser, baseUrl, evidence) => {
       await button('Metnimi koru');
       await button('Metin yapıştır');
       const corrected = page.getByRole('textbox', { name: /Etiket metni/ });
-      await corrected.click();
+      await corrected.focus();
       await frame();
       for (let n = 0; n < 40 && (await corrected.inputValue()) !== '80% CO 20% PES'; n++)
         await page.waitForTimeout(50);
