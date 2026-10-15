@@ -302,16 +302,38 @@
     if (typeof text !== 'string' || !Number.isFinite(confidence) || confidence < 45) return false;
     const folded = text.normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
       .toLowerCase().replace(/ı/g, 'i');
-    const hasDigits = /\d/.test(folded);
-    if (!hasDigits) return false;
-    const recognizedFiber = /\b(?:pamuk|cotton|co|polyester|poliester|pes|pet|pl|keten|linen|li|viskon|viskoz|viscose|cv|vi|modal|cmd|liyosel|lyocell|cly|yun|wool|wo|ipek|silk|se|poliamid|polyamide|nylon|naylon|pa|elastan|elastane|spandex|el|ea|akrilik|acrylic|pan|pc|asetat|acetate|ca|kasmir|cashmere|ws|rayon|bamboo|bambu|tencel)\b/i.test(folded);
-    if (recognizedFiber) return true;
-    const heading = /\b(?:shell|lining|outer|astar|dolgu|filling|padding|composition|bilesim|kumas|fabric|material|fiber|fibre|elyaf)\b/i.test(folded);
-    const hasWord = /\b[a-z]{4,}\b/.test(folded);
-    // Preserve unfamiliar materials when the photographed label actually has
-    // a meaningful section header or a clearly printed numeric percentage.
-    return (heading && hasWord && confidence >= 55) ||
-      (confidence >= 70 && /\d{1,3}(?:[.,]\d{1,2})?\s*%\s*[a-z]{4,}|[a-z]{4,}\s*\d{1,3}\s*%/i.test(folded));
+    // A year, garment size or care temperature is not a fiber percentage.
+    // Never decide "textile label" merely from one material word plus any digit.
+    const fullFiber = /\b(?:pamuk|cotton|polyester|poliester|keten|linen|viskon|viskoz|viscose|modal|liyosel|lyocell|yun|wool|ipek|silk|poliamid|polyamide|nylon|naylon|elastan|elastane|spandex|akrilik|acrylic|asetat|acetate|kasmir|cashmere|rayon|bamboo|bambu|tencel)\b/i;
+    const shortFiber = /\b(?:co|pes|pet|pl|li|cv|vi|cmd|cly|wo|se|pa|el|ea|pan|pc|ca|ws)\b/i;
+    const section = /\b(?:shell|lining|outer|astar|dolgu|filling|padding|composition|bilesim|kumas|fabric|material|fiber|fibre|elyaf)\b/i;
+    // Genuine labels can have % before OR after a number, and OCR sometimes
+    // replaces one number glyph with O/I. Preserve the raw text for review.
+    const markedRatio = /(?:[%％]\s*[0-9OoIl?]{1,3}|[0-9OoIl?]{1,3}(?:[.,]\d{1,2})?\s*[%％])/i;
+    if (markedRatio.test(folded)) {
+      const known = fullFiber.test(folded) || shortFiber.test(folded);
+      const meaningfulWord = /\b[a-z]{4,}\b/.test(folded);
+      // Unknown fibers remain reviewable if a section context or recognizable
+      // percentage + material name exists. Nothing is automatically verified.
+      return known || (meaningfulWord && (section.test(folded) ||
+        /(?:[%％]\s*[0-9OoIl?]{1,3}|[0-9OoIl?]{1,3}\s*[%％])\s*[a-z]{4,}|\b[a-z]{4,}\s*[0-9OoIl?]{1,3}\s*[%％]/i.test(folded)));
+    }
+    // A clearly printed percentage marker may disappear from OCR. Allow a
+    // number (1..100) alongside the FULL fiber name, but never a 4-digit year,
+    // care temperature, or ambiguous two-letter abbreviation.
+    if (confidence < 65 || /\b(?:wash|washing|yikama|care|iron|bleach|tumble)\b/i.test(folded)) return false;
+    const cleanLines = folded.split(/[\r\n]+/);
+    const number = /\b(?:100|[1-9]\d?|0[1-9])(?:[.,]\d{1,2})?\b/g;
+    for (const line of cleanLines) {
+      if (!fullFiber.test(line)) continue;
+      for (const match of line.matchAll(number)) {
+        if (/[°℃]/.test(line.slice(Math.max(0, match.index - 4), match.index + match[0].length + 5))) continue;
+        if (fullFiber.test(line.slice(Math.max(0, match.index - 24), match.index + match[0].length + 24))) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   async function recognize(path, progress) {
