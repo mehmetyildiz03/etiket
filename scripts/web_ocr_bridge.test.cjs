@@ -12,7 +12,7 @@ function png(width = 800, height = 600) {
 }
 function setup({mobile = false, secure = true, supported = true} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
-  let options, initialized = 0, decoded = 0, creation, result = 'Dış kumaş\n70% Pamuk\n30% Polyester';
+  let options, initialized = 0, decoded = 0, creation, confidence = 93, result = 'Dış kumaş\n70% Pamuk\n30% Polyester';
   class Input {
     events = {}; files = [];
     setAttribute(key, value) { this[key] = value; }
@@ -51,7 +51,7 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
       assert.equal(oem, 1);
       if (creation) await creation;
       return {setParameters: async () => {},
-        recognize: async () => { options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: result}}; },
+        recognize: async () => { options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: result, confidence}}; },
         terminate: async () => { raw.terminate(); }};
     }}
   });
@@ -60,6 +60,7 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
   return {bridge, context, nodes, revoked, blobs, workers, listeners, optionsHistory,
     get decoded() { return decoded; }, get initialized() { return initialized; }, get options() { return options; },
     set creation(value) { creation = value; }, set result(value) { result = value; },
+    set confidence(value) { confidence = value; },
     async upload(file = png()) {
       const picking = bridge.pick(false);
       nodes[0].files = [file];
@@ -189,5 +190,34 @@ test('a canceled worker cannot report progress or terminate a newer worker', asy
   assert.equal(progress.length, previousCount + 1); // Only the NEW OCR's %50.
   assert.match(result.text, /Pamuk/);
   assert.equal(s.workers[1].stopped, undefined);
+  s.bridge.dispose();
+});
+
+// OCR can hallucinate plausible letters on fabric texture, shadows or a blank wall.
+// The scanner must not present those as verified textile-label text.
+test('empty, texture-like and random high-confidence OCR is rejected as unreadable', async () => {
+  const s = setup(), photo = await s.upload();
+  for (const [text, confidence] of [
+    ['', 0], ['  -  .  / ', 90], ['ooee II ii 4', 24],
+    ['QZPJL\nYYNMEZ\nOUIO', 96], ['70% cotton', 18],
+  ]) {
+    s.result = text; s.confidence = confidence;
+    await assert.rejects(s.bridge.recognize(photo.path, () => {}), {message: 'emptyText'});
+  }
+  s.bridge.dispose();
+});
+
+test('legible fiber labels, abbreviations and clearly marked unknown fiber survive quality checks', async () => {
+  const s = setup(), photo = await s.upload();
+  for (const [text, confidence] of [
+    ['80% Pamuk\\n20% Polyester', 72],
+    ['100% CO', 84],
+    ['Lining: Viscose 100%', 64],
+    ['Shell: 70% UnknownFiber', 81],
+    ['80 PAMUK\\n20 POLYESTER', 69], // OCR may miss percent signs; never guess them.
+  ]) {
+    s.result = text; s.confidence = confidence;
+    assert.equal(await s.bridge.recognize(photo.path, () => {}), text);
+  }
   s.bridge.dispose();
 });
