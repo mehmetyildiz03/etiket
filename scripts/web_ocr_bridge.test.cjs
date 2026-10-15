@@ -12,7 +12,7 @@ function png(width = 800, height = 600) {
 }
 function setup({mobile = false, secure = true, supported = true} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
-  let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester';
+  let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, mode = '6', recognizes = 0;
   const canvases = [], imageSources = [];
   class Input {
     events = {}; files = [];
@@ -60,8 +60,8 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
       assert.deepEqual(Array.from(langs), ['tur', 'eng']);
       assert.equal(oem, 1);
       if (creation) await creation;
-      return {setParameters: async () => {},
-        recognize: async image => { recognizedBlob = image; options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: result, confidence}}; },
+      return {setParameters: async params => { if (params.tessedit_pageseg_mode) mode = String(params.tessedit_pageseg_mode); },
+        recognize: async image => { recognizes++; recognizedBlob = image; options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: mode === '11' && secondText !== null ? secondText : result, confidence: mode === '11' && secondConfidence !== null ? secondConfidence : confidence}}; },
         terminate: async () => { raw.terminate(); }};
     }}
   });
@@ -70,8 +70,10 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
   return {bridge, context, nodes, revoked, blobs, workers, listeners, optionsHistory, canvases, imageSources,
     get recognizedBlob() { return recognizedBlob; },
     get decoded() { return decoded; }, get initialized() { return initialized; }, get options() { return options; },
-    set creation(value) { creation = value; }, set result(value) { result = value; },
+    set creation(value) { creation = value; }, get result() { return result; }, set result(value) { result = value; },
     set confidence(value) { confidence = value; },
+    get secondText() { return secondText; }, set secondText(value) { secondText = value; }, set secondConfidence(value) { secondConfidence = value; },
+    get recognizes() { return recognizes; }, get mode() { return mode; },
     async upload(file = png()) {
       const picking = bridge.pick(false);
       nodes[0].files = [file];
@@ -300,7 +302,7 @@ test('diagnostics retain readable non-composition text instead of reporting a bl
   const result=await s.bridge.recognizeSafe(photo.path,()=>{});
   assert.equal(result.text,null);assert.equal(result.code,'emptyText'); // Legacy contract stays compatible.
   assert.deepEqual(JSON.parse(JSON.stringify(result.observation)),{
-    rawText:'PLEASE CLOSE THE DOOR\n',confidence:94,decision:'noComposition',acceptedText:null
+    rawText:'PLEASE CLOSE THE DOOR\n',confidence:94,decision:'noComposition',acceptedText:null,secondReading:null
   });
   s.bridge.dispose();
 });
@@ -323,5 +325,38 @@ test('no text, low confidence and label proposal are independent engine observat
   s.result='x'.repeat(20001);
   const oversized=await s.bridge.recognizeSafe(photo.path,()=>{});
   assert.equal(oversized.code,'tooMuchText');assert.equal(oversized.observation,null);
+  s.bridge.dispose();
+});
+
+test('weak candidate obtains an independent sparse-text second reading without replacing original', async () => {
+  const s = setup(), p = await s.upload();
+  s.result = 'OF 0% Polyester\\n% 40% (Cotton >';
+  s.confidence = 48;
+  s.secondText = '60% Polyester\\n40% Cotton';
+  s.secondConfidence = 72;
+  const response = await s.bridge.recognizeSafe(p.path, () => {});
+  assert.equal(response.text, s.result, 'never silently replace potentially incorrect percentage');
+  assert.equal(response.observation.rawText, s.result);
+  assert.equal(response.observation.confidence, 48);
+  assert.equal(response.observation.secondReading.rawText, s.secondText);
+  assert.equal(response.observation.secondReading.confidence, 72);
+  assert.equal(s.recognizes, 2);
+  assert.equal(s.mode, '6', 'restore ordinary reading mode for the next photo');
+  s.confidence = 95;
+  s.result = '80% PAMUK';
+  const strong = await s.bridge.recognizeSafe(p.path, () => {});
+  assert.equal(strong.observation.secondReading, null);
+  assert.equal(s.recognizes, 3, 'high confidence avoids a second OCR pass');
+  s.bridge.dispose();
+});
+
+test('weak alternate with invented or empty text is never promoted to accepted OCR', async () => {
+  const s = setup(), p = await s.upload();
+  s.result = '0% Polyester'; s.confidence = 50;
+  s.secondText = 'NOISE'; s.secondConfidence = 99;
+  const output = await s.bridge.recognizeSafe(p.path, () => {});
+  assert.equal(output.text, '0% Polyester');
+  assert.equal(output.observation.secondReading.rawText, 'NOISE');
+  assert.equal(output.observation.secondReading.confidence, 99);
   s.bridge.dispose();
 });

@@ -40,6 +40,13 @@ extension type _Observation(JSObject _) implements JSObject {
   external double? get confidence;
   external String get decision;
   external String? get acceptedText;
+  external _SecondReading? get secondReading;
+}
+
+extension type _SecondReading(JSObject _) implements JSObject {
+  external String get rawText;
+  external double? get confidence;
+  external String get mode;
 }
 
 extension type _PickedPhoto(JSObject _) implements JSObject {
@@ -167,10 +174,19 @@ class _JsBridge
         'candidate' => OcrDecision.candidate,
         _ => throw const BrowserScanException('recognition'),
       };
+      final second = evidence.secondReading;
+      if (second != null && (decision != OcrDecision.candidate ||
+          second.mode != 'sparseText')) {
+        throw const BrowserScanException('recognition');
+      }
       final observation = OcrObservation(
         rawText: evidence.rawText,
         confidence: evidence.confidence,
         decision: decision,
+        secondReading: second == null ? null : OcrSecondReading(
+          rawText: second.rawText,
+          confidence: second.confidence,
+        ),
       );
       if (observation.acceptedText != result.text ||
           observation.acceptedText != evidence.acceptedText ||

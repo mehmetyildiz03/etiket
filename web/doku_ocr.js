@@ -479,7 +479,7 @@
     else if (plausibleLabelText(rawText, 100)) decision = 'lowConfidence';
     else decision = 'noComposition';
     return Object.freeze({rawText, confidence, decision,
-      acceptedText: decision === 'candidate' ? rawText : null});
+      acceptedText: decision === 'candidate' ? rawText : null, secondReading: null});
   }
 
   async function readObservation(path, progress) {
@@ -550,8 +550,42 @@
       if (typeof text !== 'string') throw fail('recognition');
       if (text.length > 20000) throw fail('tooMuchText');
       const observation = observationFor(text, result.data.confidence);
+      // A marginally accepted label can contain destructive OCR substitutions
+      // (e.g., "0%" instead of "60%"). Run one INDEPENDENT sparse-text pass.
+      // Do not combine, score using expected sums, or silently replace either
+      // percentage. The alternative is *only* shown in opt-in diagnostics.
+      let secondReading = null;
+      if (observation.decision === 'candidate' && observation.confidence < 65) {
+        try {
+          await worker.setParameters({tessedit_pageseg_mode: '11'});
+          if (job !== current) throw fail('canceled');
+          const second = await worker.recognize(photos.get(path).blob, {}, {text:true});
+          if (job !== current) throw fail('canceled');
+          const secondText = second.data.text;
+          const secondScore = second.data.confidence;
+          if (typeof secondText === 'string' && secondText.trim() &&
+              secondText !== text && secondText.length <= 20000) {
+            secondReading = Object.freeze({
+              rawText: secondText,
+              confidence: Number.isFinite(secondScore) && secondScore >= 0 && secondScore <= 100
+                ? secondScore : null,
+              mode: 'sparseText'
+            });
+          }
+        } catch (error) {
+          if (job !== current) throw fail('canceled');
+          // OCR alternatives are best-effort. Never suppress a first-pass
+          // result if switching the secondary page segmentation fails.
+          stopWorker();
+        } finally {
+          if (worker && job === current) {
+            try { await worker.setParameters({tessedit_pageseg_mode: '6'}); }
+            catch (_) { stopWorker(); }
+          }
+        }
+      }
       if (observation.decision !== 'candidate') stopWorker();
-      return observation;
+      return Object.freeze({...observation, secondReading});
     };
     try { return await Promise.race([run(), signal]); }
     catch (error) {
