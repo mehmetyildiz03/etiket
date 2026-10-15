@@ -70,9 +70,9 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
   return {bridge, context, nodes, revoked, blobs, workers, listeners, optionsHistory, canvases, imageSources,
     get recognizedBlob() { return recognizedBlob; },
     get decoded() { return decoded; }, get initialized() { return initialized; }, get options() { return options; },
-    set creation(value) { creation = value; }, set result(value) { result = value; },
+    set creation(value) { creation = value; }, get result() { return result; }, set result(value) { result = value; },
     set confidence(value) { confidence = value; },
-    set secondText(value) { secondText = value; }, set secondConfidence(value) { secondConfidence = value; },
+    get secondText() { return secondText; }, set secondText(value) { secondText = value; }, set secondConfidence(value) { secondConfidence = value; },
     get recognizes() { return recognizes; }, get mode() { return mode; },
     async upload(file = png()) {
       const picking = bridge.pick(false);
