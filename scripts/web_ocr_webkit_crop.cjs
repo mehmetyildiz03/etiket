@@ -20,6 +20,20 @@ const {webkit} = require('../tool/web_ocr/node_modules/playwright');
     const pageErrors=[];
     page.on('pageerror',e=>pageErrors.push(e.message));
     try {
+      // Reproduce the iPhone report deterministically: the OCR processing
+      // bytes stay intact, while ONLY the Flutter original-thumb byte buffer
+      // is corrupted. Safari's Blob URL still contains the genuine pixels.
+      // This must exercise the browser-native image fallback, not merely a
+      // working primary Flutter Image.memory path.
+      await page.route('**/doku_ocr.js', async route=>{
+        const response=await route.fetch();
+        let source=await response.text();
+        const marker='const pickSafe = camera => pick(camera).then(photo => ({photo, code: null}),';
+        assert.ok(source.includes(marker),'Expected pickSafe bridge marker');
+        source=source.replace(marker,
+          'const pickSafe = camera => pick(camera).then(photo => { if(photo) photo.sourceBytes = new Uint8Array([0,1,2,3]); return {photo, code:null}; },');
+        await route.fulfill({response,body:source});
+      });
       await page.goto(base,{waitUntil:'networkidle'});
       await page.locator('flt-semantics-placeholder').evaluate(e=>e.click());
       await page.getByRole('button',{name:'Etiket tara',exact:true}).click();
@@ -63,7 +77,7 @@ const {webkit} = require('../tool/web_ocr/node_modules/playwright');
       assert.ok(pixels>100,'WebKit crop must show ACTUAL source photo pixels, count='+pixels);
       assert.equal(await page.getByText(/Orijinal fotoğraf gösterilemedi/).count(),0);
       assert.deepEqual(pageErrors,[]);
-      console.log('PASS WebKit 390dp: photo is genuinely visible in crop editor ('+pixels+' violet pixels)');
+      console.log('PASS WebKit 390dp: intentionally corrupted Flutter source bytes, native Safari fallback visibly paints original photo ('+pixels+' violet pixels)');
     }finally{await context.close();}
   }finally{await browser.close();}
 })().catch(e=>{console.error('::error title=WebKit crop visible::',e);process.exitCode=1;});
