@@ -21,9 +21,7 @@ if (!synthetic && outIndex < 0) throw new Error('Private run requires --out OUTS
 const dest = outIndex >= 0
   ? path.resolve(process.argv[outIndex + 1])
   : path.resolve('build/web-ocr-evidence/benchmark-synthetic');
-if (!synthetic && (dest.startsWith(path.resolve('build') + path.sep) ||
-    dest.startsWith(path.resolve('.github') + path.sep) ||
-    dest.startsWith(path.resolve('web') + path.sep))) {
+if (!synthetic && (dest === process.cwd() || dest.startsWith(process.cwd() + path.sep))) {
   throw new Error('Private OCR/GT report must stay outside repo build/artifact directories');
 }
 fs.mkdirSync(dest, {recursive:true});
@@ -154,8 +152,10 @@ async function main() {
       const metrics=scoreCase(f,{text:output.text,code:output.code,
         rawText:raw?.rawText||'',elapsedMs:Date.now()-start});
       // Only synthetic data enters CI artifacts; private GT stays in chosen local output.
+      // Full, sensitive transcriptions are stored only in the explicitly
+      // chosen LOCAL private report; CI always runs with synthetic fixtures.
       results.push({...metrics,group:f.group||'unknown',split:f.split||'synthetic',
-        ...(synthetic?{groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||''}: {})});
+        groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||''});
       await page.evaluate(([source,derived])=>{
         dokuOcr.release(source);
         if(derived!==source)dokuOcr.release(derived);
@@ -181,40 +181,30 @@ async function main() {
       aggregate,byGroup,results};
     fs.writeFileSync(path.join(dest,'report.json'),JSON.stringify(report,null,2));
     const asPct=n=>n==null?'n/a':(n*100).toFixed(1)+'%';
+    const pairs=[
+      ['Positive images',aggregate.positiveCount],
+      ['Negative images',aggregate.negativeCount],
+      ['CER (accepted result incl. rejects)',asPct(aggregate.cer)],
+      ['WER (accepted result incl. rejects)',asPct(aggregate.wer)],
+      ['Raw Tesseract CER',asPct(aggregate.rawCer)],
+      ['Raw Tesseract WER',asPct(aggregate.rawWer)],
+      ['Exact percent/fiber pair recall',asPct(aggregate.pairExactRecall)],
+      ['Fully correct compositions',asPct(aggregate.fullyCorrectCompositionRate)],
+      ['False reject rate',asPct(aggregate.falseRejectRate)],
+      ['False accept rate',asPct(aggregate.falseAcceptRate)],
+      ['Median latency',aggregate.p50Ms==null?'n/a':aggregate.p50Ms+' ms'],
+      ['p95 latency',aggregate.p95Ms==null?'n/a':aggregate.p95Ms+' ms']
+    ];
     const table=[
       '# Doku OCR benchmark — '+(synthetic?'SYNTHETIC ONLY':'PRIVATE REAL DATA'),
       '',
-      'This is not an app acceptance test, only measured OCR quality against fixed truth.',
-      synthetic?'**Real-label sample count: 0. Real-world accuracy: NOT MEASURED.**':
-        '**Private evaluation — do not upload images or transcriptions to a public repo.**',
+      'Numbers are OCR fidelity against explicit ground truth, not app smoke-test pass rates.',
+      synthetic?'**Real-label sample count: 0; real OCR accuracy: NOT MEASURED.**':
+        '**Sensitive local report; do not upload images/transcriptions publicly.**',
       '',
       '| Metric | Value |','|---|---:|',
-      ['Positive images',aggregate.positiveCount],
-      ['Negative images',aggregate.negativeCount],
-      ['CER (accepted output incl. rejects)',asPct(aggregate.cer)],
-      ['WER (accepted output incl. rejects)',asPct(aggregate.wer)],
-      ['Raw engine CER',asPct(aggregate.rawCer)],
-      ['Exact percent-fiber pair recall',asPct(aggregate.pairExactRecall)],
-      ['Fully correct composition (all expected pairs)',asPct(aggregate.fullyCorrectCompositionRate)],
-      ['False reject (real positive images)',asPct(aggregate.falseRejectRate)],
-      ['False accept (negative images)',asPct(aggregate.falseAcceptRate)],
-      ['Median latency',aggregate.p50Ms==null?'n/a':aggregate.p50Ms+' ms'],
-      ['p95 latency',aggregate.p95Ms==null?'n/a':aggregate.p95Ms+' ms']
-    ].slice(0,7).concat([
-      ...[
-        ['Positive images',aggregate.positiveCount],
-        ['Negative images',aggregate.negativeCount],
-        ['CER (accepted output incl. rejects)',asPct(aggregate.cer)],
-        ['WER (accepted output incl. rejects)',asPct(aggregate.wer)],
-        ['Raw engine CER',asPct(aggregate.rawCer)],
-        ['Exact percent-fiber pair recall',asPct(aggregate.pairExactRecall)],
-        ['Fully correct composition',asPct(aggregate.fullyCorrectCompositionRate)],
-        ['False reject',asPct(aggregate.falseRejectRate)],
-        ['False accept',asPct(aggregate.falseAcceptRate)],
-        ['Median latency',aggregate.p50Ms==null?'n/a':aggregate.p50Ms+' ms'],
-        ['p95 latency',aggregate.p95Ms==null?'n/a':aggregate.p95Ms+' ms']
-      ].map(([k,v])=>'| '+k+' | '+v+' |')
-    ]);
+      ...pairs.map(([key,value])=>'| '+key+' | '+value+' |')
+    ];
     fs.writeFileSync(path.join(dest,'report.md'),table.join('\n')+'\n');
     console.log('BENCHMARK '+(synthetic?'SYNTHETIC ONLY':'PRIVATE')+' SUMMARY '+JSON.stringify(aggregate));
   } finally {
