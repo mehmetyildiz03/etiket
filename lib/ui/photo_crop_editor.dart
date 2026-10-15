@@ -30,6 +30,7 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
   String? error;
   bool busy = false;
   bool closing = false;
+  bool previewFailed = false;
   int pointers = 0;
   bool multiplePointers = false;
   Offset? anchor;
@@ -108,6 +109,10 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
   }
 
   Future<void> apply() async {
+    if (previewFailed) {
+      setState(() => error = 'Orijinal fotoğraf gösterilemiyor. Başka fotoğraf seç.');
+      return;
+    }
     final value = readFields();
     if (value == null ||
         !value.isValidFor(widget.source.width, widget.source.height)) {
@@ -162,7 +167,9 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
             label: 'Etiket kırpma alanı',
             child: SizedBox(
               key: const ValueKey('crop-canvas'),
-              height: MediaQuery.viewInsetsOf(context).bottom > 0 ? 180 : 280,
+              height: MediaQuery.viewInsetsOf(context).bottom > 0
+                  ? 180
+                  : math.min(440, MediaQuery.sizeOf(context).height * .48),
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   final ratio = edit.quarterTurns.isEven
@@ -273,7 +280,13 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
                               fit: BoxFit.fill,
                               semanticLabel: 'Orijinal etiket fotoğrafı',
                               // Never leave a blank crop canvas on decode errors.
-                              errorBuilder: (context, error, stack) => Center(
+                              errorBuilder: (context, error, stack) {
+                                WidgetsBinding.instance.addPostFrameCallback((_) {
+                                  if (mounted && !previewFailed) {
+                                    setState(() => previewFailed = true);
+                                  }
+                                });
+                                return Center(
                                 child: Semantics(
                                   liveRegion: true,
                                   child: Text(
@@ -287,7 +300,8 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
                                     ),
                                   ),
                                 ),
-                              ),
+                              );
+                              },
                             ),
                           ),
                         ),
@@ -516,7 +530,7 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
           ],
           const SizedBox(height: 12),
           FilledButton(
-            onPressed: busy ? null : apply,
+            onPressed: busy || previewFailed ? null : apply,
             child: const Text('Kırpmayı uygula'),
           ),
           TextButton(
