@@ -176,8 +176,8 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         console.log('PASS angled textile label: printed 80%, 20%, and 100% preserved by real OCR.');
       } finally { await context.close(); }
     }
-    // No-text images can produce plausible-looking OCR hallucinations.
-    // Reject them rather than offering the fabricated text for verification.
+    // Verify against the REAL WebAssembly recognizer, not a fake service or
+    // Flutter's lazily exposed off-screen semantics tree.
     for (const pattern of ['blank', 'woven']) {
       stage = `reject no-text ${pattern} image`;
       const context = await browser.newContext({locale: 'tr-TR', viewport: {width: 390, height: 844},
@@ -186,6 +186,16 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
       try {
         await page.goto(baseUrl, {waitUntil: 'networkidle'});
         await page.locator('flt-semantics-placeholder').click({force: true});
+        // Intercept only local image blob URL creation, never any image content or
+        // user data; these fixtures contain no letters or sensitive material.
+        await page.evaluate(() => {
+          const original = URL.createObjectURL.bind(URL);
+          URL.createObjectURL = blob => {
+            const url = original(blob);
+            if (blob.type?.startsWith('image/')) window.__dokuSyntheticPhoto = url;
+            return url;
+          };
+        });
         const png = await page.evaluate(kind => {
           const canvas = document.createElement('canvas');
           canvas.width = 900; canvas.height = 900;
@@ -212,23 +222,14 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         const chooser = page.waitForEvent('filechooser');
         await page.getByRole('button', {name: 'Fotoğraf yükle / galeriden seç', exact: true}).click();
         await (await chooser).setFiles(fixturePath);
+        await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).waitFor({timeout: 20000});
+        const result = await page.evaluate(async () =>
+          window.dokuOcr.recognizeSafe(window.__dokuSyntheticPhoto, () => {}));
+        console.log(`Synthetic no-text ${pattern} OCR result:`, JSON.stringify(result));
+        assert.equal(result.code, 'emptyText', `No-text ${pattern} photo cannot produce accepted label text`);
         await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).click();
-        const warning = page.getByText(/Fotoğrafta okunabilir yazı bulunamadı/);
-        const review = page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true});
-        for (let i = 0; i < 90 && !(await warning.count()) && !(await review.count()); i++) {
-          await page.waitForTimeout(500);
-        }
-        if (await review.count()) {
-          await review.click();
-          const field = page.getByRole('textbox', {name: /Etiket metni/});
-          await field.click(); await page.waitForTimeout(150);
-          const syntheticRaw = await field.inputValue();
-          console.log(`Non-text ${pattern} generated unwanted OCR:`, JSON.stringify(syntheticRaw));
-          fs.writeFileSync(path.join(evidence, `non-text-${pattern}-raw.txt`), syntheticRaw);
-        }
-        console.log(`Non-text ${pattern} UI:`, (await page.locator('body').innerText()).slice(-1800));
-        assert.ok(await warning.count(), 'No-text image must show unreadable-label warning, not any fabricated text');
-        assert.equal(await review.count(), 0);
+        await page.getByText(/Fotoğrafta okunabilir yazı bulunamadı/).waitFor({timeout: 30000});
+        assert.equal(await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).count(), 0);
         console.log(`PASS ${pattern}: no fabricated OCR text offered on a no-text image.`);
       } finally { await context.close(); }
     }
