@@ -388,4 +388,41 @@ void main() {
       bridge.result.rawText,
     );
   });
+
+  testWidgets('secondary OCR remains opt-in and never replaces a mistaken first percentage', (tester) async {
+    bridge.result = OcrObservation(
+      rawText: 'OF 0% Polyester\\n% 40% Cotton',
+      confidence: 48,
+      decision: OcrDecision.candidate,
+      secondReading: OcrSecondReading(
+        rawText: '60% Polyester\\n40% Cotton',
+        confidence: 72,
+      ),
+    );
+    await tester.pumpWidget(
+      EtiketApp(photoSource: photos, textRecognizer: WebTextRecognizer(bridge)),
+    );
+    await tester.pumpAndSettle();
+    await tapText(tester, 'Etiket tara');
+    await tapText(tester, 'Galeriden seç');
+    await tapText(tester, 'Fotoğraftaki metni oku');
+    expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsNothing);
+    expect(scan.text, bridge.result.rawText);
+    await tapText(tester, showRaw);
+    expect(find.textContaining('İkinci OCR denemesi'), findsOneWidget);
+    expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsOneWidget);
+    expect(
+      tester.widget<SelectableText>(
+        find.byKey(const ValueKey('second-ocr-diagnostic')),
+      ).data,
+      '60% Polyester\\n40% Cotton',
+    );
+    expect(scan.text, 'OF 0% Polyester\\n% 40% Cotton',
+      reason: 'never silently replace first reading with alternative');
+    await tapText(tester, 'Metni incele ve düzelt');
+    final field = find.byKey(const ValueKey('label-text'));
+    expect(tester.widget<TextField>(field).controller!.text,
+      'OF 0% Polyester\\n% 40% Cotton');
+    expect(scan.observation, isNull);
+  });
 }
