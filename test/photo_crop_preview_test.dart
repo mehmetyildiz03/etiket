@@ -38,12 +38,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Orijinal fotoğraf gösterilemedi'), findsOneWidget);
     expect(find.byKey(const ValueKey('crop-preview-error')), findsOneWidget);
-    await tester.scrollUntilVisible(
-      find.text('Kırpmayı uygula'),
-      220,
-      scrollable: find.byType(Scrollable).first,
-    );
+    // ListView builds the apply button lazily. Drag the viewport first,
+    // then inspect the button state; do not assume off-screen children exist.
+    await tester.drag(find.byType(ListView), const Offset(0, -650));
     await tester.pumpAndSettle();
+    if (find.text('Kırpmayı uygula').evaluate().isEmpty) {
+      await tester.drag(find.byType(ListView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+    }
     expect(find.text('Kırpmayı uygula'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull,
       reason: 'cannot crop an original image that did not decode');
