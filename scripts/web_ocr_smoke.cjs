@@ -176,6 +176,48 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         console.log('PASS angled textile label: printed 80%, 20%, and 100% preserved by real OCR.');
       } finally { await context.close(); }
     }
+    // No-text images can produce plausible-looking OCR hallucinations.
+    // Reject them rather than offering the fabricated text for verification.
+    for (const pattern of ['blank', 'woven']) {
+      stage = `reject no-text ${pattern} image`;
+      const context = await browser.newContext({locale: 'tr-TR', viewport: {width: 390, height: 844},
+        isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36'});
+      const page = await context.newPage();
+      try {
+        await page.goto(baseUrl, {waitUntil: 'networkidle'});
+        await page.locator('flt-semantics-placeholder').click({force: true});
+        const png = await page.evaluate(kind => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 900; canvas.height = 900;
+          const g = canvas.getContext('2d');
+          g.fillStyle = kind === 'blank' ? '#deddd8' : '#b2b0a5';
+          g.fillRect(0, 0, 900, 900);
+          if (kind === 'woven') {
+            for (let y = 0; y < 900; y += 7) {
+              g.strokeStyle = y % 14 === 0 ? '#77766e' : '#a09e94';
+              g.lineWidth = 2; g.beginPath(); g.moveTo(0, y);
+              g.lineTo(900, y + 18); g.stroke();
+            }
+            for (let x = 0; x < 900; x += 7) {
+              g.strokeStyle = x % 14 === 0 ? '#c6c4bb' : '#949187';
+              g.lineWidth = 2; g.beginPath(); g.moveTo(x, 0);
+              g.lineTo(x + 13, 900); g.stroke();
+            }
+          }
+          return canvas.toDataURL('image/png').split(',')[1];
+        }, pattern);
+        const fixturePath = path.join(evidence, `non-text-${pattern}.png`);
+        fs.writeFileSync(fixturePath, Buffer.from(png, 'base64'));
+        await page.getByRole('button', {name: 'Etiket tara', exact: true}).click();
+        const chooser = page.waitForEvent('filechooser');
+        await page.getByRole('button', {name: 'Fotoğraf yükle / galeriden seç', exact: true}).click();
+        await (await chooser).setFiles(fixturePath);
+        await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).click();
+        await page.getByText(/Fotoğrafta okunabilir yazı bulunamadı/).waitFor({timeout: 120000});
+        assert.equal(await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).count(), 0);
+        console.log(`PASS ${pattern}: no fabricated OCR text offered on a no-text image.`);
+      } finally { await context.close(); }
+    }
     stage = 'browser safety scenarios';
     await require('./web_ocr_safety.cjs')(browser, baseUrl, evidence);
   } finally { await browser.close(); }
