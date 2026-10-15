@@ -48,7 +48,7 @@ jobs:
       - name: Build web for GitHub Pages project path
         run: flutter build web --release --base-href=/etiket/
       - name: Install Chromium for real OCR verification
-        run: tool/web_ocr/node_modules/.bin/playwright install --with-deps chromium
+        run: tool/web_ocr/node_modules/.bin/playwright install --with-deps chromium webkit
       - name: Read a synthetic label in the compiled browser app
         env:
           OCR_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -59,6 +59,7 @@ jobs:
           SERVER_PID=$!
           trap 'kill "$SERVER_PID"' EXIT
           node scripts/web_ocr_smoke.cjs http://127.0.0.1:8082/etiket/
+          node scripts/web_ocr_webkit_crop.cjs http://127.0.0.1:8082/etiket/
           node scripts/web_ocr_benchmark.cjs http://127.0.0.1:8082/etiket/ --synthetic
           node scripts/web_ocr_roi_matrix.cjs http://127.0.0.1:8082/etiket/
       - name: Upload browser OCR evidence
