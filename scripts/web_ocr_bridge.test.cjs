@@ -302,7 +302,7 @@ test('diagnostics retain readable non-composition text instead of reporting a bl
   const result=await s.bridge.recognizeSafe(photo.path,()=>{});
   assert.equal(result.text,null);assert.equal(result.code,'emptyText'); // Legacy contract stays compatible.
   assert.deepEqual(JSON.parse(JSON.stringify(result.observation)),{
-    rawText:'PLEASE CLOSE THE DOOR\n',confidence:94,decision:'noComposition',acceptedText:null
+    rawText:'PLEASE CLOSE THE DOOR\n',confidence:94,decision:'noComposition',acceptedText:null,secondReading:null
   });
   s.bridge.dispose();
 });
