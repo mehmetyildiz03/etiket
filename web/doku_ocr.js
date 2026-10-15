@@ -342,7 +342,10 @@
         try {
           const c = thumbnail.getContext('2d'); c.fillStyle = '#fff'; c.fillRect(0,0,thumbnail.width,thumbnail.height);
           c.drawImage(image,0,0,thumbnail.width,thumbnail.height);
-          const preview = new Uint8Array(await (await encode(thumbnail, 'image/jpeg')).arrayBuffer());
+          // Use the same lossless PNG codec as the successfully displayed OCR preview.
+          // Safari/WebKit may fail to decode the separate JPEG thumbnail even
+          // when the processed PNG renders; never upload or persist this copy.
+          const preview = new Uint8Array(await (await encode(thumbnail)).arrayBuffer());
           source = {blob:file, width, height, preview};
         } finally { freeCanvas(thumbnail); }
         const blob = await renderPhoto(source, {left:0, top:0, width:1, height:1, quarterTurns:0}, image);
