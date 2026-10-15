@@ -30,6 +30,7 @@ ScanFailure _failure(Object error) => ScanFailure(switch (error) {
     ScanFailureKind.unavailableCamera,
   BrowserScanException(code: 'tooLarge') => ScanFailureKind.tooLarge,
   BrowserScanException(code: 'invalidPhoto') => ScanFailureKind.invalidPhoto,
+  BrowserScanException(code: 'emptyText') => ScanFailureKind.emptyText,
   BrowserScanException(code: 'unsupported') => ScanFailureKind.unsupported,
   BrowserScanException(code: 'modelLoad') => ScanFailureKind.modelLoad,
   BrowserScanException(code: 'tooMuchText') => ScanFailureKind.tooMuchText,
