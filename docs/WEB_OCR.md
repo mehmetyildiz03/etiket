@@ -69,6 +69,14 @@ Tarayıcıda fotoğrafın **metin doğrultusu** koyu baskı piksellerinin satır
 
 CI'ın gerçek Chromium/WebAssembly testine orta kontrastlı ve 9° eğik sentetik etiket eklendi; %80, %20 ve %100 değerlerinin korunması beklenir. Gerçek kıyafet fotoğrafları, cihaz kamerası veya farklı fiziksel tarayıcılar ayrıca ölçülmelidir.
 
+## Yazı olmayan yüzeyler ve yanlış OCR harfleri
+
+Tesseract bir **yazı/etiket varlığı sınıflandırıcısı değildir**: kumaş dokusu, gölge, duvar gibi yazısız görüntülerde bile alakasız harfler üretebilir. Web OCR sonucunu artık **doğrulanmış veri değil, güven kontrolünden geçen bir öneri** sayarız. Sonuçta model güveni çok düşükse veya kumaş bileşimine ait bağımsız metinsel ipuçları yoksa uygulama okunabilir etiket bulunamadığını söyleyip yeniden fotoğraf çekme, metin yapıştırma ve elle giriş seçeneklerini korur.
+
+Kontrol gerçek metnin oranını/elyafını **asla uydurmaz veya otomatik düzeltmez**. Tek satır `100% CO`, `80% Pamuk / 20% Polyester` ve belirgin başlıklı bilinmeyen elyaf gibi metinler hâlâ kullanıcı incelemesine açılır. Ancak model çok düşük güvenle gerçek bir etiket okursa da öneriyi reddedebilir; kullanıcı o zaman daha net bir fotoğraf çekebilir veya elle girebilir. Kontrol sahte harfleri tamamen ortadan kaldıracağını garanti etmez; **yanlış pozitifleri azaltmak** içindir. Tekrarlayan gerçek fotoğraflarla ölçüm hâlâ gereklidir.
+
+Tarayıcı regresyonlarına **yazısız düz renk ve yazısız örgü/doku görüntüsü** eklendi. Yalnız sentetik resimler gerçek telefon fotoğraflarının garantisi değildir; gerçek kamerayla test henüz yapılmadı.
+
 ## Test kanıtı ve sınırlar
 
 - F3-R1 başlangıç **88/88** testi geçti; eski testler değiştirilmedi. Web adaptörü ve mobil/masaüstü widget akışıyla toplam **104** Flutter testi, ayrıca **9** JavaScript köprü testi. İptal edilen eski worker'ın yeni taramayı durdurması önce başarısız testle gösterilip oturum kontrolüyle düzeltildi.
