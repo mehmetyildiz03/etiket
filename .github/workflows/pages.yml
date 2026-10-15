@@ -60,6 +60,7 @@ jobs:
           trap 'kill "$SERVER_PID"' EXIT
           node scripts/web_ocr_smoke.cjs http://127.0.0.1:8082/etiket/
           node scripts/web_ocr_benchmark.cjs http://127.0.0.1:8082/etiket/ --synthetic
+          node scripts/web_ocr_roi_matrix.cjs http://127.0.0.1:8082/etiket/
       - name: Upload browser OCR evidence
         if: always()
         uses: actions/upload-artifact@v4
