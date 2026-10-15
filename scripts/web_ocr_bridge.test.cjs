@@ -289,7 +289,7 @@ test('blur invalidates an in-flight edit without discarding the committed source
   const pending=s.bridge.edit(photo.path,{left:0,top:0,width:.5,height:.5,quarterTurns:1});
   s.listeners.blur();
   await assert.rejects(pending,{message:'canceled'});
-  assert.equal(s.blobs.size,1);await s.bridge.recognize(photo.path,()=>{});
+  assert.equal(s.blobs.size,2, 'processed image and session-scoped native preview');await s.bridge.recognize(photo.path,()=>{});
   assert.equal(s.recognizedBlob,s.blobs.get(photo.path));s.bridge.dispose();
   assert.equal(s.blobs.size,0);assert.ok(s.canvases.every(c=>c.width===0&&c.height===0));
 });
