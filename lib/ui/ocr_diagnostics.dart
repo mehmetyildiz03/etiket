@@ -73,6 +73,39 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
                     ),
             ),
           ),
+          if (observation.secondReading != null) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'İkinci OCR denemesi — alternatif okuma, doğrulanmamış',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Aynı fotoğraf farklı metin bölümlendirme yöntemiyle yeniden okundu. '
+              'İki sonuç çelişebilir; uygulama rakamları veya elyafları otomatik seçmez. '
+              'Güven puanı doğru olma olasılığı değildir.',
+            ),
+            const SizedBox(height: 8),
+            Text(observation.secondReading!.confidence == null
+                ? 'İkinci okuma güven puanı: mevcut değil.'
+                : 'İkinci okuma güven puanı: '
+                  '${observation.secondReading!.confidence!.toStringAsFixed(1)} / 100'),
+            const SizedBox(height: 8),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: Theme.of(context).colorScheme.primary),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  observation.secondReading!.rawText,
+                  key: const ValueKey('second-ocr-diagnostic'),
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 8),
           const Text(
             'Metni seçerek kopyalayabilir, Metin yapıştır veya Elle giriş ile kendin düzenleyebilirsin. Ayrıştırma ve etiketle karşılaştırıp onaylama yine gerekir.',
