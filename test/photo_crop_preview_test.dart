@@ -38,14 +38,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Orijinal fotoğraf gösterilemedi'), findsOneWidget);
     expect(find.byKey(const ValueKey('crop-preview-error')), findsOneWidget);
-    // ListView builds the apply button lazily. Drag the viewport first,
-    // then inspect the button state; do not assume off-screen children exist.
-    await tester.drag(find.byType(ListView), const Offset(0, -650));
+    // The crop surface intentionally captures touch drags, so dragging the
+    // scrollable's center would hit a crop handle rather than scroll. Jump the
+    // scroll position to inspect the lazily built confirmation controls.
+    final scrolling = tester.state<ScrollableState>(find.byType(Scrollable).first);
+    scrolling.position.jumpTo(scrolling.position.maxScrollExtent);
     await tester.pumpAndSettle();
-    if (find.text('Kırpmayı uygula').evaluate().isEmpty) {
-      await tester.drag(find.byType(ListView), const Offset(0, -400));
-      await tester.pumpAndSettle();
-    }
     expect(find.text('Kırpmayı uygula'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull,
       reason: 'cannot crop an original image that did not decode');
