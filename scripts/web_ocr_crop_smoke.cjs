@@ -39,7 +39,7 @@ module.exports = async (browser, baseUrl, evidence) => {
         )
         .replace(
           'photos.set(path, {blob, source});',
-          'photos.set(path, {blob, source}); globalThis.__cropPhoto = {url:path, blob};',
+          'photos.set(path, {blob, source}); globalThis.__cropPhoto = {url:path, blob, sourceBytes:source.preview};',
         );
       await route.fulfill({ response, body });
     });
@@ -123,6 +123,12 @@ module.exports = async (browser, baseUrl, evidence) => {
             g.lineTo(x + 17, h);
             g.stroke();
           }
+          // This distinct violet strip sits LEFT of the label and lets us
+          // assert from browser SCREENSHOT PIXELS that the ORIGINAL source
+          // really renders in Flutter, not merely that a widget exists.
+          g.fillStyle = '#a12be2';
+          g.fillRect(Math.round(w * .02), Math.round(h * .08),
+            Math.round(w * .17), Math.round(h * .76));
           g.fillStyle = dark ? '#a7a494' : '#f2efe5';
           g.fillRect(label.x, label.y, label.w, label.h);
           g.fillStyle = '#151c17';
@@ -171,6 +177,37 @@ module.exports = async (browser, baseUrl, evidence) => {
       const handle = page.getByText('Sağ alt köşe', { exact: true }).locator('..');
       await handle.waitFor();
       await page.waitForTimeout(350); // Wait for the real DialogRoute transition before measuring touch coordinates.
+      // Test the actual painted pixels. Earlier tests only found crop widgets;
+      // an iPhone user reported a blank original image behind those widgets.
+      let violet = 0;
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const screenshot = await page.screenshot();
+        violet = await page.evaluate(async encoded => {
+          const bytes = Uint8Array.from(atob(encoded), char => char.charCodeAt(0));
+          const bitmap = await createImageBitmap(new Blob([bytes], {type: 'image/png'}));
+          const canvas = document.createElement('canvas');
+          canvas.width = bitmap.width; canvas.height = bitmap.height;
+          const context = canvas.getContext('2d', {willReadFrequently: true});
+          context.drawImage(bitmap, 0, 0);
+          bitmap.close();
+          const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          let count = 0;
+          for (let i = 0; i < data.length; i += 4) {
+            if (data[i] > 130 && data[i] < 200 &&
+                data[i + 1] < 85 && data[i + 2] > 175) count++;
+          }
+          return count;
+        }, screenshot.toString('base64'));
+        if (violet >= 100) break;
+        await page.waitForTimeout(200);
+      }
+      assert.ok(violet >= 100, 'Original camera photo MUST be painted in the crop dialog: '+violet+' violet pixels');
+      const previewSignature = await page.evaluate(() => {
+        const bytes = window.__cropPhoto?.sourceBytes;
+        return bytes == null ? null : [...bytes.slice(0, 8)];
+      });
+      assert.deepEqual(previewSignature, [137,80,78,71,13,10,26,10], 'Web crop source thumbnail uses lossless PNG');
+
       const box = await handle.boundingBox();
       assert.ok(box.width >= 43.99 && box.height >= 43.99, JSON.stringify(box));
       if (width < 500) {
@@ -308,6 +345,8 @@ module.exports = async (browser, baseUrl, evidence) => {
         dragged,
         touchTarget: box,
         localResourcesReleased: true,
+        cropSourceVisibleVioletPixels: violet,
+        sourcePreviewFormat: 'png',
         errors,
         failures,
       });
