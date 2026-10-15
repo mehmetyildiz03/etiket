@@ -9,6 +9,7 @@ module.exports = async (browser, baseUrl, evidence) => {
     [360, 'control-en'],
     [390, 'control-tr'],
     [430, 'label'],
+    [390, 'label-weak'],
     [390, 'blank'],
     [390, 'woven'],
   ]) {
@@ -55,19 +56,27 @@ module.exports = async (browser, baseUrl, evidence) => {
       await page.goto(baseUrl, { waitUntil: 'networkidle' });
       await page.locator('flt-semantics-placeholder').evaluate((e) => e.click());
       await page.getByRole('button', { name: 'Etiket tara', exact: true }).waitFor();
-      await page.evaluate(() => {
+      await page.evaluate((forceWeak) => {
         const original = Tesseract.createWorker;
         Tesseract.createWorker = async (...args) => {
           const worker = await original(...args),
             recognize = worker.recognize.bind(worker);
+          let calls = 0;
           worker.recognize = async (...args) => {
             const result = await recognize(...args);
-            window.__actualWorker = { rawText: result.data.text, confidence: result.data.confidence };
+            calls++;
+            // The OCR engine runs for real. Only the FIRST confidence score
+            // is forced to 48 to exercise Doku's weak-candidate second pass.
+            // This synthetic scenario is a regression test, not a benchmark.
+            if (forceWeak && calls === 1) result.data.confidence = 48;
+            const evidence = {rawText: result.data.text, confidence: result.data.confidence};
+            if (calls === 1) window.__actualWorker = evidence;
+            else window.__secondaryWorker = evidence;
             return result;
           };
           return worker;
         };
-      });
+      }, kind === 'label-weak');
       const fixture = await page.evaluate((kind) => {
         const c = document.createElement('canvas');
         c.width = 1200;
@@ -96,7 +105,7 @@ module.exports = async (browser, baseUrl, evidence) => {
             ? ['PLEASE CLOSE THE DOOR']
             : kind === 'control-tr'
               ? ['BUGÜN HAVA GÜZEL']
-              : kind === 'label'
+              : ['label', 'label-weak'].includes(kind)
                 ? ['80% PAMUK', '20% POLYESTER']
                 : [];
         g.fillStyle = '#000';
@@ -144,7 +153,19 @@ module.exports = async (browser, baseUrl, evidence) => {
       );
       assert.equal(output.observation.rawText, actual.rawText);
       assert.equal(output.observation.confidence, actual.confidence);
-      const candidate = kind === 'label';
+      if (kind === 'label-weak') {
+        assert.equal(actual.confidence, 48);
+        const alternate = await page.evaluate(() => window.__secondaryWorker);
+        assert.ok(alternate, 'real second WASM/Tesseract recognition must run');
+        assert.equal(output.text, actual.rawText, 'the original OCR output must never be replaced');
+        if (alternate.rawText.trim() && alternate.rawText !== actual.rawText) {
+          assert.equal(output.observation.secondReading.rawText, alternate.rawText);
+          assert.equal(output.observation.secondReading.confidence, alternate.confidence);
+        } else {
+          assert.equal(output.observation.secondReading, null);
+        }
+      }
+      const candidate = kind === 'label' || kind === 'label-weak';
       if (candidate) assert.equal(output.observation.decision, 'candidate');
       if (kind.startsWith('control')) assert.equal(output.observation.decision, 'noComposition');
       if (kind.startsWith('control')) {
@@ -165,6 +186,13 @@ module.exports = async (browser, baseUrl, evidence) => {
         assert.equal(await visibleText(actual.rawText.trim()).count(), 0, 'Raw evidence stays opt-in');
       await button("OCR'nin okuduğu ham metni göster");
       await visibleText('Ham OCR çıktısı — doğrulanmış kumaş bileşimi değildir').waitFor();
+      if (kind === 'label-weak' && output.observation.secondReading) {
+        await visibleText('İkinci OCR denemesi — alternatif okuma, doğrulanmamış').waitFor();
+        assert.equal(
+          (await page.locator('flt-semantics').allInnerTexts()).join(' ').includes('doğrulanmamış'),
+          true,
+        );
+      }
       await visibleText(
         'Etiket kararı: ' +
           (candidate
