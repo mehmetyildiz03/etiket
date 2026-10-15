@@ -39,6 +39,8 @@ void main() {
     expect(find.textContaining('Orijinal fotoğraf gösterilemedi'), findsOneWidget);
     expect(find.byKey(const ValueKey('crop-preview-error')), findsOneWidget);
     expect(find.text('Kırpmayı uygula'), findsOneWidget);
+    expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull,
+      reason: 'cannot crop an original image that did not decode');
     expect(tester.takeException(), isNull);
   });
 }
