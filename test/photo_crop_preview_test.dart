@@ -38,6 +38,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Orijinal fotoğraf gösterilemedi'), findsOneWidget);
     expect(find.byKey(const ValueKey('crop-preview-error')), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Kırpmayı uygula'),
+      220,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Kırpmayı uygula'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull,
       reason: 'cannot crop an original image that did not decode');
