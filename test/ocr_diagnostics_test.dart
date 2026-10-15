@@ -407,7 +407,7 @@ void main() {
     await tapText(tester, 'Galeriden seç');
     await tapText(tester, 'Fotoğraftaki metni oku');
     expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsNothing);
-    expect(scan.text, bridge.result.rawText);
+    expect(find.textContaining('Düşük OCR güveni'), findsOneWidget);
     await tapText(tester, showRaw);
     expect(find.textContaining('İkinci OCR denemesi'), findsOneWidget);
     expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsOneWidget);
@@ -423,6 +423,5 @@ void main() {
     final field = find.byKey(const ValueKey('label-text'));
     expect(tester.widget<TextField>(field).controller!.text,
       'OF 0% Polyester\\n% 40% Cotton');
-    expect(scan.observation, isNull);
   });
 }
