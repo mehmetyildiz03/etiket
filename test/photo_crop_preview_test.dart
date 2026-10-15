@@ -44,6 +44,14 @@ void main() {
     final scrolling = tester.state<ScrollableState>(find.byType(Scrollable).first);
     scrolling.position.jumpTo(scrolling.position.maxScrollExtent);
     await tester.pumpAndSettle();
+    // The larger source preview intentionally pushes the action below the
+    // initial viewport on small phones. Verify the action AFTER scrolling.
+    await tester.scrollUntilVisible(
+      find.text('Kırpmayı uygula'),
+      180,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     expect(find.text('Kırpmayı uygula'), findsOneWidget);
     expect(tester.widget<FilledButton>(find.byType(FilledButton)).onPressed, isNull,
       reason: 'cannot crop an original image that did not decode');
