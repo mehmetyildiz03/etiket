@@ -51,7 +51,8 @@ function containsExactPair(hypothesis, pair) {
   const percentage = '(?:' + value + '\\s*[%％]|[%％]\\s*' + value + ')';
   const boundedRatio = '(?<![0-9A-Z])' + percentage + '(?![0-9])';
   const boundedName = '(?<![\\p{L}])' + name + '(?![\\p{L}])';
-  const gap = '[^0-9%％\\n\\r]{0,24}';
+  // No unrelated words between ratio and fiber: avoid attaching 80% to the wrong material.
+  const gap = '[\\s:;,.()\\/\\-]{0,18}';
   return new RegExp(boundedRatio + gap + boundedName, 'u').test(text) ||
     new RegExp(boundedName + gap + boundedRatio, 'u').test(text);
 }
