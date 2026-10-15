@@ -39,7 +39,8 @@ function setup({mobile = false, secure = true, supported = true} = {}) {
     },
     document: {baseURI: 'https://example.test/etiket/', body: {appendChild: input => nodes.push(input)},
       createElement: type => type === 'input' ? new Input() : {
-        width: 1, height: 1, getContext: () => ({fillRect() {}, drawImage() {}}),
+        width: 1, height: 1, getContext: () => ({fillRect() {}, drawImage() {}, clearRect() {},
+          getImageData: (x, y, w, h) => ({data: new Uint8ClampedArray(w * h * 4).fill(255)})}),
         toBlob: callback => callback(new Blob([new Uint8Array(32)], {type: 'image/jpeg'}))
       }},
     Tesseract: {createWorker: async (langs, oem, opts) => {

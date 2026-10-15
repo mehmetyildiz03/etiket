@@ -131,6 +131,51 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
       await context.close();
     }
     fs.writeFileSync(path.join(evidence, 'report.json'), JSON.stringify(report, null, 2));
+    // A realistic angled fabric-tag photo must preserve every printed percentage.
+    // This was not covered by the original large, perfectly horizontal demo.
+    stage = 'angled textile photo OCR';
+    {
+      const context = await browser.newContext({locale: 'tr-TR', viewport: {width: 390, height: 844},
+        isMobile: true, hasTouch: true, userAgent: 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36'});
+      const page = await context.newPage();
+      try {
+        await page.goto(baseUrl, {waitUntil: 'networkidle'});
+        await page.locator('flt-semantics-placeholder').click({force: true});
+        const fixture = await page.evaluate(() => {
+          const canvas = document.createElement('canvas');
+          canvas.width = 850; canvas.height = 900;
+          const g = canvas.getContext('2d');
+          g.fillStyle = '#d9d6cb'; g.fillRect(0, 0, 850, 900);
+          g.translate(425, 450); g.rotate(-9 * Math.PI / 180);
+          g.fillStyle = '#eee9dc'; g.fillRect(-310, -260, 620, 520);
+          g.strokeStyle = '#a9a496'; g.lineWidth = 3; g.strokeRect(-310, -260, 620, 520);
+          g.fillStyle = '#57534d'; g.font = '20px Arial';
+          ['DIŞ KUMAŞ / SHELL', '80% PAMUK / COTTON', '20% POLYESTER',
+            'ASTAR / LINING', '100% VİSKON / VISCOSE'].forEach((line, i) => g.fillText(line, -280, -180 + i * 85));
+          return canvas.toDataURL('image/png').split(',')[1];
+        });
+        const fixturePath = path.join(evidence, 'angled-label.png');
+        fs.writeFileSync(fixturePath, Buffer.from(fixture, 'base64'));
+        await page.getByRole('button', {name: 'Etiket tara', exact: true}).click();
+        const chooser = page.waitForEvent('filechooser');
+        await page.getByRole('button', {name: 'Fotoğraf yükle / galeriden seç', exact: true}).click();
+        await (await chooser).setFiles(fixturePath);
+        await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).click();
+        await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).waitFor({timeout: 120000});
+        await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).click();
+        const field = page.getByRole('textbox', {name: /Etiket metni/});
+        await field.click();
+        await page.waitForTimeout(150); // Flutter attaches the editing value after focus.
+        const raw = await field.inputValue();
+        fs.writeFileSync(path.join(evidence, 'angled-raw.txt'), raw);
+        console.log('Synthetic angled-tag raw OCR:', JSON.stringify(raw));
+        await page.screenshot({path: path.join(evidence, 'angled-raw.png')});
+        assert.match(raw, /80\s*%\s*PAMUK/i, '80% PAMUK on a tilted label');
+        assert.match(raw, /20\s*%\s*POLYESTER/i, '20% POLYESTER on a tilted label');
+        assert.match(raw, /100\s*%\s*V[İI]SKON/i, '100% VISKON on a tilted label');
+        console.log('PASS angled textile label: printed 80%, 20%, and 100% preserved by real OCR.');
+      } finally { await context.close(); }
+    }
     stage = 'browser safety scenarios';
     await require('./web_ocr_safety.cjs')(browser, baseUrl, evidence);
   } finally { await browser.close(); }

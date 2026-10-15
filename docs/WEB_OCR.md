@@ -61,6 +61,14 @@ Güvenli bağlamdaki mobil tarayıcıya `accept="image/*" capture="environment"`
 
 JPEG, PNG, WebP: en fazla **20 MiB / 24 milyon piksel**. Encoded boyutlar decode'dan önce kontrol edilir; uzun kenar en fazla 2400 px'ye küçültülür. HEIC/PDF desteklenmez; JPG/PNG'ye dönüştürmek gerekir. En fazla 20.000 ham karakter. Silik, eğri, yansımalı, küçük yazılı veya dokulu gerçek etiketlerde hata olabilir; bakım sembolleri okunmaz ve doğruluk yüzdesi iddia edilmez.
 
+## Okunabilirlik incelemesi (W1 iyileştirmesi)
+
+Gerçek etiketlerde başarısız OCR geri bildirimi üzerine, tam yatay ve büyük harfli sentetik görsellerle sınırlı testlerin yeterli olmadığı görüldü. Yerel Tesseract CLI deneyinde 9° eğik, orta kontrastlı bir etiketin **80% → 0%**, **100% → 3.00%**; hafif bulanık bir etiketin **20% → 2096** gibi okunabildiği gözlendi. Bu deneyler canlı Pages/Tesseract.js sürümü için tek başına kanıt değildir.
+
+Tarayıcıda fotoğrafın **metin doğrultusu** koyu baskı piksellerinin satır projeksiyonuyla yaklaşık ±12° aralığında ölçülür; güçlü kanıt varsa görüntü OCR'den önce döndürülür. Düz veya metni yetersiz fotoğraflar çevrilmez. Gerçek Chromium deneyinde 20px sentetik etiketin yüzde işaretleri **80% → 8096**, **20% → 2096**, **100% → 10096** olarak okunduğundan küçük resimler en fazla iki kat büyütülür; küçük normalleştirilmiş OCR girdisi kayıpsız PNG olarak tutulur. Büyük fotoğraflarda bellek tüketimini sınırlayan JPEG korunur. **Okunan metindeki hiçbir rakam/elyaf otomatik düzeltilmez**; kullanıcı hâlâ kaynağa bakıp onaylar. Otomatik doğrultma katlanmış etiket, perspektif bozulması, çok dilli farklı yönlerde metin, ciddi bulanıklık veya parlama için garanti değildir. Bu durumlarda etiketi daha yakından, doğrudan ve aydınlık çekmek veya ham metni elle düzeltmek gerekir.
+
+CI'ın gerçek Chromium/WebAssembly testine orta kontrastlı ve 9° eğik sentetik etiket eklendi; %80, %20 ve %100 değerlerinin korunması beklenir. Gerçek kıyafet fotoğrafları, cihaz kamerası veya farklı fiziksel tarayıcılar ayrıca ölçülmelidir.
+
 ## Test kanıtı ve sınırlar
 
 - F3-R1 başlangıç **88/88** testi geçti; eski testler değiştirilmedi. Web adaptörü ve mobil/masaüstü widget akışıyla toplam **104** Flutter testi, ayrıca **9** JavaScript köprü testi. İptal edilen eski worker'ın yeni taramayı durdurması önce başarısız testle gösterilip oturum kontrolüyle düzeltildi.

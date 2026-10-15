@@ -68,6 +68,115 @@
     throw fail('invalidPhoto');
   }
 
+  // Estimate slight camera tilt from the rows of printed glyphs. A 9-degree
+  // skew can otherwise turn 80% into 0% or 100% into 3.00%. This changes only
+  // the photo geometry, NEVER the recognized text or percentages.
+  function straightenLabel(canvas) {
+    const longest = Math.max(canvas.width, canvas.height);
+    if (!longest) return 0;
+    const scale = Math.min(1, 360 / longest);
+    const sample = document.createElement('canvas');
+    sample.width = Math.max(1, Math.round(canvas.width * scale));
+    sample.height = Math.max(1, Math.round(canvas.height * scale));
+    const sw = sample.width, sh = sample.height;
+    const sc = sample.getContext('2d', {willReadFrequently: true});
+    sc.drawImage(canvas, 0, 0, sw, sh);
+    const rgba = sc.getImageData(0, 0, sw, sh).data;
+    const luma = new Uint8Array(sw * sh);
+    const stride = sw + 1;
+    const integral = new Float64Array(stride * (sh + 1));
+    for (let y = 0; y < sh; y++) {
+      let row = 0;
+      for (let x = 0; x < sw; x++) {
+        const index = y * sw + x, p = 4 * index;
+        const value = Math.round(.299 * rgba[p] + .587 * rgba[p + 1] + .114 * rgba[p + 2]);
+        luma[index] = value;
+        row += value;
+        integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + row;
+      }
+    }
+    const ink = new Uint8Array(sw * sh), radius = 9;
+    for (let y = 0; y < sh; y++) {
+      const top = Math.max(0, y - radius), bottom = Math.min(sh, y + radius + 1);
+      for (let x = 0; x < sw; x++) {
+        const left = Math.max(0, x - radius), right = Math.min(sw, x + radius + 1);
+        const sum = integral[bottom * stride + right] - integral[top * stride + right]
+          - integral[bottom * stride + left] + integral[top * stride + left];
+        if (luma[y * sw + x] + 12 < sum / ((bottom - top) * (right - left))) {
+          ink[y * sw + x] = 1;
+        }
+      }
+    }
+    // Exclude large seams, label borders, and backgrounds: only character-sized
+    // connected components can vote for the text-line direction.
+    const visited = new Uint8Array(sw * sh);
+    const queue = new Int32Array(sw * sh);
+    const points = [];
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+      const first = y * sw + x;
+      if (!ink[first] || visited[first]) continue;
+      let head = 0, tail = 1;
+      queue[0] = first; visited[first] = 1;
+      let minX = x, maxX = x, minY = y, maxY = y;
+      while (head < tail) {
+        const i = queue[head++], cx = i % sw, cy = (i / sw) | 0;
+        if (cx < minX) minX = cx;
+        if (cx > maxX) maxX = cx;
+        if (cy < minY) minY = cy;
+        if (cy > maxY) maxY = cy;
+        for (const n of [cx > 0 ? i - 1 : -1, cx + 1 < sw ? i + 1 : -1,
+          cy > 0 ? i - sw : -1, cy + 1 < sh ? i + sw : -1]) {
+          if (n >= 0 && ink[n] && !visited[n]) {
+            visited[n] = 1; queue[tail++] = n;
+          }
+        }
+      }
+      if (tail >= 2 && tail <= 300 && maxX - minX <= 60 && maxY - minY <= 40) {
+        for (let k = 0; k < tail; k++) {
+          const i = queue[k];
+          points.push([i % sw - sw / 2, ((i / sw) | 0) - sh / 2]);
+        }
+      }
+    }
+    // Too little text: never rotate a picture based on noise.
+    if (points.length < 200) return 0;
+    const histogram = new Int32Array(sh + 100);
+    const score = degrees => {
+      histogram.fill(0);
+      const rad = degrees * Math.PI / 180, sine = Math.sin(rad), cosine = Math.cos(rad);
+      for (const [x, y] of points) {
+        const row = Math.round(x * sine + y * cosine + sh / 2 + 50);
+        if (row >= 0 && row < histogram.length) histogram[row]++;
+      }
+      let total = 0;
+      for (const n of histogram) total += n * n;
+      return total;
+    };
+    const straightScore = score(0);
+    let bestScore = straightScore, bestAngle = 0;
+    for (let angle = -12; angle <= 12; angle += .5) {
+      const current = score(angle);
+      if (current > bestScore) { bestScore = current; bestAngle = angle; }
+    }
+    sample.width = sample.height = 0;
+    // Require substantial evidence to avoid rotating already-straight labels.
+    if (Math.abs(bestAngle) < 2 || bestScore < straightScore * 1.3) return 0;
+    const copy = document.createElement('canvas');
+    copy.width = canvas.width; copy.height = canvas.height;
+    const corrected = copy.getContext('2d');
+    corrected.fillStyle = '#fff';
+    corrected.fillRect(0, 0, copy.width, copy.height);
+    corrected.translate(copy.width / 2, copy.height / 2);
+    corrected.rotate(bestAngle * Math.PI / 180);
+    corrected.drawImage(canvas, -canvas.width / 2, -canvas.height / 2);
+    const target = canvas.getContext('2d');
+    target.setTransform(1, 0, 0, 1, 0, 0);
+    target.clearRect(0, 0, canvas.width, canvas.height);
+    target.drawImage(copy, 0, 0);
+    copy.width = copy.height = 0;
+    return bestAngle;
+  }
+
   async function adopt(file) {
     if (!file || !file.size || !file.type.startsWith('image/')) throw fail('invalidPhoto');
     if (file.size > 20 * 1024 * 1024) throw fail('tooLarge');
@@ -90,7 +199,30 @@
       context.fillStyle = '#fff';
       context.fillRect(0, 0, canvas.width, canvas.height);
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+      straightenLabel(canvas);
+      // When the label takes only a small part of a low-resolution picture,
+      // percent symbols can turn into "96" (80% => 8096). Give the recognizer
+      // enough pixels without inventing or editing any recognized characters.
+      const longSide = Math.max(canvas.width, canvas.height);
+      if (longSide < 1500) {
+        const factor = Math.min(2, 2400 / longSide);
+        const enlarged = document.createElement('canvas');
+        enlarged.width = Math.round(canvas.width * factor);
+        enlarged.height = Math.round(canvas.height * factor);
+        const ec = enlarged.getContext('2d');
+        ec.imageSmoothingEnabled = true;
+        ec.imageSmoothingQuality = 'high';
+        ec.drawImage(canvas, 0, 0, enlarged.width, enlarged.height);
+        canvas.width = enlarged.width;
+        canvas.height = enlarged.height;
+        canvas.getContext('2d').drawImage(enlarged, 0, 0);
+        enlarged.width = enlarged.height = 0;
+      }
+      // Preserve small punctuation and accents losslessly; large camera photos
+      // still use bounded high-quality JPEG to avoid oversized memory usage.
+      const usePng = Math.max(canvas.width, canvas.height) <= 2000;
+      const blob = await new Promise(resolve =>
+        canvas.toBlob(resolve, usePng ? 'image/png' : 'image/jpeg', 0.95));
       if (!blob) throw fail('invalidPhoto');
       const bytes = new Uint8Array(await blob.arrayBuffer());
       if (disposed) throw fail('canceled');
