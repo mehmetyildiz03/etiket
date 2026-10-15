@@ -42,7 +42,12 @@ const syntheticFixtures = [
     expectedPairs:[{percent:'80',fiber:'PAMUK'},{percent:'20',fiber:'POLYESTER'}]},
   {id:'blank',kind:'negative',group:'no-text',generator:'blank'},
   {id:'weave',kind:'negative',group:'fabric-no-text',generator:'woven'},
-  {id:'unrelated-year',kind:'negative',group:'non-composition',generator:'year'}
+  {id:'unrelated-year',kind:'negative',group:'non-composition',generator:'year',
+    groundTruth:'2026 COTTON'},
+  {id:'clear-writing-en',kind:'negative',group:'readable-non-label',generator:'writing-en',
+    groundTruth:'PLEASE CLOSE THE DOOR'},
+  {id:'clear-writing-tr',kind:'negative',group:'readable-non-label',generator:'writing-tr',
+    groundTruth:'BUGÜN HAVA GÜZEL'}
 ];
 
 function getFixtures() {
@@ -89,7 +94,9 @@ async function makeSynthetic(page, kind) {
       g.font=kind==='skew'?'26px Arial':'bold 46px Arial';
       const lines=kind==='sections'
         ? ['DIŞ KUMAŞ','80% PAMUK','20% POLYESTER','ASTAR','100% VİSKON']
-        :kind==='year'?['2026 COTTON']:['80% PAMUK','20% POLYESTER'];
+        :kind==='year'?['2026 COTTON']
+        :kind==='writing-en'?['PLEASE CLOSE THE DOOR']
+        :kind==='writing-tr'?['BUGÜN HAVA GÜZEL']:['80% PAMUK','20% POLYESTER'];
       lines.forEach((t,i)=>g.fillText(t,225,205+i*(kind==='sections'?95:130)));
       g.restore();
     }
@@ -149,13 +156,23 @@ async function main() {
       await page.evaluate(()=>{window.__benchmarkRaw=null;});
       const output=await page.evaluate(path=>dokuOcr.recognizeSafe(path,()=>{}),target);
       const raw=await page.evaluate(()=>window.__benchmarkRaw);
+      assert.ok(output.observation, 'Diagnostics required: '+f.id);
+      assert.equal(output.observation.rawText, raw.rawText, 'Unmodified engine text: '+f.id);
+      assert.equal(output.observation.confidence, raw.confidence, 'Engine confidence: '+f.id);
+      if(f.id.startsWith('clear-writing-')) {
+        assert.equal(output.observation.decision,'noComposition');
+        assert.ok(raw.confidence>=45, 'Readable control: '+f.id);
+        assert.equal(output.text,null);
+      }
+      if(['blank','weave'].includes(f.id)) assert.notEqual(output.observation.decision,'candidate');
       const metrics=scoreCase(f,{text:output.text,code:output.code,
         rawText:raw?.rawText||'',elapsedMs:Date.now()-start});
       // Only synthetic data enters CI artifacts; private GT stays in chosen local output.
       // Full, sensitive transcriptions are stored only in the explicitly
       // chosen LOCAL private report; CI always runs with synthetic fixtures.
       results.push({...metrics,group:f.group||'unknown',split:f.split||'synthetic',
-        groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||''});
+        groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||'',
+        confidence:output.observation.confidence,decision:output.observation.decision});
       await page.evaluate(([source,derived])=>{
         dokuOcr.release(source);
         if(derived!==source)dokuOcr.release(derived);
@@ -174,7 +191,7 @@ async function main() {
       realSampleCount:synthetic?0:results.length,
       realAccuracy:synthetic?null:aggregate,
       syntheticAccuracy:synthetic?aggregate:null,
-      baseUrl,commit:process.env.GITHUB_SHA||null,
+      baseUrl,commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       normalization:'NFC, fold whitespace only, preserve case/diacritics/%/digits',
       notes:synthetic?'Only generated fonts/backgrounds; results NEVER estimate real garment OCR quality':
         'Private authorized photos only; do not upload report or images to public CI',
@@ -188,6 +205,9 @@ async function main() {
       ['WER (accepted result incl. rejects)',asPct(aggregate.wer)],
       ['Raw Tesseract CER',asPct(aggregate.rawCer)],
       ['Raw Tesseract WER',asPct(aggregate.rawWer)],
+      ['Transcribed controls + labels',aggregate.transcriptionCount],
+      ['Raw CER incl. textual negatives',asPct(aggregate.transcriptionRawCer)],
+      ['Raw WER incl. textual negatives',asPct(aggregate.transcriptionRawWer)],
       ['Exact percent/fiber pair recall',asPct(aggregate.pairExactRecall)],
       ['Fully correct compositions',asPct(aggregate.fullyCorrectCompositionRate)],
       ['False reject rate',asPct(aggregate.falseRejectRate)],
@@ -203,7 +223,16 @@ async function main() {
         '**Sensitive local report; do not upload images/transcriptions publicly.**',
       '',
       '| Metric | Value |','|---|---:|',
-      ...pairs.map(([key,value])=>'| '+key+' | '+value+' |')
+      ...pairs.map(([key,value])=>'| '+key+' | '+value+' |'),
+      '',
+      'Raw transcription measures all explicitly transcribed images, independently of label rejection.',
+      'False reject counts only positive labels; rejecting readable non-label writing is correct.',
+      '',
+      '| Case | Decision | Engine confidence | Raw CER | Raw WER |',
+      '|---|---|---:|---:|---:|',
+      ...results.map(r=>'| '+r.id+' | '+r.decision+' | '+r.confidence+' | '+
+        asPct(r.rawTranscription? r.rawTranscription.characterEdits/r.rawTranscription.referenceCharacters:null)+' | '+
+        asPct(r.rawTranscription? r.rawTranscription.wordEdits/r.rawTranscription.referenceWords:null)+' |')
     ];
     fs.writeFileSync(path.join(dest,'report.md'),table.join('\n')+'\n');
     console.log('BENCHMARK '+(synthetic?'SYNTHETIC ONLY':'PRIVATE')+' SUMMARY '+JSON.stringify(aggregate));

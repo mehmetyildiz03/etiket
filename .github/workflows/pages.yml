@@ -50,6 +50,8 @@ jobs:
       - name: Install Chromium for real OCR verification
         run: tool/web_ocr/node_modules/.bin/playwright install --with-deps chromium
       - name: Read a synthetic label in the compiled browser app
+        env:
+          OCR_COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           mkdir -p /tmp/doku-pages/etiket
           cp -a build/web/. /tmp/doku-pages/etiket/

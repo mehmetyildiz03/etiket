@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'photo_scan.dart';
 import 'photo_edit.dart';
+import 'ocr_observation.dart';
 
 class BrowserPhoto {
   BrowserPhoto(this.path, this.bytes, {this.sourceImage});
@@ -24,6 +25,13 @@ abstract interface class BrowserScanBridge {
   void cancelRecognition();
   void cancelSelection();
   void dispose();
+}
+
+abstract interface class BrowserDiagnosticScanBridge {
+  Future<OcrObservation> recognizeObservation(
+    String path,
+    void Function(String) progress,
+  );
 }
 
 abstract interface class BrowserImageEditor {
@@ -120,7 +128,8 @@ class WebTextRecognizer
     implements
         TextRecognitionService,
         ScanProgressSource,
-        CancelableRecognition {
+        CancelableRecognition,
+        DiagnosticTextRecognitionService {
   WebTextRecognizer(this.bridge);
   final BrowserScanBridge bridge;
   @override
@@ -135,6 +144,24 @@ class WebTextRecognizer
         progressMessage = message;
         onProgress?.call();
       });
+    } catch (error) {
+      throw _failure(error);
+    }
+  }
+
+  @override
+  bool get supportsDiagnostics => bridge is BrowserDiagnosticScanBridge;
+  @override
+  Future<OcrObservation> recognizeObservation(ScanPhoto photo) async {
+    progressMessage = 'OCR motoru hazırlanıyor…';
+    try {
+      return await (bridge as BrowserDiagnosticScanBridge).recognizeObservation(
+        photo.path,
+        (message) {
+          progressMessage = message;
+          onProgress?.call();
+        },
+      );
     } catch (error) {
       throw _failure(error);
     }

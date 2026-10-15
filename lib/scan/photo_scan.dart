@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 import 'photo_edit.dart';
+import 'ocr_observation.dart';
 
 enum PhotoSource { camera, gallery }
 
@@ -100,6 +101,11 @@ abstract interface class TextRecognitionService {
   Future<String> recognize(ScanPhoto photo);
 }
 
+abstract interface class DiagnosticTextRecognitionService {
+  bool get supportsDiagnostics;
+  Future<OcrObservation> recognizeObservation(ScanPhoto photo);
+}
+
 /// Optional browser capabilities; native and existing fake adapters stay simple.
 abstract interface class ScanPresentation {
   bool get cameraAvailable;
@@ -138,6 +144,7 @@ class PhotoScanController {
   PhotoEdit? _appliedEdit;
   bool _editingPhoto = false;
   String _text = '';
+  OcrObservation? _observation;
   String? _message;
   int _revision = 0;
   bool _disposed = false;
@@ -155,6 +162,7 @@ class PhotoScanController {
       _originalPhoto?.sourceImage != null &&
       !_pickerOpen;
   String get text => _text;
+  OcrObservation? get observation => _observation;
   String? get message => _message;
   bool get canPick => !_disposed && photos.supported && !_pickerOpen;
   bool get busy => {
@@ -195,6 +203,7 @@ class PhotoScanController {
       _notify();
       return;
     }
+    _observation = null;
     final revision = ++_revision;
     _stopRecognition();
     _stopEditing();
@@ -257,13 +266,29 @@ class PhotoScanController {
         _stage == ScanStage.transforming) {
       return;
     }
+    _observation = null;
     final revision = ++_revision;
     _stage = ScanStage.recognizing;
     _message = null;
     _inFlight[input] = (_inFlight[input] ?? 0) + 1;
     _notify();
     try {
-      final recognized = await recognizer.recognize(input);
+      String recognized;
+      if (recognizer case final DiagnosticTextRecognitionService diagnostics
+          when diagnostics.supportsDiagnostics) {
+        final observation = await diagnostics.recognizeObservation(input);
+        if (!_current(revision) || !identical(input, _photo)) return;
+        _observation = observation;
+        if (observation.acceptedText == null) {
+          _text = '';
+          _stage = ScanStage.failed;
+          _message = observation.explanation;
+          return;
+        }
+        recognized = observation.acceptedText!;
+      } else {
+        recognized = await recognizer.recognize(input);
+      }
       if (!_current(revision) || !identical(input, _photo)) return;
       if (recognized.trim().isEmpty) {
         throw const ScanFailure(ScanFailureKind.emptyText);
@@ -289,6 +314,7 @@ class PhotoScanController {
 
   void editText(String value) {
     if (_disposed) return;
+    _observation = null;
     ++_revision;
     _stopRecognition();
     _stopEditing();
@@ -303,6 +329,7 @@ class PhotoScanController {
 
   void cancel({String? message}) {
     if (_disposed) return;
+    _observation = null;
     ++_revision;
     _stopRecognition();
     _stopEditing();
@@ -319,6 +346,7 @@ class PhotoScanController {
 
   void abandon() {
     if (_disposed) return;
+    _observation = null;
     ++_revision;
     _stopRecognition();
     _stopEditing();
@@ -364,6 +392,7 @@ class PhotoScanController {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    _observation = null;
     ++_revision;
     _stopRecognition();
     _stopEditing();
@@ -389,6 +418,7 @@ class PhotoScanController {
 
   bool beginPhotoEdit() {
     if (!canEditPhoto || _stage == ScanStage.transforming) return false;
+    _observation = null;
     ++_revision;
     _stopRecognition();
     _stopEditing();
@@ -401,6 +431,7 @@ class PhotoScanController {
 
   void cancelPhotoEdit() {
     if (_disposed || !_editingPhoto) return;
+    _observation = null;
     ++_revision;
     _stopEditing();
     _editingPhoto = false;
@@ -423,6 +454,7 @@ class PhotoScanController {
       _notify();
       return false;
     }
+    _observation = null;
     final revision = ++_revision;
     _stopRecognition();
     _stopEditing();

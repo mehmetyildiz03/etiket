@@ -3,6 +3,7 @@ import 'package:web/web.dart' as web;
 import 'photo_scan.dart';
 import 'web_scan_services.dart';
 import 'photo_edit.dart';
+import 'ocr_observation.dart';
 
 @JS('dokuOcr')
 external _OcrBridge? get _bridge;
@@ -31,6 +32,14 @@ extension type _PhotoResult(JSObject _) implements JSObject {
 extension type _TextResult(JSObject _) implements JSObject {
   external String? get text;
   external String? get code;
+  external _Observation? get observation;
+}
+
+extension type _Observation(JSObject _) implements JSObject {
+  external String get rawText;
+  external double? get confidence;
+  external String get decision;
+  external String? get acceptedText;
 }
 
 extension type _PickedPhoto(JSObject _) implements JSObject {
@@ -60,7 +69,11 @@ createScanServices() {
   );
 }
 
-class _JsBridge implements BrowserScanBridge, BrowserImageEditor {
+class _JsBridge
+    implements
+        BrowserScanBridge,
+        BrowserImageEditor,
+        BrowserDiagnosticScanBridge {
   @override
   bool get supported => _bridge?.supported ?? false;
   @override
@@ -126,6 +139,46 @@ class _JsBridge implements BrowserScanBridge, BrowserImageEditor {
           .toDart;
       if (result.code != null) throw BrowserScanException(result.code!);
       return result.text!;
+    } catch (error) {
+      throw _error(error);
+    }
+  }
+
+  @override
+  Future<OcrObservation> recognizeObservation(
+    String path,
+    void Function(String) progress,
+  ) async {
+    try {
+      final result = await _bridge!
+          .recognizeSafe(
+            path,
+            ((JSString message) => progress(message.toDart)).toJS,
+          )
+          .toDart;
+      final evidence = result.observation;
+      if (evidence == null) {
+        throw BrowserScanException(result.code ?? 'recognition');
+      }
+      final decision = switch (evidence.decision) {
+        'noText' => OcrDecision.noText,
+        'lowConfidence' => OcrDecision.lowConfidence,
+        'noComposition' => OcrDecision.noComposition,
+        'candidate' => OcrDecision.candidate,
+        _ => throw const BrowserScanException('recognition'),
+      };
+      final observation = OcrObservation(
+        rawText: evidence.rawText,
+        confidence: evidence.confidence,
+        decision: decision,
+      );
+      if (observation.acceptedText != result.text ||
+          observation.acceptedText != evidence.acceptedText ||
+          result.code !=
+              (decision == OcrDecision.candidate ? null : 'emptyText')) {
+        throw const BrowserScanException('recognition');
+      }
+      return observation;
     } catch (error) {
       throw _error(error);
     }

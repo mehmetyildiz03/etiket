@@ -64,7 +64,9 @@ function scoreCase(fixture, output) {
   const text = output?.text ?? '', rawText = output?.rawText ?? text;
   if (typeof text !== 'string' || typeof rawText !== 'string') throw new TypeError('OCR text must be string');
   const accepted = output?.code == null && Boolean(normalizeText(text));
-  const result = {id: fixture.id, kind: fixture.kind, accepted,
+  const rawTranscription = typeof fixture.groundTruth === 'string' && normalizeText(fixture.groundTruth)
+    ? textDistance(fixture.groundTruth, rawText) : null;
+  const result = {id: fixture.id, kind: fixture.kind, accepted, rawTranscription,
     code: output?.code ?? null, elapsedMs: output?.elapsedMs ?? null};
   if (fixture.kind === 'negative') {
     result.falseAccepted = accepted;
@@ -95,6 +97,7 @@ function summarize(results) {
   const positive = results.filter(v => v.kind === 'positive');
   const negative = results.filter(v => v.kind === 'negative');
   const sum = (arr, key) => arr.reduce((n, v) => n + (v[key] || 0), 0);
+  const transcribed = results.filter(v => v.rawTranscription);
   const totalCharacters = sum(positive, 'referenceCharacters');
   const totalWords = sum(positive, 'referenceWords');
   const totalPairs = sum(positive, 'referencePairs');
@@ -105,6 +108,11 @@ function summarize(results) {
   const ms = results.map(x => x.elapsedMs).filter(v => typeof v === 'number' && Number.isFinite(v));
   return {
     positiveCount: positive.length, negativeCount: negative.length,
+    transcriptionCount: transcribed.length,
+    transcriptionRawCer: rate(transcribed.reduce((n,v)=>n+v.rawTranscription.characterEdits,0),
+      transcribed.reduce((n,v)=>n+v.rawTranscription.referenceCharacters,0)),
+    transcriptionRawWer: rate(transcribed.reduce((n,v)=>n+v.rawTranscription.wordEdits,0),
+      transcribed.reduce((n,v)=>n+v.rawTranscription.referenceWords,0)),
     cer: rate(sum(positive,'characterEdits'),totalCharacters),
     wer: rate(sum(positive,'wordEdits'),totalWords),
     rawCer: rate(sum(positive,'rawCharacterEdits'),totalCharacters),

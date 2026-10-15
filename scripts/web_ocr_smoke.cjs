@@ -236,6 +236,8 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         console.log(`PASS ${pattern}: no fabricated OCR text offered on a no-text image.`);
       } finally { await context.close(); }
     }
+    stage = 'raw engine evidence versus label decision';
+    await require('./web_ocr_diagnostics.cjs')(browser, baseUrl, evidence);
     stage = 'browser safety scenarios';
     await require('./web_ocr_safety.cjs')(browser, baseUrl, evidence);
     stage = '9–12 degree edge OCR and expanded bounds';

@@ -84,3 +84,20 @@ test('no real images means null rates, never a fabricated real accuracy percenta
     [null,null,null,null]);
   assert.throws(() => scoreCase({id:'r',kind:'positive',groundTruth:'',expectedPairs:[]},{code:null,text:'80% PAMUK'}));
 });
+
+test('readable non-label control has raw CER/WER without becoming an accepted fabric label', () => {
+  const f={id:'control',kind:'negative',groundTruth:'PLEASE CLOSE THE DOOR'};
+  const r=scoreCase(f,{text:null,code:'emptyText',rawText:'PLEASE CLOSE THE DOOR'});
+  assert.equal(r.falseAccepted,false);
+  assert.equal(r.rawTranscription.characterEdits,0);assert.equal(r.rawTranscription.wordEdits,0);
+  const totals=summarize([r]);assert.equal(totals.transcriptionCount,1);
+  assert.equal(totals.transcriptionRawCer,0);assert.equal(totals.transcriptionRawWer,0);
+  assert.equal(totals.cer,null);assert.equal(totals.falseRejectRate,null);
+});
+
+test('control transcription mistakes are measured independently of filter rejection', () => {
+  const r=scoreCase({id:'control',kind:'negative',groundTruth:'PLEASE CLOSE THE DOOR'},
+    {text:null,code:'emptyText',rawText:'PLEASE CL0SE THE DOOR'});
+  assert.equal(r.rawTranscription.characterEdits,1);assert.equal(r.rawTranscription.wordEdits,1);
+  assert.equal(r.falseAccepted,false);
+});

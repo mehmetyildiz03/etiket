@@ -28,6 +28,8 @@ Desteklenen biçimler ve sınırlamalar: [etiket ayrıştırma notları](docs/LA
 
 Web motor/model kurulumu, `/etiket/` statik adresi, gerçek tarayıcı testi ve çevrimdışı/kamera sınırları: [Web OCR notları](docs/WEB_OCR.md). Web build'den önce `npm ci --prefix tool/web_ocr --ignore-scripts --no-audit --no-fund` ve `node scripts/prepare_web_ocr.cjs` çalıştır; Actions bu adımları uygular.
 
+Ham motor çıktısı, güven puanı ve kumaş etiketi kararı ayrı tutulur. “OCR'nin okuduğu ham metni göster” yalnız isteğe bağlı incelemedir; kumaş bileşimini doğrulamaz. Akış, test kanıtı ve sınırlar: [OCR tanıları](docs/OCR_DIAGNOSTICS.md), [doğruluk benchmark'ı](docs/OCR_BENCHMARK.md).
+
 ## Mühendislik ilkeleri
 - **Etiket verisi ≠ performans ölçümü:** Terletme, nefes alabilirlik, kalite veya alerji kesin puanı üretmeyiz.
 - OCR sonucunu kullanıcıya doğrulatırız; okunmayan oranları uydurmayız.

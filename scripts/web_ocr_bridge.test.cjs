@@ -294,3 +294,34 @@ test('releasing the last session photo clears worker-owned image buffers', async
   assert.equal(s.workers[0].stopped,true);
   assert.equal(s.blobs.size,0);
 });
+
+test('diagnostics retain readable non-composition text instead of reporting a blank engine result', async () => {
+  const s=setup(),photo=await s.upload();s.result='PLEASE CLOSE THE DOOR\n';s.confidence=94;
+  const result=await s.bridge.recognizeSafe(photo.path,()=>{});
+  assert.equal(result.text,null);assert.equal(result.code,'emptyText'); // Legacy contract stays compatible.
+  assert.deepEqual(JSON.parse(JSON.stringify(result.observation)),{
+    rawText:'PLEASE CLOSE THE DOOR\n',confidence:94,decision:'noComposition',acceptedText:null
+  });
+  s.bridge.dispose();
+});
+
+test('no text, low confidence and label proposal are independent engine observations', async () => {
+  const s=setup(),photo=await s.upload();
+  for(const [raw,confidence,decision] of [
+    [' \n',95,'noText'],['|||',90,'noText'],['80% PAMUK',22,'lowConfidence'],
+    ['letters '.repeat(100),0,'lowConfidence'],['80 PAMUK',55,'lowConfidence'],
+    ['80% PAMUK',95,'candidate'],['2026 COTTON',95,'noComposition'],
+    ['80% PAMUK',NaN,'lowConfidence'],['80% PAMUK',105,'lowConfidence'],
+  ]) {
+    s.result=raw;s.confidence=confidence;
+    const r=await s.bridge.recognizeSafe(photo.path,()=>{});
+    assert.equal(r.observation.rawText,raw);assert.equal(r.observation.decision,decision);
+    assert.equal(r.observation.confidence,Number.isFinite(confidence)&&confidence<=100?confidence:null);
+    assert.equal(r.observation.acceptedText,decision==='candidate'?raw:null);
+    assert.equal(r.text,r.observation.acceptedText);
+  }
+  s.result='x'.repeat(20001);
+  const oversized=await s.bridge.recognizeSafe(photo.path,()=>{});
+  assert.equal(oversized.code,'tooMuchText');assert.equal(oversized.observation,null);
+  s.bridge.dispose();
+});

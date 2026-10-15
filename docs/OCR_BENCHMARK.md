@@ -2,7 +2,7 @@
 
 ## Ne ölçüyoruz?
 
-Çalışan OCR akışının görüntüden çıkardığı **ham Tesseract.js metni** ve Doku'nun kullanıcıya **kabul ettiği metin**, görüntüdeki **insanın elle kontrol ettiği doğru transkripsiyon** (ground truth/GT) ile kıyaslanır. **Yapay zekâ/OCR ile üretilmiş tahmin GT değildir.** Metrik motoru ayrı kodda yaşar: `scripts/ocr_benchmark_metrics.cjs`. `scripts/web_ocr_benchmark.cjs` gerçek derlenmiş uygulamanın `dokuOcr.pick -> [editSafe] -> recognizeSafe` yolunu ve worker'ın filtrelenmemiş çıktısını Chromium içinden ölçer; sahte OCR servisi kullanılmaz. Üretim OCR davranışı değiştirilmez.
+Çalışan OCR akışının görüntüden çıkardığı **ham Tesseract.js metni** ve Doku'nun kullanıcıya **kabul ettiği metin**, görüntüdeki **insanın elle kontrol ettiği doğru transkripsiyon** (ground truth/GT) ile kıyaslanır. **Yapay zekâ/OCR ile üretilmiş tahmin GT değildir.** Metrik motoru ayrı kodda yaşar: `scripts/ocr_benchmark_metrics.cjs`. `scripts/web_ocr_benchmark.cjs` gerçek derlenmiş uygulamanın `dokuOcr.pick -> [editSafe] -> recognizeSafe` yolunu ve worker'ın filtrelenmemiş çıktısını Chromium içinden ölçer; sahte OCR servisi kullanılmaz. Benchmark üretim kararını değiştirmez. F3-W4, aynı kabul filtresini koruyarak ham çıktı/güven/etiket kararını üretim köprüsünde de ayrı taşır; ayrıntılar: [OCR tanıları](OCR_DIAGNOSTICS.md).
 
 **Ölçüm = test geçmesi değildir.** Benchmark'ın düşük skor üretmesi CI hatası olmak zorunda değildir; böylece kötü doğruluk görünmez hale gelmez. Sentetik rapor üretildiğinde “gerçek başarı” iddiası yasaktır.
 
@@ -17,7 +17,7 @@
 | False accept | İçinde kumaş bileşimi olmayan negatif fotoğraflardan uygulamanın etiket metni diye kabul ettiği oran |
 | p50/p95 | Fotoğraf seçimi, görüntü işleme ve OCR dahil geçen sürenin dağılımı, tek CI makinesinde |
 
-CER ve WER **%100'ü aşabilir** (çok sayıda ek karakter); bunları `100 - CER` ile “doğruluk olasılığı” diye sunma. Reddedilen pozitiflerde kullanıcıya sunulan OCR hipotezi boş sayılır; **ham CER** ayrı tutulur. Negatiflerde CER/WER uygulanmaz; yanlış kabul ölçülür. Makro/mikro farkı önemlidir; ayrıntılar `report.json` içindedir. Bölümler arasında aynı lif+yüzde tekrarı veya karmaşık satır sırasının otomatik bölümle eşleşmesi henüz ölçülmüyor: bu ayrı **kritik risk** ve insan onaylı bölüm GT/alan konumlarıyla F3-W3'ün sonraki aşamasında eklenecek.
+CER ve WER **%100'ü aşabilir** (çok sayıda ek karakter); bunları `100 - CER` ile “doğruluk olasılığı” diye sunma. Reddedilen pozitiflerde kullanıcıya sunulan OCR hipotezi boş sayılır; **ham CER** ayrı tutulur. Etiket CER/WER toplamına negatifler katılmaz; bunlarda yanlış kabul ölçülür. F3-W4 ile GT içeren yazılı negatiflerde ayrıca `rawTranscription` CER/WER hesaplanır. `transcriptionRawCer/Wer`, pozitifler ve yazılı negatiflerin ham motor çıktısını birlikte ölçer; `byGroup` bunları ayırır. Boş/doku negatiflerinde GT yoksa bu uzaklık `null` kalır. Etiket olmayan doğru okunmuş cümlenin reddi, false rejection sayılmaz. Makro/mikro farkı önemlidir; ayrıntılar `report.json` içindedir. Bölümler arasında aynı lif+yüzde tekrarı veya karmaşık satır sırasının otomatik bölümle eşleşmesi henüz ölçülmüyor: bu ayrı **kritik risk** ve insan onaylı bölüm GT/alan konumlarıyla F3-W3'ün sonraki aşamasında eklenecek.
 
 ## Sentetik testleri aynı Pages tabanıyla çalıştırma
 
@@ -43,6 +43,8 @@ Diğer terminalde:
 ```sh
 node scripts/web_ocr_benchmark.cjs http://127.0.0.1:8082/etiket/ --synthetic
 ```
+
+F3-W4 sentetik kümesi önceki 7 örneği korur; net İngilizce ve Türkçe kontrol cümlesi ekler (4 pozitif, 5 negatif). Her kayıt `rawText`, `confidence`, `decision`, `filteredText` içerir; gerçek worker çıktısıyla köprü alanlarının eşitliği test edilir. `unrelated-year` örneğine de rasteri değiştirmeden açık GT eklenir.
 
 Sentetik rapor: `build/web-ocr-evidence/benchmark-synthetic/report.{json,md}`. Sadece **kod tarafından çizilen** etiket/doku görüntüleri vardır; markalı/özel kullanıcı fotoğrafı veya gizli GT CI artifact'ına konmaz. `realSampleCount: 0`, `realAccuracy: null`. CI benchmark'ı öncelikle ölçüm pipeline'ını sınar, gerçek dünyadaki doğruluk oranını değil.
 
