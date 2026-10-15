@@ -54,6 +54,7 @@ extension type _PickedPhoto(JSObject _) implements JSObject {
   external String get path;
   external JSUint8Array get bytes;
   external JSUint8Array? get sourceBytes;
+  external String? get sourcePreviewUrl;
   external int? get sourceWidth;
   external int? get sourceHeight;
 }
@@ -110,6 +111,7 @@ class _JsBridge
             // Detach the preview from the JS ArrayBuffer lifetime; iOS
             // WebKit may reclaim/reuse the original Uint8Array after picking.
             previewBytes: Uint8List.fromList(picked.sourceBytes!.toDart),
+            previewUrl: picked.sourcePreviewUrl,
           ),
   );
 
