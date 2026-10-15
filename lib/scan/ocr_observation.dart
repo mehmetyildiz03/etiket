@@ -2,11 +2,25 @@
 /// fiber percentages. No parser, Flutter or native OCR dependency lives here.
 enum OcrDecision { noText, lowConfidence, noComposition, candidate }
 
+/// Independent Tesseract output, *not* a corrected transcription or a draft.
+class OcrSecondReading {
+  OcrSecondReading({required this.rawText, required this.confidence}) {
+    if (rawText.length > 20000 ||
+        (confidence != null &&
+            (!confidence!.isFinite || confidence! < 0 || confidence! > 100))) {
+      throw ArgumentError('Invalid secondary OCR reading');
+    }
+  }
+  final String rawText;
+  final double? confidence;
+}
+
 class OcrObservation {
   OcrObservation({
     required this.rawText,
     required this.confidence,
     required this.decision,
+    this.secondReading,
   }) {
     if (rawText.length > 20000 ||
         (confidence != null &&
@@ -21,6 +35,7 @@ class OcrObservation {
   final String rawText;
   final double? confidence;
   final OcrDecision decision;
+  final OcrSecondReading? secondReading;
   String? get acceptedText =>
       decision == OcrDecision.candidate ? rawText : null;
   /// Accepted OCR text remains editable, but a marginal engine score must
