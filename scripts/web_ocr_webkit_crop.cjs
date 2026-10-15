@@ -13,7 +13,9 @@ const {webkit} = require('../tool/web_ocr/node_modules/playwright');
   const browser = await webkit.launch({headless:true});
   try {
     const context = await browser.newContext({
-      viewport:{width:390,height:844},isMobile:true,hasTouch:true,
+      // Use desktop input in a narrow WebKit viewport: Playwright's mobile
+      // WebKit driver cannot issue wheel events to scroll Flutter semantics.
+      viewport:{width:390,height:844},isMobile:false,hasTouch:false,
       deviceScaleFactor:2,locale:'tr-TR'
     });
     const page = await context.newPage();
@@ -89,7 +91,7 @@ const {webkit} = require('../tool/web_ocr/node_modules/playwright');
       assert.ok(pixels>100,'WebKit crop must show ACTUAL source photo pixels, count='+pixels);
       assert.equal(await page.getByText(/Orijinal fotoğraf gösterilemedi/).count(),0);
       assert.deepEqual(pageErrors,[]);
-      console.log('PASS WebKit 390dp: intentionally corrupted Flutter source bytes, native Safari fallback visibly paints original photo ('+pixels+' violet pixels)');
+      console.log('PASS WebKit viewport 390px DPR2: forced Flutter decode failure, native browser image fallback visibly paints original photo ('+pixels+' violet pixels)');
     }finally{await context.close();}
   }finally{await browser.close();}
 })().catch(e=>{console.error('::error title=WebKit crop visible::',e);process.exitCode=1;});
