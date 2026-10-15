@@ -213,8 +213,22 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         await page.getByRole('button', {name: 'Fotoğraf yükle / galeriden seç', exact: true}).click();
         await (await chooser).setFiles(fixturePath);
         await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).click();
-        await page.getByText(/Fotoğrafta okunabilir yazı bulunamadı/).waitFor({timeout: 120000});
-        assert.equal(await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).count(), 0);
+        const warning = page.getByText(/Fotoğrafta okunabilir yazı bulunamadı/);
+        const review = page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true});
+        for (let i = 0; i < 90 && !(await warning.count()) && !(await review.count()); i++) {
+          await page.waitForTimeout(500);
+        }
+        if (await review.count()) {
+          await review.click();
+          const field = page.getByRole('textbox', {name: /Etiket metni/});
+          await field.click(); await page.waitForTimeout(150);
+          const syntheticRaw = await field.inputValue();
+          console.log(`Non-text ${pattern} generated unwanted OCR:`, JSON.stringify(syntheticRaw));
+          fs.writeFileSync(path.join(evidence, `non-text-${pattern}-raw.txt`), syntheticRaw);
+        }
+        console.log(`Non-text ${pattern} UI:`, (await page.locator('body').innerText()).slice(-1800));
+        assert.ok(await warning.count(), 'No-text image must show unreadable-label warning, not any fabricated text');
+        assert.equal(await review.count(), 0);
         console.log(`PASS ${pattern}: no fabricated OCR text offered on a no-text image.`);
       } finally { await context.close(); }
     }
