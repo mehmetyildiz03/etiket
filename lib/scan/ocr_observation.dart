@@ -31,7 +31,7 @@ class OcrObservation {
       confidence! < 65;
   String? get candidateWarning => weakCandidate
       ? 'Düşük OCR güveni (${confidence!.toStringAsFixed(1)}/100). '
-        'Yüzde işaretleri, rakamlar ve elyaf adları yanlış okunmuş olabilir. '
+        'Okunan yüzde işaretleri, rakamlar ve elyaf adları yanlış olabilir. '
         'Lütfen etiket fotoğrafıyla karşılaştırıp düzelt. '
         'Bu puan doğruluk olasılığı değildir.'
       : null;
