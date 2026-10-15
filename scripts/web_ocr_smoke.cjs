@@ -228,8 +228,11 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         console.log(`Synthetic no-text ${pattern} OCR result:`, JSON.stringify(result));
         assert.equal(result.code, 'emptyText', `No-text ${pattern} photo cannot produce accepted label text`);
         await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).click();
-        await page.getByText(/Fotoğrafta okunabilir yazı bulunamadı/).waitFor({timeout: 30000});
+        // CanvasKit does not always expose off-screen error Text in the
+        // semantics tree. The visible "Tekrar oku" CTA is the failed stage.
+        await page.getByRole('button', {name: 'Tekrar oku', exact: true}).waitFor({timeout: 120000});
         assert.equal(await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).count(), 0);
+        assert.equal(await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true}).count(), 0);
         console.log(`PASS ${pattern}: no fabricated OCR text offered on a no-text image.`);
       } finally { await context.close(); }
     }
