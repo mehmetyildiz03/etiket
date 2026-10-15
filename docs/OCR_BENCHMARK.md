@@ -48,6 +48,12 @@ F3-W4 sentetik kümesi önceki 7 örneği korur; net İngilizce ve Türkçe kont
 
 Sentetik rapor: `build/web-ocr-evidence/benchmark-synthetic/report.{json,md}`. Sadece **kod tarafından çizilen** etiket/doku görüntüleri vardır; markalı/özel kullanıcı fotoğrafı veya gizli GT CI artifact'ına konmaz. `realSampleCount: 0`, `realAccuracy: null`. CI benchmark'ı öncelikle ölçüm pipeline'ını sınar, gerçek dünyadaki doğruluk oranını değil.
 
+## OCR bölümleme ve satır kırpma deneyi — gerçek Tesseract.js
+
+`node scripts/web_ocr_roi_matrix.cjs http://127.0.0.1:8082/etiket/` komutu, derlenmiş Web arayüzünün aynı yerel `/etiket/` motor/model dosyalarını kullanarak **gerçek Chromium + Tesseract.js v6** çalıştırır. Önceden çizilmiş, kullanıcıya ait olmayan iki **sentetik** `60% Polyester / 40% Cotton` etiketi üretir; ikinci örnekte dikiş çizgisi ve bakım sembolleri bulunur. Her örneği tam fotoğraf PSM 6/3, yalnız bileşim alanı PSM 6/3/11 ve tek satır PSM 7 olarak ölçer.
+
+Raporlar `build/web-ocr-evidence/roi-matrix.json` ve `roi-matrix.md` içindedir. Karşılaştırma **yalnız gerçek yüzde işareti + birebir elyaf adı** eşleşmelerini sayar; `8096`, `O/0`, yanlış yüzde veya yanlış lif kabul edilmez. Asıl fotoğraf değişmez; ürünün mevcut OCR kararı, manuel düzeltme/onay veya güven eşiği güncellenmez. **Sentetik iki örnekten çıkarılan en iyi PSM gerçek kullanıcı etiketlerinde en iyi PSM anlamına gelmez**. Sonuçlar ancak geliştirme/holdout gerçek fotoğraf setiyle bağımsız ölçüldüğünde üretim davranışı için düşünülebilir. Kullanıcının özel screenshot dosyası GitHub'a/CI artifact'ına konmaz.
+
 ## Gerçek fotoğraf veri setini oluşturma (gereken iş)
 
 En az ilk pilot için hedef **50+ izinli gerçek kumaş etiketi, 30+ gerçek negatif**; farklı cihazlar, düşük kontrast, eğiklik, etiket üzerinde dikiş/kat, yüzdeler, Türkçe/İngilizce, astar ve dış kumaş. Veri dağılımı belgelenmeli; en az iki ayrı kişi GT'yi görerek transkribe edip uyuşmazlığı çözmeli; marka/kişisel bilgileri gizlemeli. Aynı kıyafetin fotoğrafları ayrı eğitim/test split'lerine dağıtılmamalı. Geliştirme (dev) ve hiç ayar yapılmayacak holdout seti baştan ayrılmalı. Rakamlar, yüzde ve Türkçe aksanlar GT'de **tam** yazılmalı; okunamayan metin tahmin edilmemeli. Bu minimum pilot büyüklüğü temsiliyet veya güven aralığı garantisi değildir.
