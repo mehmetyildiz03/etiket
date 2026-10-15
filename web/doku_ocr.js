@@ -324,7 +324,9 @@
     if (disposed || !current()) throw fail('canceled');
     const path = URL.createObjectURL(blob);
     photos.set(path, {blob, source});
-    return {path, bytes, sourceBytes: source.preview, sourceWidth: source.width, sourceHeight: source.height};
+    return {path, bytes, sourceBytes: source.preview,
+      sourcePreviewUrl: source.previewUrl,
+      sourceWidth: source.width, sourceHeight: source.height};
   }
   function adopt(file) {
     return serializedImage(async () => {
@@ -346,10 +348,18 @@
           // Safari/WebKit may fail to decode the separate JPEG thumbnail even
           // when the processed PNG renders; never upload or persist this copy.
           const preview = new Uint8Array(await (await encode(thumbnail)).arrayBuffer());
-          source = {blob:file, width, height, preview};
+          source = {blob:file, width, height, preview,
+            // Safari can display the original photo through its native <img>
+            // decoder if Flutter's in-memory image codec fails.
+            previewUrl: URL.createObjectURL(new Blob([preview], {type:'image/png'}))};
         } finally { freeCanvas(thumbnail); }
-        const blob = await renderPhoto(source, {left:0, top:0, width:1, height:1, quarterTurns:0}, image);
-        return publish(source, blob);
+        try {
+          const blob = await renderPhoto(source, {left:0, top:0, width:1, height:1, quarterTurns:0}, image);
+          return await publish(source, blob);
+        } catch (error) {
+          URL.revokeObjectURL(source.previewUrl);
+          throw error;
+        }
       });
     }).catch(error => { throw error instanceof DOMException && error.name === 'DokuScanError' ? error : fail('invalidPhoto'); });
   }
@@ -421,8 +431,15 @@
   }
 
   function release(path) {
+    const released = photos.get(path);
     if (photos.delete(path)) {
       URL.revokeObjectURL(path);
+      // Edited derivatives share one original; revoke the fallback only
+      // after the LAST derivative has been disposed.
+      if (released?.source?.previewUrl &&
+          ![...photos.values()].some(value => value.source === released.source)) {
+        URL.revokeObjectURL(released.source.previewUrl);
+      }
       // Tesseract may retain its last page in WASM memory. End it with the
       // photo session; successful reads within the session still reuse it.
       if (!photos.size) { cancelRecognition(); stopWorker(); }
