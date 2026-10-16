@@ -140,6 +140,29 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
     }
   }
 
+  Widget previewError(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !previewFailed) {
+        setState(() => previewFailed = true);
+      }
+    });
+    return Center(
+      child: Semantics(
+        liveRegion: true,
+        child: Text(
+          'Orijinal fotoğraf gösterilemedi. '
+          'Düzenlemeden geri dönüp başka fotoğraf seç.',
+          key: const ValueKey('crop-preview-error'),
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.error,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
@@ -279,28 +302,23 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
                               bytes: widget.source.previewBytes,
                               fit: BoxFit.fill,
                               semanticLabel: 'Orijinal etiket fotoğrafı',
-                              // Never leave a blank crop canvas on decode errors.
+                              // Prefer Flutter's paint path, but WebKit can
+                              // reject a valid PNG in its memory image codec.
+                              // The fallback is the SAME source thumbnail via
+                              // a browser-native <img> element, not the OCR crop.
                               errorBuilder: (context, error, stack) {
-                                WidgetsBinding.instance.addPostFrameCallback((_) {
-                                  if (mounted && !previewFailed) {
-                                    setState(() => previewFailed = true);
-                                  }
-                                });
-                                return Center(
-                                child: Semantics(
-                                  liveRegion: true,
-                                  child: Text(
-                                    'Orijinal fotoğraf gösterilemedi. '
-                                    'Düzenlemeden geri dönüp başka fotoğraf seç.',
-                                    key: const ValueKey('crop-preview-error'),
-                                    textAlign: TextAlign.center,
-                                    style: TextStyle(
-                                      color: Theme.of(context).colorScheme.error,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              );
+                                final url = widget.source.previewUrl;
+                                if (url != null && url.startsWith('blob:')) {
+                                  return Image.network(
+                                    url,
+                                    fit: BoxFit.fill,
+                                    webHtmlElementStrategy:
+                                        WebHtmlElementStrategy.prefer,
+                                    errorBuilder: (context, error, stack) =>
+                                        previewError(context),
+                                  );
+                                }
+                                return previewError(context);
                               },
                             ),
                           ),

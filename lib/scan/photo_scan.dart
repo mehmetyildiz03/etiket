@@ -77,9 +77,12 @@ class PhotoImageSource {
     required this.width,
     required this.height,
     required Uint8List previewBytes,
+    this.previewUrl,
   }) : previewBytes = previewBytes.asUnmodifiableView();
   final int width, height;
   final Uint8List previewBytes;
+  /// Temporary local browser Blob URL, never transmitted to a server.
+  final String? previewUrl;
 }
 
 abstract interface class PhotoEditingService {
