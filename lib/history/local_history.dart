@@ -145,7 +145,9 @@ class LocalHistoryRepository {
 
   Future<List<SavedGarment>> _load() async {
     final raw = await store.read();
-    if (raw == null || raw.isEmpty) return const [];
+    if (raw == null) return const [];
+    // Empty persisted text is corrupt; never treat it as missing history.
+    if (raw.isEmpty) throw const FormatException('Corrupted history — cannot overwrite');
     if (raw.length > maxDocumentLength) throw const FormatException('Oversized history');
     final Object? document;
     try { document = jsonDecode(raw); } on FormatException {
