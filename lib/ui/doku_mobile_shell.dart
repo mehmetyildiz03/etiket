@@ -183,8 +183,8 @@ class _LabelIllustration extends StatelessWidget {
                 angle: -.06,
                 child: Container(
                   width: 186,
-                  height: 209,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 17),
+                  height: 230,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF8F5EC),
                     borderRadius: BorderRadius.circular(5),
