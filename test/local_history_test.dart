@@ -96,7 +96,7 @@ void main() {
 
   test('corrupt and unknown versions are read-only; no silent wipe', () async {
     for (final raw in [
-      '{not json', '{"schemaVersion":2,"records":[]}',
+      '', '{not json', '{"schemaVersion":2,"records":[]}',
       '{"schemaVersion":1,"records":[{"unexpected":"field"}]}',
     ]) {
       final storage=FakeHistoryStore()..data=raw;
