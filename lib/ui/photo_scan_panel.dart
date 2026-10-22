@@ -74,6 +74,9 @@ class PhotoScanPanel extends StatelessWidget {
             child: SessionPhotoPreview(
               bytes: photo.previewBytes,
               key: const ValueKey('photo-preview'),
+              // The Blob points at the exact processed image OCR will read.
+              // Safari can paint it natively if Flutter's codec rejects bytes.
+              fallbackUrl: photo.path.startsWith('blob:') ? photo.path : null,
               height: 200,
               fit: BoxFit.contain,
               cacheWidth: 960,

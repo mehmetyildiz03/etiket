@@ -302,24 +302,12 @@ class _PhotoCropEditorState extends State<PhotoCropEditor>
                               bytes: widget.source.previewBytes,
                               fit: BoxFit.fill,
                               semanticLabel: 'Orijinal etiket fotoğrafı',
-                              // Prefer Flutter's paint path, but WebKit can
-                              // reject a valid PNG in its memory image codec.
-                              // The fallback is the SAME source thumbnail via
-                              // a browser-native <img> element, not the OCR crop.
-                              errorBuilder: (context, error, stack) {
-                                final url = widget.source.previewUrl;
-                                if (url != null && url.startsWith('blob:')) {
-                                  return Image.network(
-                                    url,
-                                    fit: BoxFit.fill,
-                                    webHtmlElementStrategy:
-                                        WebHtmlElementStrategy.prefer,
-                                    errorBuilder: (context, error, stack) =>
-                                        previewError(context),
-                                  );
-                                }
-                                return previewError(context);
-                              },
+                              // SAME original thumbnail as the crop geometry,
+                              // shown through native browser pixels if Flutter
+                              // cannot decode it on Safari/WebKit.
+                              fallbackUrl: widget.source.previewUrl,
+                              errorBuilder: (context, error, stack) =>
+                                  previewError(context),
                             ),
                           ),
                         ),

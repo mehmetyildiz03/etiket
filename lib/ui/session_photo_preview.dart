@@ -12,6 +12,7 @@ class SessionPhotoPreview extends StatefulWidget {
     this.height,
     this.fit = BoxFit.contain,
     this.cacheWidth,
+    this.fallbackUrl,
     this.errorBuilder,
   });
   final Uint8List bytes;
@@ -19,6 +20,9 @@ class SessionPhotoPreview extends StatefulWidget {
   final double? height;
   final BoxFit fit;
   final int? cacheWidth;
+  /// Temporary same-session browser Blob URL for the EXACT preview image.
+  /// The source adapter revokes this URL when the photo session is released.
+  final String? fallbackUrl;
   final ImageErrorWidgetBuilder? errorBuilder;
   @override
   State<SessionPhotoPreview> createState() => _SessionPhotoPreviewState();
@@ -53,12 +57,33 @@ class _SessionPhotoPreviewState extends State<SessionPhotoPreview> {
     super.dispose();
   }
 
+  // Some Safari/WebKit Flutter codecs reject a valid in-memory PNG even when
+  // Safari's native <img> decoder can show the same pixels. Do not replace
+  // the preview with a different photo or silently continue with a blank.
+  Widget previewDecodeError(BuildContext context, Object error, StackTrace? stack) {
+    final url = widget.fallbackUrl;
+    if (url != null && url.startsWith('blob:')) {
+      return Image.network(
+        url,
+        semanticLabel: widget.semanticLabel,
+        height: widget.height,
+        fit: widget.fit,
+        webHtmlElementStrategy: WebHtmlElementStrategy.prefer,
+        errorBuilder: widget.errorBuilder,
+      );
+    }
+    return widget.errorBuilder!(context, error, stack);
+  }
+
   @override
   Widget build(BuildContext context) => Image(
     image: provider,
     semanticLabel: widget.semanticLabel,
     height: widget.height,
     fit: widget.fit,
-    errorBuilder: widget.errorBuilder,
+    errorBuilder: widget.errorBuilder != null ||
+            (widget.fallbackUrl?.startsWith('blob:') ?? false)
+        ? previewDecodeError
+        : null,
   );
 }
