@@ -14,11 +14,11 @@ class InMemoryStore implements HistoryStore {
 void main() {
   testWidgets('real user edit can save, reopen after app restart and delete', (tester) async {
     final store=InMemoryStore();
-    await tester.view.setPhysicalSize(const Size(390, 900));
+    tester.view.physicalSize = const Size(390, 900);
     tester.view.devicePixelRatio=1;
-    addTearDown(() async {
-      await tester.view.resetPhysicalSize();
-      await tester.view.resetDevicePixelRatio();
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
     });
 
     await tester.pumpWidget(EtiketApp(historyStore: store));
