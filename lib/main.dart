@@ -258,10 +258,12 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
       final items = await _historyRepository.list();
       if (mounted) setState(() { _savedItems = items; _historyLoading = false; });
     } catch (_) {
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _historyError = 'Yerel geçmiş açılamıyor. Kayıtlara dokunulmadı.';
         _historyLoading = false;
-      });
+        });
+      }
     }
   }
 
@@ -293,7 +295,9 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     );
     proposed.dispose();
     if (!mounted || title == null || title.isEmpty || _historyBusy ||
-        page != _Page.result || !draft.canAnalyze || !draft.hasUserChanges) return;
+        page != _Page.result || !draft.canAnalyze || !draft.hasUserChanges) {
+      return;
+    }
     final snapshot = draft.verifiedGarment();
     final source = draft.imported ? 'label' : 'manual';
     setState(() => _historyBusy = true);
@@ -331,8 +335,10 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   Future<void> _removeSaved(SavedGarment item) async {
     if (_historyBusy || _historyLoading || _historyError != null) return;
     if (!await _confirmRemove('Kayıt silinsin mi?',
-        'Seçilen kıyafetin cihazdaki kaydı silinecek. Bu işlem geri alınamaz.')) return;
-    if (!mounted || _historyBusy) return;
+        'Seçilen kıyafetin cihazdaki kaydı silinecek. Bu işlem geri alınamaz.')) {
+      return;
+    }
+    if (!mounted || _historyBusy) { return; }
     setState(() => _historyBusy = true);
     try {
       final next = await _historyRepository.remove(item.id);
@@ -349,8 +355,10 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   Future<void> _clearSaved() async {
     if (_historyBusy || _historyLoading || _historyError != null || _savedItems.isEmpty) return;
     if (!await _confirmRemove('Tüm geçmiş silinsin mi?',
-        'Bütün kıyafet kayıtları bu cihazdan silinecek. Geri alınamaz.')) return;
-    if (!mounted || _historyBusy) return;
+        'Bütün kıyafet kayıtları bu cihazdan silinecek. Geri alınamaz.')) {
+      return;
+    }
+    if (!mounted || _historyBusy) { return; }
     setState(() => _historyBusy = true);
     try {
       final next = await _historyRepository.clearAll();
@@ -497,7 +505,7 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
             if (page == _Page.settings) ...[
               const DokuPrivacySettings(),
               const SizedBox(height: 12),
-              Text('Bu cihazda kayıtlı kıyafet: ' + _savedItems.length.toString()),
+              Text('Bu cihazda kayıtlı kıyafet: ${_savedItems.length}'),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                 onPressed: _historyBusy || _historyLoading ||
