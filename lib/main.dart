@@ -277,23 +277,23 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
         page != _Page.result || !draft.canAnalyze || !draft.hasUserChanges) {
       return;
     }
-    final proposed = TextEditingController(text: 'Kıyafet');
+    var proposed = 'Kıyafet';
     final title = await showDialog<String>(context: context,
       builder: (context) => AlertDialog(
         title: const Text('Kıyafeti kaydet'),
-        content: TextField(
-          controller: proposed, maxLength: 60,
+        content: TextFormField(
+          initialValue: proposed, maxLength: 60,
+          onChanged: (value) => proposed = value,
           decoration: const InputDecoration(labelText: 'Kıyafet adı'),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context),
             child: const Text('Vazgeç')),
-          FilledButton(onPressed: () => Navigator.pop(context, proposed.text.trim()),
+          FilledButton(onPressed: () => Navigator.pop(context, proposed.trim()),
             child: const Text('Kaydet')),
         ],
       ),
     );
-    proposed.dispose();
     if (!mounted || title == null || title.isEmpty || _historyBusy ||
         page != _Page.result || !draft.canAnalyze || !draft.hasUserChanges) {
       return;
