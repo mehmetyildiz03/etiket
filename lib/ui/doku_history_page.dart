@@ -115,7 +115,6 @@ class DokuSavedDetail extends StatelessWidget {
             DokuResultOverview(
               garment: item.garment,
               sourceConfirmed: item.source == 'label',
-              onEdit: () {},
             ),
           ],
         ),
