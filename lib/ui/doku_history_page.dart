@@ -37,6 +37,8 @@ class DokuHistoryPage extends StatelessWidget {
             'Fotoğraflar ve ham OCR metinleri geçmişe eklenmez.',
             style: TextStyle(height: 1.45),
           ),
+          const SizedBox(height: 8),
+          const Text('Kaydedilen kıyafetler burada görünecek.'),
           const SizedBox(height: 18),
           if (isLoading) const Center(child: CircularProgressIndicator())
           else if (error != null) ...[
