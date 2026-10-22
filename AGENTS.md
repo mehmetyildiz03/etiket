@@ -38,7 +38,7 @@ Ayrıntılı kontrol listesi: `docs/QUALITY_GATES.md`.
 
 ## Git ve teslim
 - Kural olarak `main` üzerinde doğrudan geliştirme yapma. Güncel `main`'den ayrı branch aç; var olan dosyaları ve geçmişi koru.
-- Değişiklikleri PR olarak sun; **kullanıcı açıkça istemedikçe merge veya deploy yapma**. GitHub Pages `main` push'unda otomatik yayımlandığı için merge bir yayımlama işlemidir.
+- Değişiklikleri PR olarak sun. Kullanıcı **22 Ekim 2026'da Doku için rutin test → inceleme → CI → merge/Pages yayınını ayrıca onay istemeden yapmamızı açıkça istedi**. Tam kalite kapıları başarılıysa güvenli ve geri alınabilir rutin değişiklikleri otomatik birleştirip yayımlayabilirsin. Test/CI başarısızsa dur ve düzelt; gizlilik, büyük altyapı maliyeti, yeni ücretli servis, geri döndürülemez veri işlemi veya ürün güvenliği riski söz konusuysa önce kullanıcı onayı iste. GitHub Pages `main` push'unda otomatik yayımlanır.
 - Gizli anahtarları, token'ları, kişisel bilgileri, gerçek kullanıcı fotoğraflarını veya özel dokümanları repoya koyma. Pages kamuya açıktır.
 - Final raporunda: kapsam, dosyalar, testlerin gerçek sonuçları, CI bağlantısı, varsa blokajlar, bilinen sınırlamalar ve PR bağlantısı. Başarı kriterleri tamamlanmadıysa açıkça belirt.
-- İstenen kapsam tamamlanınca dur; bir sonraki özelliğe kendiliğinden geçme.
+- Kullanıcının Doku 1.0 hedefi için açık **sürekli geliştirme ve rutin yayın yetkisi** bulunuyor; görev tamamlanınca yapılanları ve sıradaki işleri kaydet, güvenli bağımsız özelliklere yeni branch üzerinden devam edebilirsin. Gerçekte arka plan işlemi yürütülmüyorsa çalışmanın sürdüğü izlenimi verme.
