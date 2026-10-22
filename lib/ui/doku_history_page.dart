@@ -61,12 +61,12 @@ class DokuHistoryPage extends StatelessWidget {
               icon: const Icon(Icons.document_scanner_outlined),
               label: const Text('Etiket tara')),
           ] else ...[
-            Text(items.length.toString() + ' kıyafet kayıtlı',
+            Text('${items.length} kıyafet kayıtlı',
               style: const TextStyle(color: Colors.black54)),
             const SizedBox(height: 8),
             for (final item in items)
               Card(
-                key: ValueKey('saved-' + item.id),
+                key: ValueKey('saved-${item.id}'),
                 child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   leading: const Icon(Icons.checkroom_outlined, color: dokuGreen),
@@ -74,7 +74,7 @@ class DokuHistoryPage extends StatelessWidget {
                     style: const TextStyle(fontWeight: FontWeight.w700)),
                   subtitle: Text(
                     item.garment.sections.map((s) => s.fibers.map((f) =>
-                      '%' + formatPercentage(f.percent) + ' ' + f.name).join(', ')).join(' · '),
+                      '%${formatPercentage(f.percent)} ${f.name}').join(', ')).join(' · '),
                     maxLines: 2, overflow: TextOverflow.ellipsis),
                   onTap: isBusy ? null : () => onOpen(item),
                   trailing: IconButton(
@@ -108,7 +108,7 @@ class DokuSavedDetail extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Kaynak: ' + (item.source == 'label' ? 'Etiket kontrol edildi' : 'Elle girildi')),
+            Text('Kaynak: ${item.source == 'label' ? 'Etiket kontrol edildi' : 'Elle girildi'}'),
             const SizedBox(height: 14),
             DokuResultOverview(
               garment: item.garment,
