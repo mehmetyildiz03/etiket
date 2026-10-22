@@ -8,12 +8,12 @@ class DokuResultOverview extends StatelessWidget {
     super.key,
     required this.garment,
     required this.sourceConfirmed,
-    required this.onEdit,
+    this.onEdit,
   });
 
   final Garment garment;
   final bool sourceConfirmed;
-  final VoidCallback onEdit;
+  final VoidCallback? onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -54,11 +54,12 @@ class DokuResultOverview extends StatelessWidget {
                         ),
                       ),
                     ),
-                    TextButton.icon(
-                      onPressed: onEdit,
-                      icon: const Icon(Icons.edit_outlined, size: 18),
-                      label: const Text('Düzenle'),
-                    ),
+                    if (onEdit != null)
+                      TextButton.icon(
+                        onPressed: onEdit,
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        label: const Text('Düzenle'),
+                      ),
                   ],
                 ),
                 for (final section in garment.sections) ...[
