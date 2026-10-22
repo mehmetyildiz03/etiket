@@ -73,6 +73,7 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   late final LocalHistoryRepository _historyRepository;
   List<SavedGarment> _savedItems = const [];
   bool _historyLoading = true;
+  bool _historyRequested = false;
   bool _historyBusy = false;
   String? _historyError;
 
@@ -83,7 +84,6 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _historyRepository = LocalHistoryRepository(widget.historyStore ?? DeviceHistoryStore());
-    unawaited(_loadHistory());
     final services = createScanServices();
     scan = PhotoScanController(widget.photoSource ?? services.photos,
       widget.textRecognizer ?? services.recognizer);
@@ -387,6 +387,12 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     final cancelRecovery = _recoveringStartup;
     _recoveringStartup = false;
     setState(() => page = target);
+    if (!_historyRequested &&
+        (target == _Page.result || target == _Page.history ||
+         target == _Page.settings)) {
+      _historyRequested = true;
+      unawaited(_loadHistory());
+    }
     if (leaveScan || cancelRecovery || target == _Page.home) scan.abandon();
   }
   void back() {
