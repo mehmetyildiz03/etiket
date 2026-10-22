@@ -148,7 +148,7 @@ class DokuResultOverview extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         const Text(
-          'Kumaş hakkında genel bilgiler',
+          'Kumaş analizi',
           style: TextStyle(
             fontSize: 19,
             fontWeight: FontWeight.w700,
