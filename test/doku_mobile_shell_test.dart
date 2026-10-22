@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:etiket/main.dart';
+import 'package:etiket/history/local_history.dart';
 import 'package:etiket/domain/fabric.dart';
 import 'package:etiket/ui/doku_result_overview.dart';
 
+class TestHistoryStore implements HistoryStore {
+  @override
+  Future<String?> read() async => null;
+  @override
+  Future<void> write(String value) async {}
+}
 void main() {
   for (final width in [360.0, 390.0, 430.0]) {
     testWidgets('mobile dashboard and navigation at Doku ${width.toInt()}dp', (tester) async {
@@ -13,7 +20,7 @@ void main() {
         tester.view.resetPhysicalSize();
         tester.view.resetDevicePixelRatio();
       });
-      await tester.pumpWidget(const EtiketApp());
+      await tester.pumpWidget(EtiketApp(historyStore: TestHistoryStore()));
       await tester.pumpAndSettle();
 
       expect(find.text('doku.'), findsOneWidget);
