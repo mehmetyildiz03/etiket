@@ -75,14 +75,16 @@ abstract interface class HistoryStore {
 }
 
 class DeviceHistoryStore implements HistoryStore {
-  DeviceHistoryStore([SharedPreferencesAsync? value])
-      : _prefs = value ?? SharedPreferencesAsync();
+  DeviceHistoryStore([SharedPreferencesAsync? value]) : _prefs = value;
   static const storageKey = 'doku.local_compositions.v1';
-  final SharedPreferencesAsync _prefs;
+  SharedPreferencesAsync? _prefs;
+  // Lazy creation allows legacy widget tests without platform plugins to
+  // inspect the rest of the app; missing storage still FAILS closed on read.
+  SharedPreferencesAsync get _preferences => _prefs ??= SharedPreferencesAsync();
   @override
-  Future<String?> read() => _prefs.getString(storageKey);
+  Future<String?> read() => _preferences.getString(storageKey);
   @override
-  Future<void> write(String value) => _prefs.setString(storageKey, value);
+  Future<void> write(String value) => _preferences.setString(storageKey, value);
 }
 
 /// Serial writes in one session; malformed/future documents are never wiped.
