@@ -67,7 +67,7 @@ void main() {
     final entry=(doc['records'] as List).single as Map<String,dynamic>;
     expect(entry.keys.toSet(),{'id','createdAt','title','source','sections'});
     for (final prohibited in ['photo','exif','rawText','confidence','image','preview']) {
-      expect(storage.data!.contains('"'+prohibited+'"'),isFalse);
+      expect(storage.data!.contains('"${prohibited}"'),isFalse);
     }
   });
 
