@@ -3,16 +3,18 @@ import 'dart:typed_data';
 import 'package:etiket/scan/photo_scan.dart';
 import 'package:etiket/scan/photo_edit.dart';
 import 'package:etiket/ui/photo_crop_editor.dart';
+import 'package:etiket/ui/session_photo_preview.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  Widget editor(Uint8List photo) => MaterialApp(
+  Widget editor(Uint8List photo, {String? previewUrl}) => MaterialApp(
     home: PhotoCropEditor(
       source: PhotoImageSource(
         width: 1200,
         height: 800,
         previewBytes: photo,
+        previewUrl: previewUrl,
       ),
       initial: const PhotoEdit(),
       onApply: (_) async => null,
@@ -31,6 +33,22 @@ void main() {
     expect(find.byKey(const ValueKey('crop-canvas')), findsOneWidget);
     expect(find.textContaining('Orijinal fotoğraf gösterilemedi'), findsNothing);
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('crop displays the exact original thumbnail Blob as fallback',
+      (tester) async {
+    final png = Uint8List.fromList(base64Decode(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=',
+    ));
+    await tester.pumpWidget(editor(png, previewUrl: 'blob:source-thumbnail'));
+    await tester.pumpAndSettle();
+    final preview = tester.widget<SessionPhotoPreview>(
+      find.byType(SessionPhotoPreview),
+    );
+    expect(preview.fallbackUrl, 'blob:source-thumbnail');
+    expect(identical(preview.bytes, png), isFalse,
+        reason: 'source preview bytes are held as a protected session copy');
+    expect(find.textContaining('Orijinal fotoğraf gösterilemedi'), findsNothing);
   });
 
   testWidgets('failed crop preview decode is never silently a blank image', (tester) async {
