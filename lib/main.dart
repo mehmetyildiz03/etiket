@@ -8,6 +8,7 @@ import 'scan/scan_services.dart';
 import 'ui/photo_scan_panel.dart';
 import 'ui/photo_crop_editor.dart';
 import 'ui/doku_mobile_shell.dart';
+import 'ui/doku_result_overview.dart';
 import 'scan/photo_edit.dart';
 
 void main() => runApp(const EtiketApp());
@@ -596,7 +597,11 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   Widget result() {
     final insights = analyzeGarment(garment, purpose);
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      pageTitle('Kumaş analizi', 'Etiket bilgisi ile tahmini değerlendirmeleri ayrı gösteriyoruz.'),
+      DokuResultOverview(
+        garment: garment,
+        sourceConfirmed: draft.sourceConfirmed,
+        onEdit: () => navigate(_Page.edit),
+      ),
       for (final insight in insights)
         Card(child: Padding(padding: const EdgeInsets.all(17),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
