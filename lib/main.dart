@@ -7,6 +7,7 @@ import 'scan/photo_scan.dart';
 import 'scan/scan_services.dart';
 import 'ui/photo_scan_panel.dart';
 import 'ui/photo_crop_editor.dart';
+import 'ui/doku_mobile_shell.dart';
 import 'scan/photo_edit.dart';
 
 void main() => runApp(const EtiketApp());
@@ -40,7 +41,7 @@ class EtiketApp extends StatelessWidget {
   }
 }
 
-enum _Page { home, camera, label, edit, purpose, result }
+enum _Page { home, camera, label, edit, purpose, result, history, info, settings }
 
 class EtiketHome extends StatefulWidget {
   const EtiketHome({super.key, this.photoSource, this.textRecognizer});
@@ -237,6 +238,11 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     });
   }
 
+  Future<void> openPhotoSource(PhotoSource source) async {
+    navigate(_Page.camera);
+    await scan.pick(source);
+  }
+
   void navigate(_Page target) {
     final leaveScan = page == _Page.camera && target != _Page.camera;
     final cancelRecovery = _recoveringStartup;
@@ -253,6 +259,7 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
       _Page.edit => draft.imported ? _Page.label : _Page.camera,
       _Page.purpose => _Page.edit,
       _Page.result => _Page.purpose,
+      _Page.history || _Page.info || _Page.settings => _Page.home,
     });
   }
 
@@ -281,14 +288,60 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
         }
       },
       child: Scaffold(
-      appBar: AppBar(
-        leading: page == _Page.home ? const Icon(Icons.checkroom, color: _green)
-            : IconButton(icon: const Icon(Icons.arrow_back), onPressed: back,
-                tooltip: 'Geri'),
+      appBar: page == _Page.home ? null : AppBar(
+        leading: switch (page) {
+          _Page.history || _Page.info || _Page.settings => null,
+          _ => IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: back,
+            tooltip: 'Geri',
+          ),
+        },
         title: const Text('doku.', style: TextStyle(fontWeight: FontWeight.w900,
           letterSpacing: -0.8, color: _green)),
         centerTitle: false,
       ),
+      bottomNavigationBar: switch (page) {
+        _Page.home || _Page.history || _Page.info || _Page.settings =>
+          NavigationBar(
+            selectedIndex: switch (page) {
+              _Page.home => 0,
+              _Page.history => 1,
+              _Page.info => 2,
+              _Page.settings => 3,
+              _ => 0,
+            },
+            onDestinationSelected: (index) => navigate(switch (index) {
+              0 => _Page.home,
+              1 => _Page.history,
+              2 => _Page.info,
+              _ => _Page.settings,
+            }),
+            destinations: const [
+              NavigationDestination(
+                icon: Icon(Icons.document_scanner_outlined),
+                selectedIcon: Icon(Icons.document_scanner),
+                label: 'Oku',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.history_outlined),
+                selectedIcon: Icon(Icons.history),
+                label: 'Geçmiş',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.menu_book_outlined),
+                selectedIcon: Icon(Icons.menu_book),
+                label: 'Bilgi',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
+                label: 'Ayarlar',
+              ),
+            ],
+          ),
+        _ => null,
+      },
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
@@ -299,6 +352,10 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
             if (page == _Page.edit) edit(),
             if (page == _Page.purpose) choosePurpose(),
             if (page == _Page.result) result(),
+            if (page == _Page.history)
+              DokuHistoryEmpty(onScan: () => navigate(_Page.camera)),
+            if (page == _Page.info) const DokuFiberLibrary(),
+            if (page == _Page.settings) const DokuPrivacySettings(),
           ],
         ),
       ),
@@ -306,32 +363,13 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     );
   }
 
-  Widget home() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-    pageTitle('Ne giydiğini gerçekten bil.',
-      'Kıyafetinin kumaş içeriğini öğren, avantajlarını ve bilinmeyenlerini gör.'),
-    Card(child: Padding(
-      padding: const EdgeInsets.symmetric(vertical: 42, horizontal: 18),
-      child: Column(children: [
-        const Icon(Icons.sell_outlined, size: 64, color: _green),
-        const SizedBox(height: 10),
-        const Text('%70 PAMUK  ·  %30 POLYESTER',
-          style: TextStyle(fontWeight: FontWeight.bold, color: _green)),
-        const SizedBox(height: 8),
-        Text('Etiketinden fazlasını öğren.', style: TextStyle(color: Colors.grey.shade700)),
-      ]),
-    )),
-    const SizedBox(height: 20),
-    primary('Etiket tara', () => navigate(_Page.camera), icon: Icons.camera_alt_outlined),
-    const SizedBox(height: 12),
-    OutlinedButton.icon(onPressed: () => navigate(_Page.edit),
-      icon: const Icon(Icons.edit_note), label: const Text('Elle kumaş bilgisi gir')),
-    const SizedBox(height: 12),
-    OutlinedButton.icon(onPressed: () => openLabel(_Page.home),
-      icon: const Icon(Icons.content_paste), label: const Text('Etiket metnini yapıştır')),
-    const SizedBox(height: 22),
-    const Text('Üyelik gerekmez • Etiketini kontrol ederek doğrula',
-      textAlign: TextAlign.center, style: TextStyle(color: Colors.black54, fontSize: 12)),
-  ]);
+  Widget home() => DokuHomeDashboard(
+    onScan: () => navigate(_Page.camera),
+    onCamera: () => unawaited(openPhotoSource(PhotoSource.camera)),
+    onGallery: () => unawaited(openPhotoSource(PhotoSource.gallery)),
+    onManual: () => navigate(_Page.edit),
+    onPaste: () => openLabel(_Page.home),
+  );
 
   Widget camera() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     pageTitle('Etiketi tara', 'Etiketi net ve aydınlık çek. Okunan yazıyı kontrol etmeden doğrulamıyoruz.'),
