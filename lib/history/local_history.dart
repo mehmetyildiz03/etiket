@@ -114,7 +114,7 @@ class LocalHistoryRepository {
     final current = await _load();
     if (current.length >= maxEntries) throw StateError('History is full');
     final stamp = DateTime.now().toUtc();
-    final id = stamp.microsecondsSinceEpoch.toString() + '-' + (_idSequence++).toString();
+    final id = '${stamp.microsecondsSinceEpoch}-${_idSequence++}';
     final record = SavedGarment(id, stamp, title.trim(), source,
       Garment(title.trim(), List.unmodifiable([
         for (final s in garment.sections)
