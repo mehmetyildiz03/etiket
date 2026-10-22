@@ -40,7 +40,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Kıyafeti kaydet'),findsOneWidget);
-    await tester.ensureVisible(find.text('Kıyafeti kaydet'));
+    await tester.scrollUntilVisible(find.text('Kıyafeti kaydet'), 330);
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Kıyafeti kaydet'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last,'Günlük gömlek');
