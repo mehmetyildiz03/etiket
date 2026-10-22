@@ -9,6 +9,8 @@ import 'ui/photo_scan_panel.dart';
 import 'ui/photo_crop_editor.dart';
 import 'ui/doku_mobile_shell.dart';
 import 'ui/doku_result_overview.dart';
+import 'ui/doku_history_page.dart';
+import 'history/local_history.dart';
 import 'scan/photo_edit.dart';
 
 void main() => runApp(const EtiketApp());
@@ -17,9 +19,10 @@ const _green = Color(0xFF254A3F);
 const _cream = Color(0xFFF4F2EC);
 
 class EtiketApp extends StatelessWidget {
-  const EtiketApp({super.key, this.photoSource, this.textRecognizer});
+  const EtiketApp({super.key, this.photoSource, this.textRecognizer, this.historyStore});
   final PhotoSourceService? photoSource;
   final TextRecognitionService? textRecognizer;
+  final HistoryStore? historyStore;
 
   @override
   Widget build(BuildContext context) {
@@ -37,7 +40,8 @@ class EtiketApp extends StatelessWidget {
           minimumSize: const Size.fromHeight(54),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)))),
       ),
-      home: EtiketHome(photoSource: photoSource, textRecognizer: textRecognizer),
+      home: EtiketHome(photoSource: photoSource, textRecognizer: textRecognizer,
+        historyStore: historyStore),
     );
   }
 }
@@ -45,9 +49,10 @@ class EtiketApp extends StatelessWidget {
 enum _Page { home, camera, label, edit, purpose, result, history, info, settings }
 
 class EtiketHome extends StatefulWidget {
-  const EtiketHome({super.key, this.photoSource, this.textRecognizer});
+  const EtiketHome({super.key, this.photoSource, this.textRecognizer, this.historyStore});
   final PhotoSourceService? photoSource;
   final TextRecognitionService? textRecognizer;
+  final HistoryStore? historyStore;
   @override
   State<EtiketHome> createState() => _EtiketHomeState();
 }
@@ -65,6 +70,12 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   int _labelEditRevision = 0;
   bool _photoChanged = false;
   ScanPhoto? _lastScanPhoto;
+  late final LocalHistoryRepository _historyRepository;
+  List<SavedGarment> _savedItems = const [];
+  bool _historyLoading = true;
+  bool _historyRequested = false;
+  bool _historyBusy = false;
+  String? _historyError;
 
   bool get allValid => draft.canAnalyze;
   Garment get garment => draft.verifiedGarment();
@@ -72,6 +83,7 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _historyRepository = LocalHistoryRepository(widget.historyStore ?? DeviceHistoryStore());
     final services = createScanServices();
     scan = PhotoScanController(widget.photoSource ?? services.photos,
       widget.textRecognizer ?? services.recognizer);
@@ -239,6 +251,132 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     });
   }
 
+
+  Future<void> _loadHistory() async {
+    if (mounted) setState(() { _historyLoading = true; _historyError = null; });
+    try {
+      final items = await _historyRepository.list();
+      if (mounted) setState(() { _savedItems = items; _historyLoading = false; });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+        _historyError = 'Yerel geçmiş açılamıyor. Kayıtlara dokunulmadı.';
+        _historyLoading = false;
+        });
+      }
+    }
+  }
+
+  void _historyNotice(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _saveCurrent() async {
+    if (_historyBusy || _historyLoading || _historyError != null ||
+        page != _Page.result || !draft.canAnalyze || !draft.hasUserChanges) {
+      return;
+    }
+    var proposed = 'Kıyafet';
+    final title = await showDialog<String>(context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Kıyafeti kaydet'),
+        content: TextFormField(
+          initialValue: proposed, maxLength: 60,
+          onChanged: (value) => proposed = value,
+          decoration: const InputDecoration(labelText: 'Kıyafet adı'),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context),
+            child: const Text('Vazgeç')),
+          FilledButton(onPressed: () => Navigator.pop(context, proposed.trim()),
+            child: const Text('Kaydet')),
+        ],
+      ),
+    );
+    if (!mounted || title == null || title.isEmpty || _historyBusy ||
+        page != _Page.result || !draft.canAnalyze || !draft.hasUserChanges) {
+      return;
+    }
+    final snapshot = draft.verifiedGarment();
+    final source = draft.imported ? 'label' : 'manual';
+    setState(() => _historyBusy = true);
+    try {
+      final updated = await _historyRepository.save(
+        garment: snapshot, title: title, source: source,
+        explicitlyReviewed: draft.hasUserChanges &&
+            (!draft.imported || draft.sourceConfirmed),
+      );
+      if (!mounted) return;
+      setState(() => _savedItems = updated);
+      _historyNotice('Kıyafet yerel depoya yazıldı.');
+    } catch (_) {
+      _historyNotice('Kaydedilemedi. Yerel depolama izinlerini veya doluluğunu kontrol edin.');
+      await _loadHistory();
+    } finally {
+      if (mounted) setState(() => _historyBusy = false);
+    }
+  }
+
+  Future<bool> _confirmRemove(String title, String message) async {
+    return await showDialog<bool>(context: context,
+      builder: (context) => AlertDialog(
+        title: Text(title), content: Text(message),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false),
+            child: const Text('Vazgeç')),
+          TextButton(onPressed: () => Navigator.pop(context, true),
+            child: const Text('Sil')),
+        ],
+      ),
+    ) ?? false;
+  }
+
+  Future<void> _removeSaved(SavedGarment item) async {
+    if (_historyBusy || _historyLoading || _historyError != null) return;
+    if (!await _confirmRemove('Kayıt silinsin mi?',
+        'Seçilen kıyafetin cihazdaki kaydı silinecek. Bu işlem geri alınamaz.')) {
+      return;
+    }
+    if (!mounted || _historyBusy) { return; }
+    setState(() => _historyBusy = true);
+    try {
+      final next = await _historyRepository.remove(item.id);
+      if (mounted) setState(() => _savedItems = next);
+      _historyNotice('Kayıt silindi.');
+    } catch (_) {
+      _historyNotice('Silinemedi; geçmiş yeniden kontrol ediliyor.');
+      await _loadHistory();
+    } finally {
+      if (mounted) setState(() => _historyBusy = false);
+    }
+  }
+
+  Future<void> _clearSaved() async {
+    if (_historyBusy || _historyLoading || _historyError != null || _savedItems.isEmpty) return;
+    if (!await _confirmRemove('Tüm geçmiş silinsin mi?',
+        'Bütün kıyafet kayıtları bu cihazdan silinecek. Geri alınamaz.')) {
+      return;
+    }
+    if (!mounted || _historyBusy) { return; }
+    setState(() => _historyBusy = true);
+    try {
+      final next = await _historyRepository.clearAll();
+      if (mounted) setState(() => _savedItems = next);
+      _historyNotice('Yerel geçmiş silindi.');
+    } catch (_) {
+      _historyNotice('Geçmiş silinemedi; durum yeniden kontrol ediliyor.');
+      await _loadHistory();
+    } finally {
+      if (mounted) setState(() => _historyBusy = false);
+    }
+  }
+
+  void _showSaved(SavedGarment item) {
+    showDialog<void>(context: context,
+      builder: (context) => DokuSavedDetail(item: item));
+  }
+
   Future<void> openPhotoSource(PhotoSource source) async {
     navigate(_Page.camera);
     await scan.pick(source);
@@ -249,6 +387,12 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
     final cancelRecovery = _recoveringStartup;
     _recoveringStartup = false;
     setState(() => page = target);
+    if (!_historyRequested &&
+        (target == _Page.result || target == _Page.history ||
+         target == _Page.settings)) {
+      _historyRequested = true;
+      unawaited(_loadHistory());
+    }
     if (leaveScan || cancelRecovery || target == _Page.home) scan.abandon();
   }
   void back() {
@@ -354,9 +498,34 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
             if (page == _Page.purpose) choosePurpose(),
             if (page == _Page.result) result(),
             if (page == _Page.history)
-              DokuHistoryEmpty(onScan: () => navigate(_Page.camera)),
+              DokuHistoryPage(
+                items: _savedItems, isLoading: _historyLoading,
+                isBusy: _historyBusy, error: _historyError,
+                onScan: () => navigate(_Page.camera),
+                onOpen: _showSaved,
+                onDelete: (item) => unawaited(_removeSaved(item)),
+                onClear: () => unawaited(_clearSaved()),
+                onRetry: () => unawaited(_loadHistory()),
+              ),
             if (page == _Page.info) const DokuFiberLibrary(),
-            if (page == _Page.settings) const DokuPrivacySettings(),
+            if (page == _Page.settings) ...[
+              const DokuPrivacySettings(),
+              const SizedBox(height: 12),
+              Text('Bu cihazda kayıtlı kıyafet: ${_savedItems.length}'),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: _historyBusy || _historyLoading ||
+                    _historyError != null || _savedItems.isEmpty
+                  ? null : () => unawaited(_clearSaved()),
+                icon: const Icon(Icons.delete_forever_outlined),
+                label: const Text('Tüm yerel geçmişi sil'),
+              ),
+              const Text(
+                'Bu kayıtlar başka cihazlarla senkronize edilmez. '
+                'Tarayıcı verilerinin temizlenmesi kayıtları silebilir.',
+                style: TextStyle(color: Colors.black54),
+              ),
+            ],
           ],
         ),
       ),
@@ -618,6 +787,20 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
             Text(insight.confirmed ? 'KONTROL EDİLEN ETİKET BİLGİSİ' : 'GENEL YORUM / TAHMİN',
               style: const TextStyle(fontSize: 10, color: Colors.black54)),
           ]))),
+      const SizedBox(height: 15),
+      if (!draft.hasUserChanges) const Text(
+        'Örnek başlangıç bileşimi gerçek kıyafet olarak kaydedilemez.',
+        style: TextStyle(color: Colors.black54),
+      ),
+      const SizedBox(height: 8),
+      FilledButton.icon(
+        key: const ValueKey('save-garment'),
+        onPressed: _historyBusy || _historyLoading || _historyError != null ||
+            !draft.canAnalyze || !draft.hasUserChanges
+          ? null : () => unawaited(_saveCurrent()),
+        icon: const Icon(Icons.bookmark_add_outlined),
+        label: const Text('Kıyafeti kaydet'),
+      ),
       const SizedBox(height: 15),
       primary('Yeni analiz', () => navigate(_Page.home), icon: Icons.restart_alt),
     ]);
