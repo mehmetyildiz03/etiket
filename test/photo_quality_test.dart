@@ -107,6 +107,30 @@ void main() {
     );
   });
 
+  test('vertical neighbor contrast contributes without horizontal edges', () {
+    final report = PhotoQualityReport.fromRgba(
+      rgba: grayRgba([0, 0, 255, 255]),
+      width: 2,
+      height: 2,
+    );
+    expect(report.dynamicRange, 255);
+    expect(report.meanNeighborDifference, 127.5);
+    expect(report.possiblyLowDetail, isFalse);
+  });
+
+  test('half-transparent black composites to midgray over white', () {
+    final report = PhotoQualityReport.fromRgba(
+      rgba: grayRgba([0, 0, 0, 0], alpha: 128),
+      width: 2,
+      height: 2,
+    );
+    expect(report.meanLuma, 127);
+    expect(report.lightClippingFraction, 0);
+    expect(report.darkClippingFraction, 0);
+    expect(report.possiblyTooBright, isFalse);
+    expect(report.possiblyTooDark, isFalse);
+  });
+
   test('analysis does not modify caller-owned pixel bytes', () {
     final bytes = grayRgba([0, 64, 128, 255]);
     final before = Uint8List.fromList(bytes);
