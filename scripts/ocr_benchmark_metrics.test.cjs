@@ -101,3 +101,19 @@ test('control transcription mistakes are measured independently of filter reject
   assert.equal(r.rawTranscription.characterEdits,1);assert.equal(r.rawTranscription.wordEdits,1);
   assert.equal(r.falseAccepted,false);
 });
+
+test('repeated expected fiber/percentage pairs need distinct printed occurrences', () => {
+  const fixture = {id:'two-sections',kind:'positive',
+    groundTruth:'DIŞ KUMAŞ\n80% PAMUK\nASTAR\n80% PAMUK',
+    expectedPairs:[{percent:'80',fiber:'PAMUK'},{percent:'80',fiber:'PAMUK'}]};
+  const once = scoreCase(fixture,{code:null,text:'DIŞ KUMAŞ\n80% PAMUK\nASTAR'});
+  assert.equal(once.correctPairs,1);
+  assert.equal(once.fullyCorrectComposition,false);
+  // One printed percentage between two fiber names must not count twice.
+  const shared = scoreCase(fixture,{code:null,text:'PAMUK 80% PAMUK'});
+  assert.equal(shared.correctPairs,1);
+  const twice = scoreCase(fixture,{code:null,text:'80% PAMUK\nPAMUK 80%'});
+  assert.equal(twice.correctPairs,2);
+  assert.equal(twice.fullyCorrectComposition,true);
+  // This is multiplicity only; section placement remains unmeasured.
+});
