@@ -48,6 +48,33 @@ void main() {
     expect(find.byKey(const ValueKey('second-ocr-provenance')), findsNothing);
   });
 
+  testWidgets('rejected scan reveals PSM3 evidence only by explicit request',
+      (tester) async {
+    final evidence = OcrObservation(
+      rawText: 'COMPOSITION 60 POLYESTER 40 COTTON',
+      confidence: 33,
+      decision: OcrDecision.lowConfidence,
+      secondReading: OcrSecondReading(
+        rawText: '60% Polyester\\n40% Cotton',
+        confidence: 90,
+        engine: OcrReadingEngine.tesseractJs,
+        variant: OcrReadingVariant.automaticPagePsm3,
+      ),
+    );
+    await _showDiagnostics(tester, evidence);
+    expect(
+      find.text('İkinci okuma kaynağı: Tesseract.js — otomatik sayfa bölümleme (PSM 3).'),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsOneWidget);
+    expect(evidence.acceptedText, isNull,
+        reason: 'PSM3 output must never be accepted automatically');
+    expect(find.textContaining('İlk okuma reddedilmişse'), findsOneWidget);
+    await tester.tap(find.text('Ham OCR metnini gizle'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsNothing);
+  });
+
   testWidgets('unspecified secondary source is never presented as verified',
       (tester) async {
     final evidence = _observation(OcrSecondReading(

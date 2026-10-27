@@ -24,6 +24,8 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
     final second = observation.secondReading;
     final verifiedSparseText = second?.engine == OcrReadingEngine.tesseractJs &&
         second?.variant == OcrReadingVariant.sparseTextPsm11;
+    final verifiedAutoPage = second?.engine == OcrReadingEngine.tesseractJs &&
+        second?.variant == OcrReadingVariant.automaticPagePsm3;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -86,14 +88,17 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
             Text(
               verifiedSparseText
                   ? 'İkinci okuma kaynağı: Tesseract.js — seyrek metin (PSM 11).'
-                  : 'İkinci okuma kaynağı: motor veya yöntem doğrulanmadı.',
+                  : verifiedAutoPage
+                      ? 'İkinci okuma kaynağı: Tesseract.js — otomatik sayfa bölümleme (PSM 3).'
+                      : 'İkinci okuma kaynağı: motor veya yöntem doğrulanmadı.',
               key: const ValueKey('second-ocr-provenance'),
             ),
             const SizedBox(height: 8),
             Text(
-              verifiedSparseText
+              verifiedSparseText || verifiedAutoPage
                   ? 'Aynı fotoğraf farklı metin bölümlendirme yöntemiyle yeniden okundu. '
                     'İki sonuç çelişebilir; uygulama rakamları veya elyafları otomatik seçmez. '
+                    'İlk okuma reddedilmişse ikinci okuma da otomatik kabul edilmez. '
                     'Güven puanı doğru olma olasılığı değildir.'
                   : 'Alternatif okumanın üretildiği motor veya yöntem doğrulanmadı. '
                     'İki sonuç çelişebilir; uygulama rakamları veya elyafları otomatik seçmez. '

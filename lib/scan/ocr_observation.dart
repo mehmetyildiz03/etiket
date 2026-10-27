@@ -5,7 +5,7 @@ enum OcrDecision { noText, lowConfidence, noComposition, candidate }
 /// Provenance is diagnostic metadata, not a reliability score. Synthetic
 /// readings without verified provenance must remain explicitly unspecified.
 enum OcrReadingEngine { unspecified, tesseractJs }
-enum OcrReadingVariant { unspecified, sparseTextPsm11 }
+enum OcrReadingVariant { unspecified, sparseTextPsm11, automaticPagePsm3 }
 
 /// Independent OCR output, *not* a corrected transcription or a draft.
 class OcrSecondReading {
