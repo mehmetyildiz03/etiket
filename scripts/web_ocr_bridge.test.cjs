@@ -52,7 +52,10 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
         width: 1, height: 1, getContext: () => ({fillRect() {}, drawImage() {}, clearRect() {},
           scale() {}, translate() {}, rotate() {}, setTransform() {}, putImageData() {},
           getImageData: (x, y, w, h) => {
-            if (failDeskewRead) {
+            // The quality probe reads a <=256px sample first and intentionally
+            // fails open. Inject this fault only into the 360px deskew
+            // sample so the test exercises the intended cleanup path.
+            if (failDeskewRead && Math.max(w, h) > 256) {
               failDeskewRead = false;
               throw new Error('synthetic canvas read failure');
             }
