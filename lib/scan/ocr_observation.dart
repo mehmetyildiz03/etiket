@@ -123,7 +123,7 @@ String _textAroundPrintedPercentages(String text) => text
     .replaceAll(_printedPercentPattern, ' [yuzde] ')
     .split(RegExp(r'\r\n?|\n'))
     .map((line) =>
-        line.trim().replaceAll(RegExp(r'[ \t]+'), ' ').toLowerCase())
+        line.trim().replaceAll(RegExp(r'[ \t\u00A0\u202F]+'), ' ').toLowerCase())
     .where((line) => line.isNotEmpty)
     .join('\n');
 
