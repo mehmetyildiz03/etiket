@@ -246,6 +246,8 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
     await require('./web_ocr_crop_smoke.cjs')(browser, baseUrl, evidence);
     stage = 'cropped no-text/year and EXIF orientation';
     await require('./web_ocr_crop_safety.cjs')(browser, baseUrl, evidence);
+    stage = 'two-region crop pixel isolation through real OCR';
+    await require('./web_ocr_crop_region_isolation.cjs')(browser, baseUrl);
   } finally { await browser.close(); }
 })().catch(error => {
   const message = error.stack || String(error);
