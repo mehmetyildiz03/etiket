@@ -83,16 +83,36 @@ class OcrObservation {
 }
 
 
-/// Only explicit printed ratios; this signal does not validate a composition.
-/// Exclude partial numeric matches (e.g. 080% inside 1080%).
+/// Only explicitly percent-marked numbers; no composition or fiber inference.
+/// Compare decimal punctuation and trailing zero formatting conservatively.
+/// Never take a partial ratio from an oversized or malformed number.
 List<String> _printedPercentTokens(String text) {
-  final matches = RegExp(r'[0-9]{1,3}\s*[%％]|[%％]\s*[0-9]{1,3}').allMatches(text);
-  final digits = RegExp(r'[0-9]');
+  final matches = RegExp(
+    r'[0-9]{1,3}(?:[.,][0-9]{1,2})?[ \t]*[%％]|'
+    r'[%％][ \t]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
+  ).allMatches(text);
+  final digit = RegExp(r'[0-9]');
   return matches.where((match) {
-    return (match.start == 0 ||
-            !digits.hasMatch(text.substring(match.start - 1, match.start))) &&
-        (match.end == text.length ||
-            !digits.hasMatch(text.substring(match.end, match.end + 1)));
-  }).map((match) =>
-      match.group(0)!.replaceAll(RegExp(r'[%％\s]'), '')).toList(growable: false);
+    final before = match.start > 0 ? text[match.start - 1] : '';
+    final after = match.end < text.length ? text[match.end] : '';
+    final partialLeft = digit.hasMatch(before) ||
+        ((before == '.' || before == ',') &&
+            match.start > 1 &&
+            digit.hasMatch(text[match.start - 2]));
+    final partialRight = digit.hasMatch(after) ||
+        ((after == '.' || after == ',') &&
+            match.end + 1 < text.length &&
+            digit.hasMatch(text[match.end + 1]));
+    return !partialLeft && !partialRight;
+  }).map((match) {
+    final value = match.group(0)!
+        .replaceAll(RegExp(r'[%％ \t]'), '')
+        .replaceAll(',', '.');
+    final separator = value.indexOf('.');
+    if (separator < 0) return value;
+    final whole = value.substring(0, separator);
+    final fraction =
+        value.substring(separator + 1).replaceFirst(RegExp(r'0+$'), '');
+    return fraction.isEmpty ? whole : '${whole}.${fraction}';
+  }).toList(growable: false);
 }
