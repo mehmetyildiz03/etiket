@@ -107,12 +107,12 @@ class OcrObservation {
 
 /// Only explicitly percent-marked numbers; no composition or fiber inference.
 /// Compare decimal punctuation and trailing zero formatting conservatively.
-/// OCR may insert nonbreaking spaces (U+00A0/U+202F) next to a printed %;
+/// OCR may insert typographic inline spaces (U+00A0/U+2007/U+2009/U+202F) next to a printed %;
 /// treat only these inline spaces as separators, never line breaks.
 /// Never take a partial ratio from an oversized or malformed number.
 final RegExp _printedPercentPattern = RegExp(
-  r'[0-9]{1,3}(?:[.,][0-9]{1,2})?[ \t\u00A0\u202F]*[%％]|'
-  r'[%％][ \t\u00A0\u202F]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
+  r'[0-9]{1,3}(?:[.,][0-9]{1,2})?[ \t\u00A0\u2007\u2009\u202F]*[%％]|'
+  r'[%％][ \t\u00A0\u2007\u2009\u202F]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
 );
 
 /// Keep both line boundaries and percentage *positions* when comparing
@@ -123,7 +123,7 @@ String _textAroundPrintedPercentages(String text) => text
     .replaceAll(_printedPercentPattern, ' [yuzde] ')
     .split(RegExp(r'\r\n?|\n'))
     .map((line) =>
-        line.trim().replaceAll(RegExp(r'[ \t\u00A0\u202F]+'), ' ').toLowerCase())
+        line.trim().replaceAll(RegExp(r'[ \t\u00A0\u2007\u2009\u202F]+'), ' ').toLowerCase())
     .where((line) => line.isNotEmpty)
     .join('\n');
 
@@ -148,7 +148,7 @@ List<String> _printedPercentTokens(String text) {
     return !partialLeft && !partialRight;
   }).map((match) {
     final value = match.group(0)!
-        .replaceAll(RegExp(r'[%％ \t\u00A0\u202F]'), '')
+        .replaceAll(RegExp(r'[%％ \t\u00A0\u2007\u2009\u202F]'), '')
         .replaceAll(',', '.');
     final separator = value.indexOf('.');
     if (separator < 0) return value;
