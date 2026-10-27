@@ -198,6 +198,10 @@ class _JsBridge
         secondReading: second == null ? null : OcrSecondReading(
           rawText: second.rawText,
           confidence: second.confidence,
+          // The JS bridge validates mode == sparseText before this point.
+          // This is provenance only, never an automatic selection signal.
+          engine: OcrReadingEngine.tesseractJs,
+          variant: OcrReadingVariant.sparseTextPsm11,
         ),
       );
       if (observation.acceptedText != result.text ||

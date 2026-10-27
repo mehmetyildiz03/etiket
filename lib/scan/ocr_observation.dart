@@ -2,9 +2,19 @@
 /// fiber percentages. No parser, Flutter or native OCR dependency lives here.
 enum OcrDecision { noText, lowConfidence, noComposition, candidate }
 
-/// Independent Tesseract output, *not* a corrected transcription or a draft.
+/// Provenance is diagnostic metadata, not a reliability score. Synthetic
+/// readings without verified provenance must remain explicitly unspecified.
+enum OcrReadingEngine { unspecified, tesseractJs }
+enum OcrReadingVariant { unspecified, sparseTextPsm11 }
+
+/// Independent OCR output, *not* a corrected transcription or a draft.
 class OcrSecondReading {
-  OcrSecondReading({required this.rawText, required this.confidence}) {
+  OcrSecondReading({
+    required this.rawText,
+    required this.confidence,
+    this.engine = OcrReadingEngine.unspecified,
+    this.variant = OcrReadingVariant.unspecified,
+  }) {
     if (rawText.length > 20000 ||
         (confidence != null &&
             (!confidence!.isFinite || confidence! < 0 || confidence! > 100))) {
@@ -13,6 +23,8 @@ class OcrSecondReading {
   }
   final String rawText;
   final double? confidence;
+  final OcrReadingEngine engine;
+  final OcrReadingVariant variant;
 }
 
 class OcrObservation {
