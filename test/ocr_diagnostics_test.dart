@@ -437,6 +437,57 @@ void main() {
     expect(compare('12.5% CO', '22.5% CO').acceptedText, '12.5% CO');
   });
 
+  test('D4.3 equal ratios can hide fiber, section and line-context differences', () {
+    OcrObservation compare(String first, String second) => OcrObservation(
+      rawText: first,
+      confidence: 48,
+      decision: OcrDecision.candidate,
+      secondReading: OcrSecondReading(rawText: second, confidence: 72),
+    );
+    expect(compare('80% PAMUK\n20% PES', '%80 PES\n%20 PAMUK')
+        .percentageContextDiffers, isTrue);
+    expect(compare('DIŞ: 80% PAMUK\nASTAR: 20% PES',
+        'DIŞ: 80% PAMUK\nDOLGU: 20% PES')
+        .percentageContextDiffers, isTrue);
+    expect(compare('80% PAMUK\n20% PES', '80% PAMUK 20% PES')
+        .percentageContextDiffers, isTrue);
+    expect(compare('12.5% CO', '%12,50 co')
+        .percentageContextDiffers, isFalse);
+    expect(compare('80% PAMUK', '20% POLYESTER')
+        .percentageContextDiffers, isFalse);
+    expect(compare('no ratios', 'other no ratios')
+        .percentageContextDiffers, isFalse);
+    expect(candidate('80% PAMUK').percentageContextDiffers, isFalse);
+    expect(compare('80% PAMUK', '80% PES').acceptedText, '80% PAMUK');
+  });
+
+  testWidgets('matching OCR ratios with changed fibers warn only after opt-in',
+      (tester) async {
+    bridge.result = OcrObservation(
+      rawText: '80% PAMUK\n20% PES',
+      confidence: 48,
+      decision: OcrDecision.candidate,
+      secondReading: OcrSecondReading(
+        rawText: '80% PES\n20% PAMUK',
+        confidence: 72,
+      ),
+    );
+    await tester.pumpWidget(
+      EtiketApp(photoSource: photos, textRecognizer: WebTextRecognizer(bridge)),
+    );
+    await tester.pumpAndSettle();
+    await tapText(tester, 'Etiket tara');
+    await tapText(tester, 'Galeriden seç');
+    await tapText(tester, 'Fotoğraftaki metni oku');
+    expect(find.byKey(const ValueKey('ocr-context-disagreement')), findsNothing);
+    await tapText(tester, showRaw);
+    expect(find.byKey(const ValueKey('ocr-context-disagreement')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ocr-percentage-disagreement')), findsNothing);
+    await tapText(tester, 'Metni incele ve düzelt');
+    final field = find.byKey(const ValueKey('label-text'));
+    expect(tester.widget<TextField>(field).controller!.text, '80% PAMUK\n20% PES');
+  });
+
   testWidgets('secondary OCR remains opt-in and never replaces a mistaken first percentage', (tester) async {
     bridge.result = OcrObservation(
       rawText: 'OF 0% Polyester\\n% 40% Cotton',
