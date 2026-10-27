@@ -107,10 +107,12 @@ class OcrObservation {
 
 /// Only explicitly percent-marked numbers; no composition or fiber inference.
 /// Compare decimal punctuation and trailing zero formatting conservatively.
+/// OCR may insert nonbreaking spaces (U+00A0/U+202F) next to a printed %;
+/// treat only these inline spaces as separators, never line breaks.
 /// Never take a partial ratio from an oversized or malformed number.
 final RegExp _printedPercentPattern = RegExp(
-  r'[0-9]{1,3}(?:[.,][0-9]{1,2})?[ \t]*[%％]|'
-  r'[%％][ \t]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
+  r'[0-9]{1,3}(?:[.,][0-9]{1,2})?[ \t\u00A0\u202F]*[%％]|'
+  r'[%％][ \t\u00A0\u202F]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
 );
 
 /// Keep both line boundaries and percentage *positions* when comparing
@@ -146,7 +148,7 @@ List<String> _printedPercentTokens(String text) {
     return !partialLeft && !partialRight;
   }).map((match) {
     final value = match.group(0)!
-        .replaceAll(RegExp(r'[%％ \t]'), '')
+        .replaceAll(RegExp(r'[%％ \t\u00A0\u202F]'), '')
         .replaceAll(',', '.');
     final separator = value.indexOf('.');
     if (separator < 0) return value;
