@@ -187,9 +187,16 @@ class _JsBridge
         _ => throw const BrowserScanException('recognition'),
       };
       final second = evidence.secondReading;
-      if (second != null && (decision != OcrDecision.candidate ||
-          second.mode != 'sparseText')) {
-        throw const BrowserScanException('recognition');
+      // Only the two known local methods may be marked as verified.
+      // Rejected PSM6 text remains rejected even if PSM3 finds a candidate.
+      if (second != null) {
+        final verifiedSparse = decision == OcrDecision.candidate &&
+            second.mode == 'sparseText';
+        final verifiedPage = decision != OcrDecision.candidate &&
+            second.mode == 'autoPage';
+        if (!verifiedSparse && !verifiedPage) {
+          throw const BrowserScanException('recognition');
+        }
       }
       final observation = OcrObservation(
         rawText: evidence.rawText,
@@ -198,10 +205,12 @@ class _JsBridge
         secondReading: second == null ? null : OcrSecondReading(
           rawText: second.rawText,
           confidence: second.confidence,
-          // The JS bridge validates mode == sparseText before this point.
-          // This is provenance only, never an automatic selection signal.
+          // JS mode and original decision were validated above. This only
+          // identifies diagnostic evidence, never automatically accepts it.
           engine: OcrReadingEngine.tesseractJs,
-          variant: OcrReadingVariant.sparseTextPsm11,
+          variant: second.mode == 'autoPage'
+              ? OcrReadingVariant.automaticPagePsm3
+              : OcrReadingVariant.sparseTextPsm11,
         ),
       );
       if (observation.acceptedText != result.text ||
