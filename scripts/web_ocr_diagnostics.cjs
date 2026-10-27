@@ -171,8 +171,15 @@ module.exports = async (browser, baseUrl, evidence) => {
       if (kind.startsWith('control')) {
         assert.ok(actual.confidence >= 45);
         assert.match(actual.rawText, kind === 'control-en' ? /PLEASE CLOSE THE DOOR/ : /HAVA/);
+        // Flutter Web sometimes paints Text correctly while Playwright's
+        // getByText cannot see its canvas-backed semantics node. Require the
+        // exact message substring through either text OR its accessibility
+        // label; never accept an unrelated failure message.
+        const errorMessage = 'Yazı algılandı, ancak kumaş bileşimi tespit edilemedi.';
         await page
-          .getByText('Yazı algılandı, ancak kumaş bileşimi tespit edilemedi.', { exact: false })
+          .getByText(errorMessage, { exact: false })
+          .or(page.locator('[aria-label*=' + JSON.stringify(errorMessage) + ']'))
+          .first()
           .waitFor();
         assert.equal(output.text, null);
       } else if (!candidate) {
