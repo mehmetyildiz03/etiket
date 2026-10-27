@@ -117,6 +117,6 @@ List<String> _printedPercentTokens(String text) {
     final whole = value.substring(0, separator);
     final fraction =
         value.substring(separator + 1).replaceFirst(RegExp(r'0+$'), '');
-    return fraction.isEmpty ? whole : '${whole}.${fraction}';
+    return fraction.isEmpty ? whole : '$whole.$fraction';
   }).toList(growable: false);
 }
