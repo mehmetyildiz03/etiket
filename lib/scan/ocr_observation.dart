@@ -49,6 +49,16 @@ class OcrObservation {
     }
     return false;
   }
+  /// Advisory only: identical printed ratios can still accompany different
+  /// fiber names, section headings or line grouping. Never choose an OCR
+  /// reading or infer a fiber-percentage pairing from this signal.
+  bool get percentageContextDiffers {
+    final alternative = secondReading;
+    if (alternative == null || percentageTokensDiffer) return false;
+    if (_printedPercentTokens(rawText).isEmpty) return false;
+    return _textAroundPrintedPercentages(rawText) !=
+        _textAroundPrintedPercentages(alternative.rawText);
+  }
   String? get acceptedText =>
       decision == OcrDecision.candidate ? rawText : null;
   /// Accepted OCR text remains editable, but a marginal engine score must
@@ -86,11 +96,23 @@ class OcrObservation {
 /// Only explicitly percent-marked numbers; no composition or fiber inference.
 /// Compare decimal punctuation and trailing zero formatting conservatively.
 /// Never take a partial ratio from an oversized or malformed number.
+final RegExp _printedPercentPattern = RegExp(
+  r'[0-9]{1,3}(?:[.,][0-9]{1,2})?[ \t]*[%％]|'
+  r'[%％][ \t]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
+);
+
+/// Keep line boundaries when checking text context; line grouping can change
+/// the apparent association of a percentage with a fiber or section.
+String _textAroundPrintedPercentages(String text) => text
+    .replaceAll(_printedPercentPattern, ' ')
+    .split(RegExp(r'\r\n?|\n'))
+    .map((line) =>
+        line.trim().replaceAll(RegExp(r'[ \t]+'), ' ').toLowerCase())
+    .where((line) => line.isNotEmpty)
+    .join('\n');
+
 List<String> _printedPercentTokens(String text) {
-  final matches = RegExp(
-    r'[0-9]{1,3}(?:[.,][0-9]{1,2})?[ \t]*[%％]|'
-    r'[%％][ \t]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
-  ).allMatches(text);
+  final matches = _printedPercentPattern.allMatches(text);
   final digit = RegExp(r'[0-9]');
   return matches.where((match) {
     final before = match.start > 0 ? text[match.start - 1] : '';
