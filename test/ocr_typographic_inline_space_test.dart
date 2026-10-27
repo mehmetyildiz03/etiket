@@ -94,4 +94,30 @@ void main() {
     expect(reading.percentageTokensDiffer, isFalse);
     expect(reading.percentageContextDiffers, isFalse);
   });
+
+  test('Unicode line and paragraph separators match physical line breaks', () {
+    final reading = compareReadings(
+      '80% PAMUK\u2028\u2028ASTAR\u202920% PES',
+      '80% PAMUK\n\nASTAR\n20% PES',
+    );
+    expect(reading.percentageTokensDiffer, isFalse);
+    expect(reading.percentageContextDiffers, isFalse);
+  });
+
+  test('Unicode paragraph boundary is not silently flattened', () {
+    final reading = compareReadings(
+      '80% PAMUK\u2029ASTAR 20% PES',
+      '80% PAMUK ASTAR 20% PES',
+    );
+    expect(reading.percentageTokensDiffer, isFalse);
+    expect(reading.percentageContextDiffers, isTrue);
+  });
+
+  test('Unicode line break never joins a number to its percent sign', () {
+    final reading = compareReadings(
+      '80\u2028% PAMUK',
+      '80% PAMUK',
+    );
+    expect(reading.percentageTokensDiffer, isTrue);
+  });
 }
