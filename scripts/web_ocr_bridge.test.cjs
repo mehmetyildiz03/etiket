@@ -4,13 +4,14 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const fs = require('node:fs');
 const bridgeSource = fs.readFileSync(require('node:path').join(__dirname, '../web/doku_ocr.js'), 'utf8');
+const qualitySource = fs.readFileSync(require('node:path').join(__dirname, '../web/doku_quality.js'), 'utf8');
 function png(width = 800, height = 600) {
   const bytes = new Uint8Array(32), view = new DataView(bytes.buffer);
   view.setUint32(0, 0x89504e47); view.setUint32(4, 0x0d0a1a0a);
   view.setUint32(16, width); view.setUint32(20, height);
   return new File([bytes], 'label.png', {type: 'image/png'});
 }
-function setup({mobile = false, secure = true, supported = true, failDeskewRead = false} = {}) {
+function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, failDeskewRead = false} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
   let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, mode = '6', recognizes = 0;
   const canvases = [], imageSources = [];
@@ -51,7 +52,10 @@ function setup({mobile = false, secure = true, supported = true, failDeskewRead 
         width: 1, height: 1, getContext: () => ({fillRect() {}, drawImage() {}, clearRect() {},
           scale() {}, translate() {}, rotate() {}, setTransform() {}, putImageData() {},
           getImageData: (x, y, w, h) => {
-            if (failDeskewRead) {
+            // The quality probe reads a <=256px sample first and intentionally
+            // fails open. Inject this fault only into the 360px deskew
+            // sample so the test exercises the intended cleanup path.
+            if (failDeskewRead && Math.max(w, h) > 256) {
               failDeskewRead = false;
               throw new Error('synthetic canvas read failure');
             }
@@ -71,6 +75,7 @@ function setup({mobile = false, secure = true, supported = true, failDeskewRead 
         terminate: async () => { raw.terminate(); }};
     }}
   });
+  if (qualityAvailable) vm.runInContext(qualitySource, context);
   vm.runInContext(bridgeSource, context);
   const bridge = context.dokuOcr;
   return {bridge, context, nodes, revoked, blobs, workers, listeners, optionsHistory, canvases, imageSources,
@@ -87,6 +92,34 @@ function setup({mobile = false, secure = true, supported = true, failDeskewRead 
       return picking;
     }};
 }
+
+test('D4.2 diagnostics measure selected crop, preserve OCR source and release canvases', async () => {
+  const s = setup();
+  const original = await s.upload();
+  assert.equal(original.quality.meanLuminance, 255);
+  assert.equal(original.quality.dynamicRange, 0);
+  assert.equal(original.quality.edgeEnergy, 0);
+  assert.ok(original.quality.sampleWidth <= 256);
+  const edited = await s.bridge.edit(original.path,
+    {left: 0.1, top: 0.1, width: 0.6, height: 0.7, quarterTurns: 0});
+  assert.equal(edited.quality.meanLuminance, 255);
+  await s.bridge.recognize(edited.path, () => {});
+  assert.equal(s.recognizedBlob, s.blobs.get(edited.path),
+    'OCR must still read the exact user-previewed crop, not a diagnostic sample');
+  s.bridge.release(edited.path);
+  s.bridge.release(original.path);
+  assert.equal(s.blobs.size, 0);
+  assert.ok(s.canvases.every(canvas => canvas.width === 0 && canvas.height === 0));
+});
+
+test('D4.2 diagnostics are optional and never block a photo when analyzer is unavailable', async () => {
+  const s = setup({qualityAvailable: false});
+  const photo = await s.upload();
+  assert.equal(photo.quality, null);
+  assert.match(await s.bridge.recognize(photo.path, () => {}), /Pamuk/);
+  s.bridge.dispose();
+  assert.equal(s.blobs.size, 0);
+});
 
 test('upload normalizes locally; release/dispose revoke every owned URL', async () => {
   const s = setup(), photo = await s.upload();
