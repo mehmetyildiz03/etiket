@@ -594,7 +594,10 @@
         if (job !== current) { await created.terminate(); throw fail('canceled'); }
         worker = created;
         current.rawWorker = null;
-        await worker.setParameters({preserve_interword_spaces: '1'});
+        // Pin the primary OCR layout explicitly: Tesseract.js defaults to PSM 6,
+        // but a future engine upgrade must not silently turn the PSM 3
+        // recovery into a duplicate of the first reading.
+        await worker.setParameters({preserve_interword_spaces: '1', tessedit_pageseg_mode: '6'});
       }
       loading = false;
       if (job !== current) throw fail('canceled');
