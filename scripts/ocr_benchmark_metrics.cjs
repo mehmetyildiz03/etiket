@@ -40,7 +40,7 @@ function escaped(value) {
 // Exact numerical ratio AND exact fiber token must occur within a narrow span.
 // "8096 PAMUK" cannot count as a correct reading of "80% PAMUK".
 // This scorer is separate from the production text acceptance filter.
-function containsExactPair(hypothesis, pair) {
+function countExactPairOccurrences(hypothesis, pair) {
   if (!pair || typeof pair.fiber !== 'string' ||
       typeof pair.percent !== 'string' || !/^(?:100|[1-9]?\d)(?:[.,]\d{1,2})?$/.test(pair.percent)) {
     throw new TypeError('Each expected pair requires fiber and numeric percent');
@@ -49,12 +49,23 @@ function containsExactPair(hypothesis, pair) {
   const name = escaped(normalizeText(pair.fiber).toLocaleUpperCase('tr-TR'));
   const value = pair.percent.replace(/[.,]/g, '[.,]');
   const percentage = '(?:' + value + '\\s*[%％]|[%％]\\s*' + value + ')';
-  const boundedRatio = '(?<![0-9A-Z])' + percentage + '(?![0-9])';
+  // Capture the percentage itself so the same printed token cannot count
+  // twice when a fiber name appears on both sides of it.
+  const boundedRatio = '(?<![0-9A-Z])(' + percentage + ')(?![0-9])';
   const boundedName = '(?<![\\p{L}])' + name + '(?![\\p{L}])';
-  // No unrelated words between ratio and fiber: avoid attaching 80% to the wrong material.
   const gap = '[\\s:;,.()\\/\\-]{0,18}';
-  return new RegExp(boundedRatio + gap + boundedName, 'u').test(text) ||
-    new RegExp(boundedName + gap + boundedRatio, 'u').test(text);
+  const offsets = new Set();
+  for (const expression of [boundedRatio + gap + boundedName,
+    boundedName + gap + boundedRatio]) {
+    for (const match of text.matchAll(new RegExp(expression, 'gu'))) {
+      offsets.add(match.index + match[0].indexOf(match[1]));
+    }
+  }
+  return offsets.size;
+}
+
+function containsExactPair(hypothesis, pair) {
+  return countExactPairOccurrences(hypothesis, pair) > 0;
 }
 
 function scoreCase(fixture, output) {
@@ -80,10 +91,18 @@ function scoreCase(fixture, output) {
   // text also has its own CER, so reject-errors remain visible separately.
   const distance = textDistance(fixture.groundTruth, accepted ? text : '');
   const rawDistance = textDistance(fixture.groundTruth, rawText);
-  const pairs = fixture.expectedPairs.map(pair => ({
-    fiber: pair.fiber, percent: pair.percent,
-    correct: accepted && containsExactPair(text, pair)
-  }));
+  // Repeated identical pairs across sections require repeated *printed*
+  // occurrences. A single "80% PAMUK" must not satisfy two GT rows.
+  const usedPairs = new Map();
+  const pairs = fixture.expectedPairs.map(pair => {
+    const available = accepted ? countExactPairOccurrences(text, pair) : 0;
+    const key = JSON.stringify([pair.percent.replace(',', '.'),
+      normalizeText(pair.fiber).toLocaleUpperCase('tr-TR')]);
+    const used = (usedPairs.get(key) || 0) + 1;
+    usedPairs.set(key, used);
+    return {fiber: pair.fiber, percent: pair.percent,
+      correct: accepted && used <= available};
+  });
   return {...result, falseRejected: !accepted, ...distance,
     rawCharacterEdits: rawDistance.characterEdits,
     rawWordEdits: rawDistance.wordEdits,
