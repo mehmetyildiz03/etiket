@@ -101,10 +101,12 @@ final RegExp _printedPercentPattern = RegExp(
   r'[%％][ \t]*[0-9]{1,3}(?:[.,][0-9]{1,2})?',
 );
 
-/// Keep line boundaries when checking text context; line grouping can change
-/// the apparent association of a percentage with a fiber or section.
+/// Keep both line boundaries and percentage *positions* when comparing
+/// context. Deleting all percentages would miss a number moving from before
+/// one fiber name to after it while the numbers and words remain unchanged.
+/// The marker is only for a diagnostic warning, never for pairing fibers.
 String _textAroundPrintedPercentages(String text) => text
-    .replaceAll(_printedPercentPattern, ' ')
+    .replaceAll(_printedPercentPattern, ' [yuzde] ')
     .split(RegExp(r'\r\n?|\n'))
     .map((line) =>
         line.trim().replaceAll(RegExp(r'[ \t]+'), ' ').toLowerCase())
