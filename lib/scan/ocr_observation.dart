@@ -122,13 +122,13 @@ final RegExp _printedPercentPattern = RegExp(
 String _textAroundPrintedPercentages(String text) {
   final lines = text
       .replaceAll(_printedPercentPattern, ' [yuzde] ')
-      .split(RegExp(r'\r\n?|\n'))
+      .split(RegExp(r'\r\n?|\n|\u2028|\u2029'))
       .map((line) => line
           .trim()
           .replaceAll(RegExp(r'[ \t\u00A0\u2007\u2009\u202F]+'), ' ')
           .toLowerCase())
       .toList();
-  // Empty lines *between* content can separate fabric sections. Discard only
+  // Unicode line/paragraph separators are physical boundaries too. Empty\n  // lines *between* content can separate fabric sections. Discard only
   // outer whitespace; never infer that either reading is the correct one.
   while (lines.isNotEmpty && lines.first.isEmpty) {
     lines.removeAt(0);
