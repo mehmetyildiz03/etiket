@@ -36,6 +36,19 @@ class OcrObservation {
   final double? confidence;
   final OcrDecision decision;
   final OcrSecondReading? secondReading;
+  /// Advisory only: compare printed percent-marked digit sequences in reading
+  /// order. Never infer missing ratios, match fibers or replace the first OCR.
+  bool get percentageTokensDiffer {
+    final alternative = secondReading;
+    if (alternative == null) return false;
+    final primaryTokens = _printedPercentTokens(rawText);
+    final alternativeTokens = _printedPercentTokens(alternative.rawText);
+    if (primaryTokens.length != alternativeTokens.length) return true;
+    for (var i = 0; i < primaryTokens.length; i++) {
+      if (primaryTokens[i] != alternativeTokens[i]) return true;
+    }
+    return false;
+  }
   String? get acceptedText =>
       decision == OcrDecision.candidate ? rawText : null;
   /// Accepted OCR text remains editable, but a marginal engine score must
@@ -67,4 +80,19 @@ class OcrObservation {
       'Kumaş bileşimi bulunamadı — etiket adayı kabul edilmedi',
     OcrDecision.candidate => 'Etiket adayı — kullanıcı doğrulaması bekliyor',
   };
+}
+
+
+/// Only explicit printed ratios; this signal does not validate a composition.
+/// Exclude partial numeric matches (e.g. 080% inside 1080%).
+List<String> _printedPercentTokens(String text) {
+  final matches = RegExp(r'[0-9]{1,3}\s*[%％]|[%％]\s*[0-9]{1,3}').allMatches(text);
+  final digits = RegExp(r'[0-9]');
+  return matches.where((match) {
+    return (match.start == 0 ||
+            !digits.hasMatch(text.substring(match.start - 1, match.start))) &&
+        (match.end == text.length ||
+            !digits.hasMatch(text.substring(match.end, match.end + 1)));
+  }).map((match) =>
+      match.group(0)!.replaceAll(RegExp(r'[%％\s]'), '')).toList(growable: false);
 }
