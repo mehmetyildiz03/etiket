@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:etiket/main.dart';
+import 'package:etiket/scan/photo_scan.dart';
 import 'package:etiket/scan/web_scan_services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,45 @@ import 'photo_flow_test.dart' show imagePhoto, tapPending;
 import 'widget_test.dart' show tapText, continueButton;
 
 void main() {
+  for (final hint in PhotoCaptureHint.values) {
+    testWidgets('web photo displays optional ${hint.name} guidance without blocking OCR',
+        (tester) async {
+      final bridge = FakeBridge()
+        ..selection = BrowserPhoto(
+          'blob:hint',
+          imagePhoto('fixture').previewBytes,
+          captureHint: hint,
+        );
+      await tester.pumpWidget(EtiketApp(
+        photoSource: WebPhotoSource(bridge),
+        textRecognizer: WebTextRecognizer(bridge),
+      ));
+      await tester.pumpAndSettle();
+      await tapText(tester, 'Etiket tara');
+      await tapText(tester, 'Fotoğraf yükle / galeriden seç');
+      expect(find.byKey(const ValueKey('capture-quality-hint')), findsOneWidget);
+      expect(find.textContaining(hint.advice), findsOneWidget);
+      await tapText(tester, 'Fotoğraftaki metni oku');
+      expect(find.text('Okunan metin — henüz doğrulanmadı'), findsOneWidget);
+      expect(find.text('Metni incele ve düzelt'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('web photo without quality hint has no misleading warning',
+      (tester) async {
+    final bridge = FakeBridge()
+      ..selection = BrowserPhoto('blob:no-hint', imagePhoto('fixture').previewBytes);
+    await tester.pumpWidget(EtiketApp(
+      photoSource: WebPhotoSource(bridge),
+      textRecognizer: WebTextRecognizer(bridge),
+    ));
+    await tester.pumpAndSettle();
+    await tapText(tester, 'Etiket tara');
+    await tapText(tester, 'Fotoğraf yükle / galeriden seç');
+    expect(find.byKey(const ValueKey('capture-quality-hint')), findsNothing);
+  });
+
   for (final width in [360.0, 390.0, 430.0, 1280.0]) {
     testWidgets(
       'web $width: upload, editable OCR and required approval with keyboard',

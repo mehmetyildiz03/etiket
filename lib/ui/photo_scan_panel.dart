@@ -91,6 +91,19 @@ class PhotoScanPanel extends StatelessWidget {
               ),
             ),
           ),
+          if (photo.captureHint != null) ...[
+            const SizedBox(height: 8),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                '${photo.captureHint!.advice} Okumaya yine de devam edebilirsin.',
+                key: const ValueKey('capture-quality-hint'),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           if (!scan.busy && scan.stage != ScanStage.ready)
             FilledButton.icon(

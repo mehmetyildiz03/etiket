@@ -5,6 +5,22 @@ import 'ocr_observation.dart';
 
 enum PhotoSource { camera, gallery }
 
+// Advisory only: derived from local image metrics, never OCR correctness.
+enum PhotoCaptureHint {
+  veryDark,
+  veryBright,
+  lowDetail;
+
+  String get advice => switch (this) {
+    PhotoCaptureHint.veryDark =>
+      'Fotoğraf çok karanlık görünüyor. Daha aydınlıkta tekrar çekmeyi deneyebilirsin.',
+    PhotoCaptureHint.veryBright =>
+      'Fotoğraf çok parlak görünüyor. Işığı azaltıp tekrar çekmeyi deneyebilirsin.',
+    PhotoCaptureHint.lowDetail =>
+      'Fotoğrafta çok az ayrıntı görünüyor. Etiketi yakından ve net çekmeyi deneyebilirsin.',
+  };
+}
+
 enum ScanStage {
   idle,
   recovering,
@@ -66,10 +82,13 @@ class ScanPhoto {
     required this.path,
     required Uint8List previewBytes,
     this.sourceImage,
+    this.captureHint,
   }) : previewBytes = previewBytes.asUnmodifiableView();
   final String path;
   final Uint8List previewBytes;
   final PhotoImageSource? sourceImage;
+  /// Optional guidance; never blocks recognition or validates percentages.
+  final PhotoCaptureHint? captureHint;
 }
 
 class PhotoImageSource {
