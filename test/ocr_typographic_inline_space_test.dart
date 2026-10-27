@@ -65,4 +65,33 @@ void main() {
     );
     expect(reading.percentageTokensDiffer, isTrue);
   });
+
+  test('blank line separating fabric sections requires review', () {
+    const primary = 'DIS KUMAS\n80% PAMUK\n\nASTAR\n20% PES';
+    final reading = compareReadings(
+      primary,
+      'DIS KUMAS\n80% PAMUK\nASTAR\n20% PES',
+    );
+    expect(reading.percentageTokensDiffer, isFalse);
+    expect(reading.percentageContextDiffers, isTrue);
+    expect(reading.acceptedText, primary);
+  });
+
+  test('leading and trailing empty lines are not section changes', () {
+    final reading = compareReadings(
+      '\n\n80% PAMUK\n',
+      '80% PAMUK',
+    );
+    expect(reading.percentageTokensDiffer, isFalse);
+    expect(reading.percentageContextDiffers, isFalse);
+  });
+
+  test('CRLF and LF preserve the same internal section boundary', () {
+    final reading = compareReadings(
+      '80% PAMUK\r\n\r\nASTAR\r\n20% PES',
+      '80% PAMUK\n\nASTAR\n20% PES',
+    );
+    expect(reading.percentageTokensDiffer, isFalse);
+    expect(reading.percentageContextDiffers, isFalse);
+  });
 }
