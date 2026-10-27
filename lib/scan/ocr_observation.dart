@@ -128,7 +128,8 @@ String _textAroundPrintedPercentages(String text) {
           .replaceAll(RegExp(r'[ \t\u00A0\u2007\u2009\u202F]+'), ' ')
           .toLowerCase())
       .toList();
-  // Unicode line/paragraph separators are physical boundaries too. Empty\n  // lines *between* content can separate fabric sections. Discard only
+  // Unicode line/paragraph separators are physical boundaries too.
+  // Empty lines *between* content can separate fabric sections. Discard only
   // outer whitespace; never infer that either reading is the correct one.
   while (lines.isNotEmpty && lines.first.isEmpty) {
     lines.removeAt(0);
