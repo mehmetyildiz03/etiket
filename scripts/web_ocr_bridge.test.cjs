@@ -14,7 +14,7 @@ function png(width = 800, height = 600) {
 }
 function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, guidanceAvailable = true, failDeskewRead = false} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
-  let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, pageText = null, pageConfidence = null, mode = '6', recognizes = 0;
+  let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, pageText = null, pageConfidence = null, mode = '3', recognizes = 0, recognitionModes = [];
   const canvases = [], imageSources = [];
   class Input {
     events = {}; files = [];
@@ -72,7 +72,7 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
       assert.equal(oem, 1);
       if (creation) await creation;
       return {setParameters: async params => { if (params.tessedit_pageseg_mode) mode = String(params.tessedit_pageseg_mode); },
-        recognize: async image => { recognizes++; recognizedBlob = image; options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: mode === '11' && secondText !== null ? secondText : mode === '3' && pageText !== null ? pageText : result, confidence: mode === '11' && secondConfidence !== null ? secondConfidence : mode === '3' && pageConfidence !== null ? pageConfidence : confidence}}; },
+        recognize: async image => { recognizes++; recognitionModes.push(mode); recognizedBlob = image; options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: mode === '11' && secondText !== null ? secondText : mode === '3' && pageText !== null ? pageText : result, confidence: mode === '11' && secondConfidence !== null ? secondConfidence : mode === '3' && pageConfidence !== null ? pageConfidence : confidence}}; },
         terminate: async () => { raw.terminate(); }};
     }}
   });
@@ -87,7 +87,7 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
     set confidence(value) { confidence = value; },
     get secondText() { return secondText; }, set secondText(value) { secondText = value; }, set secondConfidence(value) { secondConfidence = value; },
     get pageText() { return pageText; }, set pageText(value) { pageText = value; }, set pageConfidence(value) { pageConfidence = value; },
-    get recognizes() { return recognizes; }, get mode() { return mode; },
+    get recognizes() { return recognizes; }, get mode() { return mode; }, get recognitionModes() { return recognitionModes; },
     async upload(file = png()) {
       const picking = bridge.pick(false);
       nodes[0].files = [file];
@@ -422,6 +422,7 @@ test('rejected PSM6 label attempts local PSM3 and keeps manual verification mand
   assert.equal(out.observation.secondReading.rawText, s.pageText);
   assert.equal(out.observation.secondReading.confidence, 91);
   assert.equal(s.recognizes, 2, 'one bounded additional page-segmentation attempt');
+  assert.deepEqual(s.recognitionModes, ['6', '3'], 'primary PSM6 is explicit, secondary PSM3 independent');
   assert.equal(s.mode, '6', 'PSM is restored even for an initially rejected scan');
   s.bridge.release(photo.path);
   assert.equal(s.blobs.size, 0, 'no persistent user photo');
@@ -457,6 +458,7 @@ test('weak candidate obtains an independent sparse-text second reading without r
   assert.equal(response.observation.secondReading.rawText, s.secondText);
   assert.equal(response.observation.secondReading.confidence, 72);
   assert.equal(s.recognizes, 2);
+  assert.deepEqual(s.recognitionModes, ['6', '11'], 'weak candidate uses independent sparse PSM11');
   assert.equal(s.mode, '6', 'restore ordinary reading mode for the next photo');
   s.confidence = 95;
   s.result = '80% PAMUK';
