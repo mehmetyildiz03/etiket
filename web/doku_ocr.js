@@ -284,6 +284,28 @@
     }
     context.putImageData(image,0,0);
   }
+  // Sample the exact selected crop BEFORE deskew, enlargement or thresholding.
+  // This is diagnostic evidence only; never silently changes OCR or a percentage.
+  function frameQuality(canvas) {
+    const measure = globalThis.dokuQuality?.measureFrame;
+    if (typeof measure !== 'function') return null;
+    const longest = Math.max(canvas.width, canvas.height);
+    const factor = Math.min(1, 256 / longest);
+    const width = Math.round(canvas.width * factor);
+    const height = Math.round(canvas.height * factor);
+    if (width < 16 || height < 16) return null;
+    let sample;
+    try {
+      sample = makeCanvas(width, height);
+      const context = sample.getContext('2d', {willReadFrequently:true});
+      context.drawImage(canvas, 0, 0, width, height);
+      return measure({data:context.getImageData(0, 0, width, height).data, width, height});
+    } catch (_) {
+      // Quality measurement must not turn an otherwise readable photo into an error.
+      return null;
+    } finally { freeCanvas(sample); }
+  }
+
   async function renderPhoto(source, edit, decodedImage = null) {
     const {w, h, cw, ch} = validateEdit(source, edit);
     const render = async image => {
@@ -298,6 +320,7 @@
         else if (edit.quarterTurns === 2) { c.translate(source.width, source.height); c.rotate(Math.PI); }
         else if (edit.quarterTurns === 3) { c.translate(0, source.width); c.rotate(-Math.PI / 2); }
         c.drawImage(image, 0, 0);
+        const quality = frameQuality(canvas);
         // Deskew only the selected region; no second hidden preprocessing in OCR.
         const angle = straightenLabel(canvas);
         if (!angle) rotateExpanded(canvas, 0);
@@ -314,17 +337,17 @@
           } finally { freeCanvas(enlarged); }
         }
         readablePreview(canvas, Boolean(angle));
-        return await encode(canvas);
+        return {blob: await encode(canvas), quality};
       } finally { freeCanvas(canvas); }
     };
     return decodedImage ? render(decodedImage) : withImage(source.blob, render);
   }
-  async function publish(source, blob, current = () => true) {
+  async function publish(source, blob, current = () => true, quality = null) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     if (disposed || !current()) throw fail('canceled');
     const path = URL.createObjectURL(blob);
     photos.set(path, {blob, source});
-    return {path, bytes, sourceBytes: source.preview,
+    return {path, bytes, quality, sourceBytes: source.preview,
       sourcePreviewUrl: source.previewUrl,
       sourceWidth: source.width, sourceHeight: source.height};
   }
@@ -354,8 +377,8 @@
             previewUrl: URL.createObjectURL(new Blob([preview], {type:'image/png'}))};
         } finally { freeCanvas(thumbnail); }
         try {
-          const blob = await renderPhoto(source, {left:0, top:0, width:1, height:1, quarterTurns:0}, image);
-          return await publish(source, blob);
+          const rendered = await renderPhoto(source, {left:0, top:0, width:1, height:1, quarterTurns:0}, image);
+          return await publish(source, rendered.blob, () => true, rendered.quality);
         } catch (error) {
           URL.revokeObjectURL(source.previewUrl);
           throw error;
@@ -373,9 +396,9 @@
     return serializedImage(async () => {
       const current = () => !disposed && revision === editRevision && photos.has(path);
       if (!current()) throw fail('canceled');
-      const blob = await renderPhoto(photo.source, options);
+      const rendered = await renderPhoto(photo.source, options);
       if (!current()) throw fail('canceled');
-      return publish(photo.source, blob, current);
+      return publish(photo.source, rendered.blob, current, rendered.quality);
     }).catch(error => { throw error instanceof DOMException && error.name === 'DokuScanError' ? error : fail('invalidPhoto'); });
   }
 
