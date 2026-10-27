@@ -95,12 +95,16 @@ List<String> _printedPercentTokens(String text) {
   return matches.where((match) {
     final before = match.start > 0 ? text[match.start - 1] : '';
     final after = match.end < text.length ? text[match.end] : '';
+    final startsWithNumber = digit.hasMatch(text[match.start]);
+    final endsWithNumber = digit.hasMatch(text[match.end - 1]);
     final partialLeft = digit.hasMatch(before) ||
-        ((before == '.' || before == ',') &&
+        (startsWithNumber &&
+            (before == '.' || before == ',') &&
             match.start > 1 &&
             digit.hasMatch(text[match.start - 2]));
     final partialRight = digit.hasMatch(after) ||
-        ((after == '.' || after == ',') &&
+        (endsWithNumber &&
+            (after == '.' || after == ',') &&
             match.end + 1 < text.length &&
             digit.hasMatch(text[match.end + 1]));
     return !partialLeft && !partialRight;
