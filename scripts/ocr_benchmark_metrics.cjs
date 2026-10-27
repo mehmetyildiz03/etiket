@@ -45,7 +45,10 @@ function exactPairRatioOffsets(hypothesis, pair) {
       typeof pair.percent !== 'string' || !/^(?:100|[1-9]?\d)(?:[.,]\d{1,2})?$/.test(pair.percent)) {
     throw new TypeError('Each expected pair requires fiber and numeric percent');
   }
-  const text = normalizeText(hypothesis).toLocaleUpperCase('tr-TR');
+  // Keep line boundaries to prefer same-line evidence over a nearby
+  // fiber from another row when one printed percentage touches both.
+  const text = hypothesis.normalize('NFC').replace(/\r\n?/gu, '\n')
+    .replace(/[^\S\n\u2028\u2029]+/gu, ' ').trim().toLocaleUpperCase('tr-TR');
   const name = escaped(normalizeText(pair.fiber).toLocaleUpperCase('tr-TR'));
   const value = pair.percent.replace(/[.,]/g, '[.,]');
   const percentage = '(?:' + value + '\\s*[%％]|[%％]\\s*' + value + ')';
@@ -54,11 +57,13 @@ function exactPairRatioOffsets(hypothesis, pair) {
   const boundedRatio = '(?<![0-9A-Z])(' + percentage + ')(?![0-9])';
   const boundedName = '(?<![\\p{L}])' + name + '(?![\\p{L}])';
   const gap = '[\\s:;,.()\\/\\-]{0,18}';
-  const offsets = new Set();
+  const offsets = new Map();
   for (const expression of [boundedRatio + gap + boundedName,
     boundedName + gap + boundedRatio]) {
     for (const match of text.matchAll(new RegExp(expression, 'gu'))) {
-      offsets.add(match.index + match[0].indexOf(match[1]));
+      const offset = match.index + match[0].indexOf(match[1]);
+      const sameLine = !/[\n\u2028\u2029]/u.test(match[0]);
+      offsets.set(offset, Boolean(offsets.get(offset)) || sameLine);
     }
   }
   return offsets;
@@ -106,9 +111,14 @@ function scoreCase(fixture, output) {
   const owners = new Map();
   candidates.forEach((offsets, index) => {
     const key = pairKey(fixture.expectedPairs[index]);
-    for (const offset of offsets) {
-      if (!owners.has(offset)) owners.set(offset, new Set());
-      owners.get(offset).add(key);
+    for (const [offset, sameLine] of offsets) {
+      const priority = sameLine ? 1 : 0;
+      const previous = owners.get(offset);
+      if (!previous || priority > previous.priority) {
+        owners.set(offset, {priority, keys: new Set([key])});
+      } else if (priority === previous.priority) {
+        previous.keys.add(key);
+      }
     }
   });
   const availableByKey = new Map();
@@ -116,8 +126,11 @@ function scoreCase(fixture, output) {
   const pairs = fixture.expectedPairs.map((pair, index) => {
     const key = pairKey(pair);
     if (!availableByKey.has(key)) {
-      availableByKey.set(key, [...candidates[index]].filter(
-        offset => owners.get(offset).size === 1).length);
+      availableByKey.set(key, [...candidates[index]].filter(([offset, sameLine]) => {
+        const owner = owners.get(offset);
+        return owner.keys.size === 1 && owner.keys.has(key) &&
+          owner.priority === (sameLine ? 1 : 0);
+      }).length);
     }
     const used = (usedPairs.get(key) || 0) + 1;
     usedPairs.set(key, used);
