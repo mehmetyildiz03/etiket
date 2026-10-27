@@ -94,6 +94,16 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
                 key: ValueKey('ocr-percentage-disagreement'),
               ),
             ],
+            if (observation.percentageContextDiffers) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'Yüzde işaretli sayılar aynı görünse de OCR okumalarında '
+                'diğer metin veya satır düzeni farklı. Elyaf adlarını, '
+                'bölümleri ve oranların hangi satıra ait olduğunu etiket '
+                'fotoğrafından kontrol et. Bu uyarı doğruluk kararı değildir.',
+                key: ValueKey('ocr-context-disagreement'),
+              ),
+            ],
             const SizedBox(height: 8),
             Text(observation.secondReading!.confidence == null
                 ? 'İkinci okuma güven puanı: mevcut değil.'
