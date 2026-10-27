@@ -25,7 +25,7 @@ async function main(){
   ...(process.env.CHROME_EXECUTABLE?{executablePath:process.env.CHROME_EXECUTABLE}:{}),
   args:['--no-sandbox']});
  const ctx=await browser.newContext({locale:'tr-TR',viewport:{width:390,height:844}});
- const page=await ctx.newPage(),req=[],results=[];
+ const page=await ctx.newPage(),req=[],results=[],recoveryProof=[];
  page.on('request',r=>req.push(r.method()));
  try{
   await page.goto(base,{waitUntil:'networkidle'});
@@ -101,6 +101,28 @@ async function main(){
     results.push(result);
     console.log('ROI '+fixture+' '+id+': '+found+'/'+exp.length+' '+JSON.stringify(o.rawText.trim().slice(0,110)));
    }
+   // Exercise the PRODUCTION bridge with real Tesseract WASM, not just an
+   // isolated PSM study worker. This synthetic label is known to lose both
+   // exact ratios under PSM6 but recover them under PSM3.
+   if(fixture==='clean'){
+    const recovered=await page.evaluate(async()=>{
+      const selected=await window.__studyPicked;
+      return dokuOcr.recognizeSafe(selected.path,()=>{});
+    });
+    assert.ok(['noComposition','lowConfidence'].includes(recovered.observation?.decision),
+      'PSM6 must reject the synthetic first pass instead of inventing percentages');
+    assert.equal(recovered.text,null,'PSM3 must not be auto-imported as accepted text');
+    assert.equal(recovered.code,'emptyText');
+    assert.equal(recovered.observation.acceptedText,null);
+    assert.equal(recovered.observation.secondReading?.mode,'autoPage');
+    const firstPairs=pairs.filter(p=>containsExactPair(recovered.observation.rawText,p)).length;
+    const secondPairs=pairs.filter(p=>containsExactPair(recovered.observation.secondReading.rawText,p)).length;
+    assert.equal(firstPairs,0,'baseline PSM6 must really miss both printed pairs');
+    assert.equal(secondPairs,2,'production PSM3 fallback must recover both synthetic pairs');
+    recoveryProof.push({fixture,kind:'SYNTHETIC ONLY',firstPairs,secondPairs,
+      autoAccepted:false,mode:recovered.observation.secondReading.mode});
+    console.log('PASS production PSM6 -> diagnostic PSM3: synthetic exact pairs 0/2 -> 2/2, no automatic acceptance');
+   }
    await page.evaluate(paths=>{
       for(const p of paths)dokuOcr.release(p);
       window.__studyPicked=null;
@@ -118,7 +140,7 @@ async function main(){
   const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
     engine:'Real Chromium + Tesseract.js 6 WebAssembly, Turkish/English',
     limits:'Never infer fiber percentages, normalize to 100, or auto-select a higher confidence hypothesis',
-    byVariant,results};
+    byVariant,recoveryProof,results};
   fs.writeFileSync(path.join(out,'roi-matrix.json'),JSON.stringify(report,null,2));
   fs.writeFileSync(path.join(out,'roi-matrix.md'),[
    '# Doku ROI/PSM study — SYNTHETIC ONLY',
