@@ -67,7 +67,8 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsOneWidget);
-    expect(evidence.acceptedText, isNull, 'PSM3 output must never be accepted automatically');
+    expect(evidence.acceptedText, isNull,
+        reason: 'PSM3 output must never be accepted automatically');
     expect(find.textContaining('İlk okuma reddedilmişse'), findsOneWidget);
     await tester.tap(find.text('Ham OCR metnini gizle'));
     await tester.pumpAndSettle();
