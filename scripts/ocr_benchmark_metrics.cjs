@@ -51,7 +51,9 @@ function exactPairRatioOffsets(hypothesis, pair) {
     .replace(/[^\S\n\u2028\u2029]+/gu, ' ').trim().toLocaleUpperCase('tr-TR');
   const name = escaped(normalizeText(pair.fiber).toLocaleUpperCase('tr-TR'));
   const value = pair.percent.replace(/[.,]/g, '[.,]');
-  const percentage = '(?:' + value + '\\s*[%％]|[%％]\\s*' + value + ')';
+  // Horizontal whitespace is permitted; a line break cannot manufacture a ratio.
+  const inlineSpace = '[\\p{Zs}\\t]*';
+  const percentage = '(?:' + value + inlineSpace + '[%％]|[%％]' + inlineSpace + value + ')';
   // Capture the percentage itself so the same printed token cannot count
   // twice when a fiber name appears on both sides of it.
   const boundedRatio = '(?<![0-9A-Z])(' + percentage + ')(?![0-9])';
