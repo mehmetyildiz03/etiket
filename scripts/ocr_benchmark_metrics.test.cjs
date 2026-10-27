@@ -117,3 +117,18 @@ test('repeated expected fiber/percentage pairs need distinct printed occurrences
   assert.equal(twice.fullyCorrectComposition,true);
   // This is multiplicity only; section placement remains unmeasured.
 });
+
+test('ambiguous shared ratio cannot credit two different expected fibers', () => {
+  const fixture = {id:'two-fibers',kind:'positive',
+    groundTruth:'80% PAMUK\n80% POLYESTER',
+    expectedPairs:[{percent:'80',fiber:'PAMUK'},{percent:'80',fiber:'POLYESTER'}]};
+  const ambiguous = scoreCase(fixture,{code:null,text:'PAMUK 80% POLYESTER'});
+  assert.equal(ambiguous.correctPairs,0);
+  assert.equal(ambiguous.fullyCorrectComposition,false);
+  const reversed = scoreCase({...fixture,expectedPairs:[...fixture.expectedPairs].reverse()},
+    {code:null,text:'PAMUK 80% POLYESTER'});
+  assert.equal(reversed.correctPairs,0);
+  const separate = scoreCase(fixture,{code:null,text:'80% PAMUK\n80% POLYESTER'});
+  assert.equal(separate.correctPairs,2);
+  assert.equal(separate.fullyCorrectComposition,true);
+});

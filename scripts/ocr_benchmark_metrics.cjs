@@ -40,12 +40,15 @@ function escaped(value) {
 // Exact numerical ratio AND exact fiber token must occur within a narrow span.
 // "8096 PAMUK" cannot count as a correct reading of "80% PAMUK".
 // This scorer is separate from the production text acceptance filter.
-function countExactPairOccurrences(hypothesis, pair) {
+function exactPairRatioOffsets(hypothesis, pair) {
   if (!pair || typeof pair.fiber !== 'string' ||
       typeof pair.percent !== 'string' || !/^(?:100|[1-9]?\d)(?:[.,]\d{1,2})?$/.test(pair.percent)) {
     throw new TypeError('Each expected pair requires fiber and numeric percent');
   }
-  const text = normalizeText(hypothesis).toLocaleUpperCase('tr-TR');
+  // Keep line boundaries to prefer same-line evidence over a nearby
+  // fiber from another row when one printed percentage touches both.
+  const text = hypothesis.normalize('NFC').replace(/\r\n?/gu, '\n')
+    .replace(/[^\S\n\u2028\u2029]+/gu, ' ').trim().toLocaleUpperCase('tr-TR');
   const name = escaped(normalizeText(pair.fiber).toLocaleUpperCase('tr-TR'));
   const value = pair.percent.replace(/[.,]/g, '[.,]');
   const percentage = '(?:' + value + '\\s*[%％]|[%％]\\s*' + value + ')';
@@ -54,14 +57,20 @@ function countExactPairOccurrences(hypothesis, pair) {
   const boundedRatio = '(?<![0-9A-Z])(' + percentage + ')(?![0-9])';
   const boundedName = '(?<![\\p{L}])' + name + '(?![\\p{L}])';
   const gap = '[\\s:;,.()\\/\\-]{0,18}';
-  const offsets = new Set();
+  const offsets = new Map();
   for (const expression of [boundedRatio + gap + boundedName,
     boundedName + gap + boundedRatio]) {
     for (const match of text.matchAll(new RegExp(expression, 'gu'))) {
-      offsets.add(match.index + match[0].indexOf(match[1]));
+      const offset = match.index + match[0].indexOf(match[1]);
+      const sameLine = !/[\n\u2028\u2029]/u.test(match[0]);
+      offsets.set(offset, Boolean(offsets.get(offset)) || sameLine);
     }
   }
-  return offsets.size;
+  return offsets;
+}
+
+function countExactPairOccurrences(hypothesis, pair) {
+  return exactPairRatioOffsets(hypothesis, pair).size;
 }
 
 function containsExactPair(hypothesis, pair) {
@@ -93,15 +102,40 @@ function scoreCase(fixture, output) {
   const rawDistance = textDistance(fixture.groundTruth, rawText);
   // Repeated identical pairs across sections require repeated *printed*
   // occurrences. A single "80% PAMUK" must not satisfy two GT rows.
+  const pairKey = pair => JSON.stringify([pair.percent.replace(',', '.'),
+    normalizeText(pair.fiber).toLocaleUpperCase('tr-TR')]);
+  const candidates = fixture.expectedPairs.map(pair =>
+    accepted ? exactPairRatioOffsets(text, pair) : new Set());
+  // A single printed percentage can touch two different fiber names.
+  // If it matches distinct expected pairs, credit neither: ownership is unclear.
+  const owners = new Map();
+  candidates.forEach((offsets, index) => {
+    const key = pairKey(fixture.expectedPairs[index]);
+    for (const [offset, sameLine] of offsets) {
+      const priority = sameLine ? 1 : 0;
+      const previous = owners.get(offset);
+      if (!previous || priority > previous.priority) {
+        owners.set(offset, {priority, keys: new Set([key])});
+      } else if (priority === previous.priority) {
+        previous.keys.add(key);
+      }
+    }
+  });
+  const availableByKey = new Map();
   const usedPairs = new Map();
-  const pairs = fixture.expectedPairs.map(pair => {
-    const available = accepted ? countExactPairOccurrences(text, pair) : 0;
-    const key = JSON.stringify([pair.percent.replace(',', '.'),
-      normalizeText(pair.fiber).toLocaleUpperCase('tr-TR')]);
+  const pairs = fixture.expectedPairs.map((pair, index) => {
+    const key = pairKey(pair);
+    if (!availableByKey.has(key)) {
+      availableByKey.set(key, [...candidates[index]].filter(([offset, sameLine]) => {
+        const owner = owners.get(offset);
+        return owner.keys.size === 1 && owner.keys.has(key) &&
+          owner.priority === (sameLine ? 1 : 0);
+      }).length);
+    }
     const used = (usedPairs.get(key) || 0) + 1;
     usedPairs.set(key, used);
     return {fiber: pair.fiber, percent: pair.percent,
-      correct: accepted && used <= available};
+      correct: accepted && used <= availableByKey.get(key)};
   });
   return {...result, falseRejected: !accepted, ...distance,
     rawCharacterEdits: rawDistance.characterEdits,
