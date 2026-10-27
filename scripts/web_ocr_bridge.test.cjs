@@ -14,7 +14,7 @@ function png(width = 800, height = 600) {
 }
 function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, guidanceAvailable = true, failDeskewRead = false} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
-  let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, mode = '6', recognizes = 0;
+  let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, pageText = null, pageConfidence = null, mode = '6', recognizes = 0;
   const canvases = [], imageSources = [];
   class Input {
     events = {}; files = [];
@@ -72,7 +72,7 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
       assert.equal(oem, 1);
       if (creation) await creation;
       return {setParameters: async params => { if (params.tessedit_pageseg_mode) mode = String(params.tessedit_pageseg_mode); },
-        recognize: async image => { recognizes++; recognizedBlob = image; options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: mode === '11' && secondText !== null ? secondText : result, confidence: mode === '11' && secondConfidence !== null ? secondConfidence : confidence}}; },
+        recognize: async image => { recognizes++; recognizedBlob = image; options.logger({status: 'recognizing text', progress: 0.5}); return {data: {text: mode === '11' && secondText !== null ? secondText : mode === '3' && pageText !== null ? pageText : result, confidence: mode === '11' && secondConfidence !== null ? secondConfidence : mode === '3' && pageConfidence !== null ? pageConfidence : confidence}}; },
         terminate: async () => { raw.terminate(); }};
     }}
   });
@@ -86,6 +86,7 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
     set creation(value) { creation = value; }, get result() { return result; }, set result(value) { result = value; },
     set confidence(value) { confidence = value; },
     get secondText() { return secondText; }, set secondText(value) { secondText = value; }, set secondConfidence(value) { secondConfidence = value; },
+    get pageText() { return pageText; }, set pageText(value) { pageText = value; }, set pageConfidence(value) { pageConfidence = value; },
     get recognizes() { return recognizes; }, get mode() { return mode; },
     async upload(file = png()) {
       const picking = bridge.pick(false);
@@ -402,6 +403,44 @@ test('no text, low confidence and label proposal are independent engine observat
   s.result='x'.repeat(20001);
   const oversized=await s.bridge.recognizeSafe(photo.path,()=>{});
   assert.equal(oversized.code,'tooMuchText');assert.equal(oversized.observation,null);
+  s.bridge.dispose();
+});
+
+test('rejected PSM6 label attempts local PSM3 and keeps manual verification mandatory', async () => {
+  const s = setup(), photo = await s.upload();
+  s.result = 'COMPOSITION 60 POLYESTER 40 COTTON';
+  s.confidence = 30;
+  s.pageText = '60% Polyester\\n40% Cotton';
+  s.pageConfidence = 91;
+  const out = await s.bridge.recognizeSafe(photo.path, () => {});
+  assert.equal(out.code, 'emptyText');
+  assert.equal(out.text, null, 'high second-pass confidence never promotes OCR');
+  assert.equal(out.observation.decision, 'lowConfidence');
+  assert.equal(out.observation.rawText, s.result);
+  assert.equal(out.observation.acceptedText, null);
+  assert.equal(out.observation.secondReading.mode, 'autoPage');
+  assert.equal(out.observation.secondReading.rawText, s.pageText);
+  assert.equal(out.observation.secondReading.confidence, 91);
+  assert.equal(s.recognizes, 2, 'one bounded additional page-segmentation attempt');
+  assert.equal(s.mode, '6', 'PSM is restored even for an initially rejected scan');
+  s.bridge.release(photo.path);
+  assert.equal(s.blobs.size, 0, 'no persistent user photo');
+});
+
+test('PSM3 alternative is only diagnostic for no text/no composition, not a false label', async () => {
+  const s = setup(), photo = await s.upload();
+  s.result = 'PLEASE CLOSE THE DOOR'; s.confidence = 93;
+  s.pageText = '80% PAMUK'; s.pageConfidence = 99;
+  const out = await s.bridge.recognizeSafe(photo.path, () => {});
+  assert.equal(out.observation.decision, 'noComposition');
+  assert.equal(out.text, null);
+  assert.equal(out.observation.secondReading.mode, 'autoPage');
+  assert.equal(s.mode, '6');
+  s.result = '  '; s.pageText = '';
+  const blank = await s.bridge.recognizeSafe(photo.path, () => {});
+  assert.equal(blank.observation.decision, 'noText');
+  assert.equal(blank.observation.secondReading, null);
+  assert.equal(blank.text, null);
   s.bridge.dispose();
 });
 
