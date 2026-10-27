@@ -411,6 +411,32 @@ void main() {
     expect(compare('80% PAMUK', '20% PAMUK').acceptedText, '80% PAMUK');
   });
 
+  test('D4.3 decimal percentages compare full explicit values only', () {
+    OcrObservation compare(String first, String second) => OcrObservation(
+      rawText: first,
+      confidence: 48,
+      decision: OcrDecision.candidate,
+      secondReading: OcrSecondReading(rawText: second, confidence: 72),
+    );
+    // Decimal separators, prefix/suffix notation and trailing zero formatting.
+    expect(compare('12,5% CO 87,5% PES', '%12.5 CO %87.5 PES')
+        .percentageTokensDiffer, isFalse);
+    expect(compare('12.50% CO', '12,5% CO').percentageTokensDiffer, isFalse);
+    expect(compare('12,0% CO', '12% CO').percentageTokensDiffer, isFalse);
+    // Distinct whole numbers with the same fractional part must not be equal.
+    expect(compare('12.5% CO', '22.5% CO').percentageTokensDiffer, isTrue);
+    expect(compare('12,5% CO', '12,6% CO').percentageTokensDiffer, isTrue);
+    // Punctuation separating adjacent ratios is not part of a decimal.
+    expect(compare('80%,20%', '%80,%20').percentageTokensDiffer, isFalse);
+    expect(compare('80%. 20%', '80% 20%').percentageTokensDiffer, isFalse);
+    // Malformed, oversized or line-separated ratios are never partially read.
+    expect(compare('1234% CO', '234% CO').percentageTokensDiffer, isTrue);
+    expect(compare('123.456% CO', '456% CO').percentageTokensDiffer, isTrue);
+    expect(compare('%12.345 CO', '%12.34 CO').percentageTokensDiffer, isTrue);
+    expect(compare('12\n% CO', '12% CO').percentageTokensDiffer, isTrue);
+    expect(compare('12.5% CO', '22.5% CO').acceptedText, '12.5% CO');
+  });
+
   testWidgets('secondary OCR remains opt-in and never replaces a mistaken first percentage', (tester) async {
     bridge.result = OcrObservation(
       rawText: 'OF 0% Polyester\\n% 40% Cotton',
