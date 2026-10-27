@@ -389,6 +389,28 @@ void main() {
     );
   });
 
+  test('D4.3 percent disagreements are only a strict review signal', () {
+    OcrObservation compare(String first, String second) => OcrObservation(
+      rawText: first,
+      confidence: 48,
+      decision: OcrDecision.candidate,
+      secondReading: OcrSecondReading(rawText: second, confidence: 99),
+    );
+    expect(compare('80% PAMUK 20% PES', '%80 PAMUK 20％ PES')
+        .percentageTokensDiffer, isFalse);
+    expect(compare('80% PAMUK 20% PES', '20% PAMUK 80% PES')
+        .percentageTokensDiffer, isTrue);
+    expect(compare('8O% PAMUK 20% PES', '80% PAMUK 20% PES')
+        .percentageTokensDiffer, isTrue);
+    expect(compare('8096 PAMUK', '80% PAMUK').percentageTokensDiffer, isTrue);
+    expect(compare('1080% PAMUK', '80% PAMUK').percentageTokensDiffer, isTrue);
+    // Equal ratio sequences do not establish that fibers or sections match.
+    expect(compare('80% PAMUK', '80% POLYESTER').percentageTokensDiffer, isFalse);
+    expect(compare('no ratio', 'also no ratio').percentageTokensDiffer, isFalse);
+    expect(candidate('80% PAMUK').percentageTokensDiffer, isFalse);
+    expect(compare('80% PAMUK', '20% PAMUK').acceptedText, '80% PAMUK');
+  });
+
   testWidgets('secondary OCR remains opt-in and never replaces a mistaken first percentage', (tester) async {
     bridge.result = OcrObservation(
       rawText: 'OF 0% Polyester\\n% 40% Cotton',
@@ -407,9 +429,11 @@ void main() {
     await tapText(tester, 'Galeriden seç');
     await tapText(tester, 'Fotoğraftaki metni oku');
     expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsNothing);
+    expect(find.byKey(const ValueKey('ocr-percentage-disagreement')), findsNothing);
     expect(find.textContaining('Düşük OCR güveni'), findsOneWidget);
     await tapText(tester, showRaw);
     expect(find.textContaining('İkinci OCR denemesi'), findsOneWidget);
+    expect(find.byKey(const ValueKey('ocr-percentage-disagreement')), findsOneWidget);
     expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsOneWidget);
     expect(
       tester.widget<SelectableText>(
