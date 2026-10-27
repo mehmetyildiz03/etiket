@@ -123,6 +123,7 @@
     const scale = Math.min(1, 360 / longest);
     const sample = makeCanvas(Math.max(1, Math.round(canvas.width * scale)),
       Math.max(1, Math.round(canvas.height * scale)));
+    try {
     const sw = sample.width, sh = sample.height;
     const sc = sample.getContext('2d', {willReadFrequently: true});
     sc.drawImage(canvas, 0, 0, sw, sh);
@@ -184,7 +185,7 @@
       }
     }
     // Too little text: never rotate a picture based on noise.
-    if (points.length < 200) { freeCanvas(sample); return 0; }
+    if (points.length < 200) return 0;
     const histogram = new Int32Array(sh + 100);
     const score = degrees => {
       histogram.fill(0);
@@ -203,11 +204,11 @@
       const current = score(angle);
       if (current > bestScore) { bestScore = current; bestAngle = angle; }
     }
-    freeCanvas(sample);
     // Require substantial evidence to avoid rotating already-straight labels.
     if (Math.abs(bestAngle) < 2 || bestScore < straightScore * 1.3) return 0;
     rotateExpanded(canvas, bestAngle * Math.PI / 180);
     return bestAngle;
+    } finally { freeCanvas(sample); }
   }
 
   async function withImage(blob, action) {
