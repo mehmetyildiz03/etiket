@@ -11,7 +11,7 @@ function png(width = 800, height = 600) {
   view.setUint32(16, width); view.setUint32(20, height);
   return new File([bytes], 'label.png', {type: 'image/png'});
 }
-function setup({mobile = false, secure = true, supported = true, qualityAvailable = true} = {}) {
+function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, failDeskewRead = false} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
   let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, mode = '6', recognizes = 0;
   const canvases = [], imageSources = [];
@@ -51,7 +51,13 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
       createElement: type => type === 'input' ? new Input() : (() => { const canvas = {
         width: 1, height: 1, getContext: () => ({fillRect() {}, drawImage() {}, clearRect() {},
           scale() {}, translate() {}, rotate() {}, setTransform() {}, putImageData() {},
-          getImageData: (x, y, w, h) => ({data: new Uint8ClampedArray(w * h * 4).fill(255)})}),
+          getImageData: (x, y, w, h) => {
+            if (failDeskewRead) {
+              failDeskewRead = false;
+              throw new Error('synthetic canvas read failure');
+            }
+            return {data: new Uint8ClampedArray(w * h * 4).fill(255)};
+          }}),
         toBlob: callback => callback(new Blob([new Uint8Array(32)], {type: 'image/jpeg'}))
       }; canvases.push(canvas); return canvas; })()},
     Tesseract: {createWorker: async (langs, oem, opts) => {
@@ -394,4 +400,20 @@ test('weak alternate with invented or empty text is never promoted to accepted O
   assert.equal(output.observation.secondReading.rawText, 'NOISE');
   assert.equal(output.observation.secondReading.confidence, 99);
   s.bridge.dispose();
+});
+
+// The 360px deskew scratch canvas must be released even if WebKit rejects pixel reads.
+test('deskew canvas read failure releases every canvas and allows a clean retry', async () => {
+  const s = setup({failDeskewRead: true});
+  await assert.rejects(s.upload(), {message: 'invalidPhoto'});
+  assert.equal(s.blobs.size, 0);
+  assert.ok(s.canvases.length >= 3);
+  assert.ok(s.canvases.every(c => c.width === 0 && c.height === 0),
+    'a failed sample must not leak the bounded canvas pixel budget');
+  const photo = await s.upload();
+  assert.ok(photo.bytes instanceof Uint8Array);
+  s.bridge.release(photo.path);
+  s.bridge.dispose();
+  assert.equal(s.blobs.size, 0);
+  assert.ok(s.canvases.every(c => c.width === 0 && c.height === 0));
 });
