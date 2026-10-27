@@ -451,6 +451,18 @@ void main() {
         .percentageContextDiffers, isTrue);
     expect(compare('80% PAMUK\n20% PES', '80% PAMUK 20% PES')
         .percentageContextDiffers, isTrue);
+    // Removing the numbers entirely hides moved percentage anchors.
+    // Preserve their positions: equal number/fiber sequences are not proof
+    // of equal fiber-to-ratio associations.
+    expect(compare('80% PAMUK 20% PES', 'PAMUK 80% PES 20%')
+        .percentageContextDiffers, isTrue);
+    expect(compare('80% PAMUK', 'PAMUK 80%')
+        .percentageContextDiffers, isTrue);
+    // Prefix/suffix percent and optional spaces are equivalent notation.
+    expect(compare('80% PAMUK', '%80 PAMUK')
+        .percentageContextDiffers, isFalse);
+    expect(compare('80%PAMUK', '80% PAMUK')
+        .percentageContextDiffers, isFalse);
     expect(compare('12.5% CO', '%12,50 co')
         .percentageContextDiffers, isFalse);
     expect(compare('80% PAMUK', '20% POLYESTER')
