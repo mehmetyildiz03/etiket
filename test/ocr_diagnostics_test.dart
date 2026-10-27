@@ -433,7 +433,7 @@ void main() {
     expect(compare('1234% CO', '234% CO').percentageTokensDiffer, isTrue);
     expect(compare('123.456% CO', '456% CO').percentageTokensDiffer, isTrue);
     expect(compare('%12.345 CO', '%12.34 CO').percentageTokensDiffer, isTrue);
-    expect(compare('12\\n% CO', '12% CO').percentageTokensDiffer, isTrue);
+    expect(compare('12\n% CO', '12% CO').percentageTokensDiffer, isTrue);
     expect(compare('12.5% CO', '22.5% CO').acceptedText, '12.5% CO');
   });
 
