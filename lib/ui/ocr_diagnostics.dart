@@ -85,6 +85,15 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
               'İki sonuç çelişebilir; uygulama rakamları veya elyafları otomatik seçmez. '
               'Güven puanı doğru olma olasılığı değildir.',
             ),
+            if (observation.percentageTokensDiffer) ...[
+              const SizedBox(height: 8),
+              const Text(
+                'İki OCR denemesinin yüzde işaretli sayı dizileri farklı. '
+                'Hangi rakamın doğru olduğunu etiket fotoğrafıyla kontrol et; '
+                'bu karşılaştırma elyaf-yüzde eşleşmesini doğrulamaz.',
+                key: ValueKey('ocr-percentage-disagreement'),
+              ),
+            ],
             const SizedBox(height: 8),
             Text(observation.secondReading!.confidence == null
                 ? 'İkinci okuma güven puanı: mevcut değil.'
