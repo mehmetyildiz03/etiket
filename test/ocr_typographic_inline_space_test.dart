@@ -14,7 +14,7 @@ OcrObservation compareReadings(String primary, String secondary) =>
 
 void main() {
   test('thin and figure spaces next to percentages are equivalent', () {
-    final primary = '80\u2009% PAMUK\u2007PES\n%\u200780 ASTAR';
+    const primary = '80\u2009% PAMUK\u2007PES\n%\u200780 ASTAR';
     final reading = compareReadings(
       primary,
       '80% PAMUK PES\n%80 ASTAR',
