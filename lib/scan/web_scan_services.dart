@@ -4,10 +4,11 @@ import 'photo_edit.dart';
 import 'ocr_observation.dart';
 
 class BrowserPhoto {
-  BrowserPhoto(this.path, this.bytes, {this.sourceImage});
+  BrowserPhoto(this.path, this.bytes, {this.sourceImage, this.captureHint});
   final String path;
   final Uint8List bytes;
   final PhotoImageSource? sourceImage;
+  final PhotoCaptureHint? captureHint;
 }
 
 class BrowserScanException implements Exception {
@@ -87,6 +88,7 @@ class WebPhotoSource
               path: picked.path,
               previewBytes: picked.bytes,
               sourceImage: picked.sourceImage,
+              captureHint: picked.captureHint,
             );
     } catch (error) {
       throw _failure(error);
@@ -110,6 +112,7 @@ class WebPhotoSource
           path: photo.path,
           previewBytes: photo.bytes,
           sourceImage: photo.sourceImage,
+          captureHint: photo.captureHint,
         );
       } catch (error) {
         throw _failure(error);
