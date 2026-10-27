@@ -53,6 +53,7 @@ extension type _SecondReading(JSObject _) implements JSObject {
 extension type _PickedPhoto(JSObject _) implements JSObject {
   external String get path;
   external JSUint8Array get bytes;
+  external String? get captureHint;
   external JSUint8Array? get sourceBytes;
   external String? get sourcePreviewUrl;
   external int? get sourceWidth;
@@ -103,6 +104,12 @@ class _JsBridge
   BrowserPhoto _photo(_PickedPhoto picked) => BrowserPhoto(
     picked.path,
     Uint8List.fromList(picked.bytes.toDart),
+    captureHint: switch (picked.captureHint) {
+      'veryDark' => PhotoCaptureHint.veryDark,
+      'veryBright' => PhotoCaptureHint.veryBright,
+      'lowDetail' => PhotoCaptureHint.lowDetail,
+      _ => null,
+    },
     sourceImage: picked.sourceBytes == null
         ? null
         : PhotoImageSource(
