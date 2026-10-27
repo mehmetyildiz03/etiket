@@ -21,6 +21,9 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
   @override
   Widget build(BuildContext context) {
     final observation = widget.observation;
+    final second = observation.secondReading;
+    final verifiedSparseText = second?.engine == OcrReadingEngine.tesseractJs &&
+        second?.variant == OcrReadingVariant.sparseTextPsm11;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -73,17 +76,28 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
                     ),
             ),
           ),
-          if (observation.secondReading != null) ...[
+          if (second != null) ...[
             const SizedBox(height: 16),
             const Text(
               'İkinci OCR denemesi — alternatif okuma, doğrulanmamış',
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Aynı fotoğraf farklı metin bölümlendirme yöntemiyle yeniden okundu. '
-              'İki sonuç çelişebilir; uygulama rakamları veya elyafları otomatik seçmez. '
-              'Güven puanı doğru olma olasılığı değildir.',
+            Text(
+              verifiedSparseText
+                  ? 'İkinci okuma kaynağı: Tesseract.js — seyrek metin (PSM 11).'
+                  : 'İkinci okuma kaynağı: motor veya yöntem doğrulanmadı.',
+              key: const ValueKey('second-ocr-provenance'),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              verifiedSparseText
+                  ? 'Aynı fotoğraf farklı metin bölümlendirme yöntemiyle yeniden okundu. '
+                    'İki sonuç çelişebilir; uygulama rakamları veya elyafları otomatik seçmez. '
+                    'Güven puanı doğru olma olasılığı değildir.'
+                  : 'Alternatif okumanın üretildiği motor veya yöntem doğrulanmadı. '
+                    'İki sonuç çelişebilir; uygulama rakamları veya elyafları otomatik seçmez. '
+                    'Güven puanı doğru olma olasılığı değildir.',
             ),
             if (observation.percentageTokensDiffer) ...[
               const SizedBox(height: 8),
