@@ -132,3 +132,21 @@ test('ambiguous shared ratio cannot credit two different expected fibers', () =>
   assert.equal(separate.correctPairs,2);
   assert.equal(separate.fullyCorrectComposition,true);
 });
+
+
+test('benchmark never joins a number and percent sign across a line boundary', () => {
+  const pair = {fiber:'PAMUK',percent:'80'};
+  for (const text of ['80\n% PAMUK', '%\n80 PAMUK',
+    '80\r\n% PAMUK', '80\u2028% PAMUK', '%\u2029 80 PAMUK']) {
+    assert.equal(containsExactPair(text, pair), false, text);
+  }
+  for (const text of ['80 % PAMUK', '80\t% PAMUK',
+    '80\u2009% PAMUK', '%\u00a080 PAMUK']) {
+    assert.equal(containsExactPair(text, pair), true, text);
+  }
+  const fixture = {id:'line-split-ratio',kind:'positive',
+    groundTruth:'80% PAMUK',expectedPairs:[pair]};
+  const result = scoreCase(fixture,{code:null,text:'80\n% PAMUK'});
+  assert.equal(result.correctPairs,0);
+  assert.equal(result.fullyCorrectComposition,false);
+});
