@@ -389,6 +389,28 @@ void main() {
     );
   });
 
+  test('D4.3 secondary OCR provenance is explicit and advisory only', () {
+    final reading = OcrSecondReading(
+      rawText: '20% PAMUK',
+      confidence: 88,
+      engine: OcrReadingEngine.tesseractJs,
+      variant: OcrReadingVariant.sparseTextPsm11,
+    );
+    final first = OcrObservation(
+      rawText: '80% PAMUK',
+      confidence: 48,
+      decision: OcrDecision.candidate,
+      secondReading: reading,
+    );
+    expect(reading.engine, OcrReadingEngine.tesseractJs);
+    expect(reading.variant, OcrReadingVariant.sparseTextPsm11);
+    expect(first.acceptedText, '80% PAMUK');
+    expect(first.percentageTokensDiffer, isTrue);
+    final unknown = OcrSecondReading(rawText: '80% PAMUK', confidence: null);
+    expect(unknown.engine, OcrReadingEngine.unspecified);
+    expect(unknown.variant, OcrReadingVariant.unspecified);
+  });
+
   test('D4.3 percent disagreements are only a strict review signal', () {
     OcrObservation compare(String first, String second) => OcrObservation(
       rawText: first,
