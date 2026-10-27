@@ -119,13 +119,25 @@ final RegExp _printedPercentPattern = RegExp(
 /// context. Deleting all percentages would miss a number moving from before
 /// one fiber name to after it while the numbers and words remain unchanged.
 /// The marker is only for a diagnostic warning, never for pairing fibers.
-String _textAroundPrintedPercentages(String text) => text
-    .replaceAll(_printedPercentPattern, ' [yuzde] ')
-    .split(RegExp(r'\r\n?|\n'))
-    .map((line) =>
-        line.trim().replaceAll(RegExp(r'[ \t\u00A0\u2007\u2009\u202F]+'), ' ').toLowerCase())
-    .where((line) => line.isNotEmpty)
-    .join('\n');
+String _textAroundPrintedPercentages(String text) {
+  final lines = text
+      .replaceAll(_printedPercentPattern, ' [yuzde] ')
+      .split(RegExp(r'\r\n?|\n'))
+      .map((line) => line
+          .trim()
+          .replaceAll(RegExp(r'[ \t\u00A0\u2007\u2009\u202F]+'), ' ')
+          .toLowerCase())
+      .toList();
+  // Empty lines *between* content can separate fabric sections. Discard only
+  // outer whitespace; never infer that either reading is the correct one.
+  while (lines.isNotEmpty && lines.first.isEmpty) {
+    lines.removeAt(0);
+  }
+  while (lines.isNotEmpty && lines.last.isEmpty) {
+    lines.removeLast();
+  }
+  return lines.join('\n');
+}
 
 List<String> _printedPercentTokens(String text) {
   final matches = _printedPercentPattern.allMatches(text);
