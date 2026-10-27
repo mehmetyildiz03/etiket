@@ -5,13 +5,14 @@ const vm = require('node:vm');
 const fs = require('node:fs');
 const bridgeSource = fs.readFileSync(require('node:path').join(__dirname, '../web/doku_ocr.js'), 'utf8');
 const qualitySource = fs.readFileSync(require('node:path').join(__dirname, '../web/doku_quality.js'), 'utf8');
+const guidanceSource = fs.readFileSync(require('node:path').join(__dirname, '../web/doku_capture_guidance.js'), 'utf8');
 function png(width = 800, height = 600) {
   const bytes = new Uint8Array(32), view = new DataView(bytes.buffer);
   view.setUint32(0, 0x89504e47); view.setUint32(4, 0x0d0a1a0a);
   view.setUint32(16, width); view.setUint32(20, height);
   return new File([bytes], 'label.png', {type: 'image/png'});
 }
-function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, failDeskewRead = false} = {}) {
+function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, guidanceAvailable = true, failDeskewRead = false} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
   let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, mode = '6', recognizes = 0;
   const canvases = [], imageSources = [];
@@ -76,6 +77,7 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
     }}
   });
   if (qualityAvailable) vm.runInContext(qualitySource, context);
+  if (guidanceAvailable) vm.runInContext(guidanceSource, context);
   vm.runInContext(bridgeSource, context);
   const bridge = context.dokuOcr;
   return {bridge, context, nodes, revoked, blobs, workers, listeners, optionsHistory, canvases, imageSources,
@@ -92,6 +94,37 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
       return picking;
     }};
 }
+
+test('D4.2 capture hint is metadata on original and edited photos, not an OCR gate', async () => {
+  const s = setup();
+  const original = await s.upload();
+  assert.equal(original.captureHint, 'veryBright');
+  const edited = await s.bridge.edit(original.path,
+    {left: 0.1, top: 0.1, width: 0.6, height: 0.7, quarterTurns: 0});
+  assert.equal(edited.captureHint, 'veryBright');
+  assert.match(await s.bridge.recognize(edited.path, () => {}), /Pamuk/);
+  assert.equal(s.recognizedBlob, s.blobs.get(edited.path));
+  s.bridge.release(edited.path);
+  s.bridge.release(original.path);
+  assert.equal(s.blobs.size, 0);
+});
+
+test('D4.2 optional hint engine missing or throwing never blocks OCR', async () => {
+  const absent = setup({guidanceAvailable: false});
+  const first = await absent.upload();
+  assert.equal(first.captureHint, null);
+  assert.match(await absent.bridge.recognize(first.path, () => {}), /Pamuk/);
+  absent.bridge.dispose();
+  assert.equal(absent.blobs.size, 0);
+
+  const faulty = setup();
+  faulty.context.dokuCaptureGuidance = {evaluate: () => {throw new Error('synthetic hint failure');}};
+  const second = await faulty.upload();
+  assert.equal(second.captureHint, null);
+  assert.match(await faulty.bridge.recognize(second.path, () => {}), /Pamuk/);
+  faulty.bridge.dispose();
+  assert.equal(faulty.blobs.size, 0);
+});
 
 test('D4.2 diagnostics measure selected crop, preserve OCR source and release canvases', async () => {
   const s = setup();

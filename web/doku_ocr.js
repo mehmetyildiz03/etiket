@@ -346,9 +346,19 @@
   async function publish(source, blob, current = () => true, quality = null) {
     const bytes = new Uint8Array(await blob.arrayBuffer());
     if (disposed || !current()) throw fail('canceled');
+    // A photo hint is optional metadata, never a gate for OCR or an image edit.
+    // Only the bounded numeric metrics are passed; no image/text is transmitted.
+    let captureHint = null;
+    try {
+      const evaluate = globalThis.dokuCaptureGuidance?.evaluate;
+      if (typeof evaluate === 'function') {
+        const result = evaluate(quality);
+        if (['veryDark', 'veryBright', 'lowDetail'].includes(result)) captureHint = result;
+      }
+    } catch (_) { /* A failed hint must not prevent scanning. */ }
     const path = URL.createObjectURL(blob);
     photos.set(path, {blob, source});
-    return {path, bytes, quality, sourceBytes: source.preview,
+    return {path, bytes, quality, captureHint, sourceBytes: source.preview,
       sourcePreviewUrl: source.previewUrl,
       sourceWidth: source.width, sourceHeight: source.height};
   }
