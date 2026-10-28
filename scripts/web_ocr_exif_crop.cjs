@@ -2,17 +2,15 @@
 const assert = require('node:assert/strict');
 const {chromium, webkit} = require('../tool/web_ocr/node_modules/playwright');
 
-// Synthetic 160x100 JPEG with red left half and blue right half. This is
-// the same non-user fixture as test/native_exif_crop_test.dart. Its EXIF tag
-// is orientation 6; only that one tag byte is changed for orientation 8.
-const fixture = '/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAYAAAAAAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCABkAKADASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFgEBAQEAAAAAAAAAAAAAAAAAAAgG/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AiAGUUAAAAAAAAAiQFVpqAAAAAAAAWwCVFKgAAAAAAAIkBVaagAAAAAAAFsAlRSoAAAAAAACJAVWmoAAAAAAABbAJUUqAAAAAAAAiQFVpqAAAAAAAAWwCVFKgAAAAAAAIkBVaagAAAAAAAFsAlRSoAAAAAAACJAVWmoAAAAAAABbAJUUqAAAAAAAAiQFVpqAAAAAAAAf/2Q==';
-function jpegWithOrientation(orientation) {
-  const bytes = Buffer.from(fixture, 'base64');
-  const tag = Buffer.from([0x01, 0x12, 0x00, 0x03, 0, 0, 0, 1, 0, 6]);
-  const offset = bytes.indexOf(tag);
-  assert.ok(offset >= 0, 'synthetic TIFF EXIF orientation tag must exist');
-  bytes[offset + tag.length - 1] = orientation;
-  return bytes;
+// A standards-compliant synthetic JPEG is drawn by each browser's canvas.
+// Insert a minimal EXIF orientation APP1 segment after the JPEG SOI marker.
+// The red/blue halves are generated, never taken from a user photo.
+function jpegWithOrientation(jpeg, orientation) {
+  assert.equal(jpeg.readUInt16BE(0), 0xffd8);
+  const exif = Buffer.from(
+    'ffe100224578696600004d4d002a00000008000101120003000000010006000000000000', 'hex');
+  exif[29] = orientation; // Big-endian TIFF tag 0x0112, SHORT value.
+  return Buffer.concat([jpeg.subarray(0, 2), exif, jpeg.subarray(2)]);
 }
 
 async function run(engine, baseUrl) {
@@ -23,13 +21,21 @@ async function run(engine, baseUrl) {
       const page = await context.newPage();
       await page.goto(baseUrl, {waitUntil:'networkidle'});
       assert.equal(await page.evaluate(() => window.dokuOcr?.supported), true);
+      const jpeg = Buffer.from(await page.evaluate(() => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 160; canvas.height = 100;
+        const c = canvas.getContext('2d');
+        c.fillStyle = '#ff0000'; c.fillRect(0, 0, 80, 100);
+        c.fillStyle = '#0000ff'; c.fillRect(80, 0, 80, 100);
+        return canvas.toDataURL('image/jpeg', .98).split(',')[1];
+      }), 'base64');
       for (const orientation of [6, 8]) {
         const chooserPromise = page.waitForEvent('filechooser');
         await page.evaluate(() => { window.__exifPick = window.dokuOcr.pick(false); });
         const chooser = await chooserPromise;
         await chooser.setFiles({
           name: 'synthetic-exif.jpg', mimeType:'image/jpeg',
-          buffer: jpegWithOrientation(orientation)
+          buffer: jpegWithOrientation(jpeg, orientation)
         });
         const source = await page.evaluate(async () => {
           window.__exifSource = await window.__exifPick;
