@@ -10,7 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const {chromium} = require('../tool/web_ocr/node_modules/playwright');
-const {scoreCase, summarize} = require('./ocr_benchmark_metrics.cjs');
+const {scoreCase, summarize, compareAlternativeReading} = require('./ocr_benchmark_metrics.cjs');
 const {validatePrivateBenchmark} = require('./private_benchmark_guard.cjs');
 
 const baseUrl = process.argv[2] || 'http://127.0.0.1:8082/etiket/';
@@ -191,7 +191,11 @@ async function main() {
       // Only synthetic data enters CI artifacts; private GT stays in chosen local output.
       // Full, sensitive transcriptions are stored only in the explicitly
       // chosen LOCAL private report; CI always runs with synthetic fixtures.
-      results.push({...metrics,group:f.group||'unknown',split:f.split||'synthetic',
+      // Diagnostic-only paired PSM6/3 or PSM6/11 comparison. No OCR variant
+      // is selected, corrected or promoted into the user's accepted text.
+      const paired=compareAlternativeReading(f,raw?.rawText||'',
+        output.observation.secondReading);
+      results.push({...metrics,paired,group:f.group||'unknown',split:f.split||'synthetic',
         groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||'',
         confidence:output.observation.confidence,decision:output.observation.decision,
          secondReading:output.observation.secondReading||null});
@@ -207,6 +211,25 @@ async function main() {
     }
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),'No image/GT upload');
     const aggregate=summarize(results);
+    const pairedByPsm=Object.fromEntries([3,11].map(psm=>{
+      const rows=results.map(r=>r.paired).filter(r=>r?.secondPsm===psm);
+      const sum=key=>rows.reduce((total,r)=>total+(r[key]||0),0);
+      const macro=key=>rows.length
+        ? rows.reduce((total,r)=>total+r[key],0)/rows.length : null;
+      return [String(psm),{
+        comparedPositiveImages:rows.length,
+        firstMacroRawCer:macro('firstRawCer'),
+        secondMacroRawCer:macro('secondRawCer'),
+        firstMacroRawWer:macro('firstRawWer'),
+        secondMacroRawWer:macro('secondRawWer'),
+        referencePairs:sum('referencePairs'),
+        firstExactPairs:sum('firstExactPairs'),
+        secondExactPairs:sum('secondExactPairs'),
+        referenceSectionPairs:sum('referenceSectionPairs'),
+        firstSectionPairs:sum('firstSectionPairs'),
+        secondSectionPairs:sum('secondSectionPairs')
+      }];
+    }));
     const byGroup=Object.fromEntries([...new Set(results.map(r=>r.group))]
       .map(group=>[group,summarize(results.filter(r=>r.group===group))]));
     const report={schemaVersion:1,kind:synthetic?'synthetic-not-real-accuracy':'real-private',
@@ -217,7 +240,7 @@ async function main() {
       normalization:'NFC, fold whitespace only, preserve case/diacritics/%/digits',
       notes:synthetic?'Only generated fonts/backgrounds; results NEVER estimate real garment OCR quality':
         'Private authorized photos only; do not upload report or images to public CI',
-      aggregate,byGroup,results};
+      aggregate,byGroup,pairedByPsm,results};
     fs.writeFileSync(path.join(dest,'report.json'),JSON.stringify(report,null,2));
     const asPct=n=>n==null?'n/a':(n*100).toFixed(1)+'%';
     const pairs=[
@@ -254,6 +277,23 @@ async function main() {
       'False reject counts only positive labels; rejecting readable non-label writing is correct.',
       'Section metrics require human-annotated headings and pair ownership. Missing/duplicate headings earn zero; unannotated labels are excluded, not assumed correct.',
       'Section metrics measure exact-pair recall, not precision: extra invented pairs are not separately penalized.',
+      '',
+      '## Paired raw PSM diagnostics (conditional second pass; NEVER auto-selected)',
+      '',
+      'Only positive images with an observed second reading are compared. PSM3 is',
+      'tried after rejected PSM6; PSM11 is tried after a marginal PSM6 candidate.',
+      'Missing second readings are unobserved, not counted as OCR failures.',
+      'Macro CER/WER is an unweighted mean over paired images, not a population estimate.',
+      '',
+      '| Second PSM | Paired labels | PSM6 raw CER | Alternative raw CER | PSM6 exact pairs | Alternative exact pairs |',
+      '|---|---:|---:|---:|---:|---:|',
+      ...[3,11].map(psm=>{
+        const r=pairedByPsm[String(psm)];
+        return '| '+psm+' | '+r.comparedPositiveImages+' | '+
+          asPct(r.firstMacroRawCer)+' | '+asPct(r.secondMacroRawCer)+' | '+
+          r.firstExactPairs+'/'+r.referencePairs+' | '+
+          r.secondExactPairs+'/'+r.referencePairs+' |';
+      }),
       '',
       '| Case | Decision | Engine confidence | Raw CER | Raw WER |',
       '|---|---|---:|---:|---:|',
