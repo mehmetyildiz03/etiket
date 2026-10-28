@@ -30,6 +30,8 @@ async function main() {
   page.on('request',r=>requests.push({method:r.method(),url:r.url()}));
   try {
     await page.goto(base,{waitUntil:'networkidle'});
+    // Study-only helper is injected into the test page, never into shipped Doku.
+    await page.addScriptTag({path:path.join(__dirname,'d4_skew_components.cjs')});
     await page.evaluate(async()=>{
       const assets = new URL('./ocr/',location.href);
       window.__abWorker = await Tesseract.createWorker(['tur','eng'],1,{
@@ -87,21 +89,33 @@ async function main() {
       },crop);
       assert.equal(edited.code,null,'Production crop failed');
       assert.ok(edited.photo?.path);
-      // An alternative image-processing candidate is created only in this
-      // isolated study. It is never passed to the production acceptance path.
-      const contrastUrl=await page.evaluate(async ({encoded,crop})=>{
-        const img=new Image();
-        img.src='data:image/png;base64,'+encoded;
-        await img.decode();
-        const x=Math.floor(crop.left*img.naturalWidth);
-        const y=Math.floor(crop.top*img.naturalHeight);
-        const w=Math.floor(crop.width*img.naturalWidth);
-        const h=Math.floor(crop.height*img.naturalHeight);
+      // CRITICAL CONTROL: editSafe() ALREADY runs production straightenLabel()
+      // and enlarges the crop. Estimating the ORIGINAL camera skew from
+      // edited.photo.path would therefore be a double-deskew experiment.
+      // Keep the production crop as its own baseline, but derive all study
+      // transforms from this untouched, normalized raw source ROI.
+      const rawCropUrl=await page.evaluate(async ({sourceUrl,region})=>{
+        const img=new Image();img.src=sourceUrl;await img.decode();
         const canvas=document.createElement('canvas');
-        canvas.width=w*2;canvas.height=h*2;
+        canvas.width=Math.max(1,Math.round(img.naturalWidth*region.width));
+        canvas.height=Math.max(1,Math.round(img.naturalHeight*region.height));
+        const c=canvas.getContext('2d');
+        c.drawImage(img,img.naturalWidth*region.left,img.naturalHeight*region.top,
+          img.naturalWidth*region.width,img.naturalHeight*region.height,
+          0,0,canvas.width,canvas.height);
+        const blob=await new Promise((resolve,reject)=>
+          canvas.toBlob(b=>b?resolve(b):reject(Error('raw ROI encode failed')),'image/png'));
+        return URL.createObjectURL(blob);
+      },{sourceUrl:source.path,region:crop});
+      // Isolated A/B threshold candidate, from the SAME raw crop pixels.
+      // Never passed to the production acceptance path.
+      const contrastUrl=await page.evaluate(async sourceUrl=>{
+        const img=new Image();img.src=sourceUrl;await img.decode();
+        const canvas=document.createElement('canvas');
+        canvas.width=img.naturalWidth*2;canvas.height=img.naturalHeight*2;
         const c=canvas.getContext('2d',{willReadFrequently:true});
         c.imageSmoothingEnabled=true;
-        c.drawImage(img,x,y,w,h,0,0,canvas.width,canvas.height);
+        c.drawImage(img,0,0,canvas.width,canvas.height);
         const image=c.getImageData(0,0,canvas.width,canvas.height);
         for(let p=0;p<image.data.length;p+=4) {
           const gray=.299*image.data[p]+.587*image.data[p+1]+.114*image.data[p+2];
@@ -110,9 +124,9 @@ async function main() {
         }
         c.putImageData(image,0,0);
         const blob=await new Promise((resolve,reject)=>
-          canvas.toBlob(b=>b?resolve(b):reject(Error('encode failed')),'image/png'));
+          canvas.toBlob(b=>b?resolve(b):reject(Error('threshold encode failed')),'image/png'));
         return URL.createObjectURL(blob);
-      },{encoded,crop});
+      },rawCropUrl);
       // Oracle deskew is an upper-bound diagnostic: the fixture generator
       // knows the exact rotation. Production does NOT know this angle and
       // must not automatically apply or select this candidate.
@@ -134,7 +148,7 @@ async function main() {
         const blob=await new Promise((resolve,reject)=>
           canvas.toBlob(b=>b?resolve(b):reject(Error('deskew encode failed')),'image/png'));
         return URL.createObjectURL(blob);
-      },{sourceUrl:edited.photo.path,angle:fixture.angle});
+      },{sourceUrl:rawCropUrl,angle:fixture.angle});
       // Matched 2x interpolation control: identical source, canvas size,
       // fill and smoothing to oracle deskew, but no rotation. This isolates
       // the contribution of geometric correction from mere enlargement.
@@ -154,7 +168,7 @@ async function main() {
         const blob=await new Promise((resolve,reject)=>
           canvas.toBlob(b=>b?resolve(b):reject(Error('upscale encode failed')),'image/png'));
         return URL.createObjectURL(blob);
-      },edited.photo.path);
+      },rawCropUrl);
       // Estimate line skew from image pixels, NOT the synthetic fixture angle.
       // A dark-pixel horizontal projection is a small, local candidate for
       // evaluating whether geometry can be inferred without an oracle.
@@ -189,8 +203,21 @@ async function main() {
           if(score>bestScore) {bestScore=score;bestAngle=angle;}
         }
         return {angle:bestAngle,pixels:points.length,usable:true};
-      },edited.photo.path);
-      const estimatedUrl=await page.evaluate(async ({sourceUrl,angle})=>{
+      },rawCropUrl);
+      // Independent candidate: estimate the text-line slope from connected
+      // ink glyphs rather than the full dark-pixel horizontal projection.
+      // Its only inputs are the cropped pixels; fixture.angle is NOT passed.
+      const componentEstimate=await page.evaluate(async sourceUrl=>{
+        const img=new Image();img.src=sourceUrl;await img.decode();
+        const canvas=document.createElement('canvas');
+        canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;
+        const c=canvas.getContext('2d',{willReadFrequently:true});
+        c.drawImage(img,0,0);
+        return window.__dokuStudySkew.estimate(
+          c.getImageData(0,0,canvas.width,canvas.height).data,
+          canvas.width,canvas.height);
+      },rawCropUrl);
+      const makeStudyDeskewUrl=async angle=>page.evaluate(async ({sourceUrl,angle})=>{
         const img=new Image();img.src=sourceUrl;await img.decode();
         const canvas=document.createElement('canvas');
         canvas.width=img.naturalWidth*2;canvas.height=img.naturalHeight*2;
@@ -201,17 +228,24 @@ async function main() {
         c.rotate(-angle*Math.PI/180);
         c.drawImage(img,-canvas.width/2,-canvas.height/2,canvas.width,canvas.height);
         const blob=await new Promise((resolve,reject)=>
-          canvas.toBlob(b=>b?resolve(b):reject(Error('estimated deskew encode failed')),'image/png'));
+          canvas.toBlob(b=>b?resolve(b):reject(Error('study deskew encode failed')),'image/png'));
         return URL.createObjectURL(blob);
-      },{sourceUrl:edited.photo.path,angle:estimated.angle});
+      },{sourceUrl:rawCropUrl,angle});
+      const estimatedUrl=await makeStudyDeskewUrl(estimated.angle);
+      const componentUrl=await makeStudyDeskewUrl(
+        componentEstimate.usable?componentEstimate.angle:0);
+      console.log('D4.2 SYNTHETIC component angle '+fixture.id+': '+
+        JSON.stringify(componentEstimate));
       console.log('D4.2 SYNTHETIC pixel-only angle estimate '+fixture.id+
         ': '+estimated.angle+' degrees, darkPixels='+estimated.pixels);
       const variants=[
         ['production-full',source.path],
         ['production-crop',edited.photo.path],
+        ['study-raw-crop',rawCropUrl],
         ['study-crop-2x-threshold',contrastUrl],
         ['study-crop-2x-unrotated',upscaleUrl],
         ['study-crop-estimated-deskew-2x',estimatedUrl],
+        ['study-crop-component-deskew-2x',componentUrl],
         ['study-crop-oracle-deskew-2x',deskewUrl]
       ];
       try {
@@ -227,6 +261,9 @@ async function main() {
             const distance=textDistance(truth,reading.rawText);
             const exactPairs=pairs.filter(p=>containsExactPair(reading.rawText,p)).length;
             results.push({fixture:fixture.id,variant,psm,estimatedAngle:estimated.angle,
+              componentAngle:componentEstimate.angle,
+              componentUsable:componentEstimate.usable,
+              componentGlyphs:componentEstimate.components,
               oracleAngleForComparisonOnly:fixture.angle,exactPairs,
               referencePairs:pairs.length,
               rawCer:distance.characterEdits/distance.referenceCharacters,
@@ -238,13 +275,14 @@ async function main() {
           }
         }
       } finally {
-        await page.evaluate(({original,processed,contrast,deskew,upscale,estimated})=>{
+        await page.evaluate(({original,processed,rawCrop,contrast,deskew,upscale,estimated,component})=>{
           dokuOcr.release(original);dokuOcr.release(processed);
-          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);URL.revokeObjectURL(upscale);URL.revokeObjectURL(estimated);window.__abPick=null;
-        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl,deskew:deskewUrl,upscale:upscaleUrl,estimated:estimatedUrl});
+          URL.revokeObjectURL(rawCrop);
+          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);URL.revokeObjectURL(upscale);URL.revokeObjectURL(estimated);URL.revokeObjectURL(component);window.__abPick=null;
+        },{original:source.path,processed:edited.photo.path,rawCrop:rawCropUrl,contrast:contrastUrl,deskew:deskewUrl,upscale:upscaleUrl,estimated:estimatedUrl,component:componentUrl});
       }
     }
-    assert.equal(results.length,fixtures.length*6*3);
+    assert.equal(results.length,fixtures.length*8*3);
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),
       'No POST or private image upload');
     // Pair each candidate with its exact same-source, same-scale control.
@@ -252,38 +290,54 @@ async function main() {
     const angleSweep=fixtures.map(fixture=>{
       const sample=results.filter(r=>r.fixture===fixture.id);
       const estimatedAngle=sample[0].estimatedAngle;
+      const componentAngle=sample[0].componentAngle;
       return {
         fixture:fixture.id,
         syntheticAngleOnly:fixture.angle,
         estimatedAngle,
         absoluteAngleErrorDeg:Math.abs(estimatedAngle-fixture.angle),
+        componentAngle,componentUsable:sample[0].componentUsable,
+        componentGlyphs:sample[0].componentGlyphs,
+        componentAbsoluteAngleErrorDeg:Math.abs(componentAngle-fixture.angle),
         comparisons:[3,6,11].map(psm=>{
           const baseline=sample.find(r=>r.psm===psm &&
             r.variant==='study-crop-2x-unrotated');
           const corrected=sample.find(r=>r.psm===psm &&
             r.variant==='study-crop-estimated-deskew-2x');
-          assert.ok(baseline && corrected);
+          const component=sample.find(r=>r.psm===psm &&
+            r.variant==='study-crop-component-deskew-2x');
+          assert.ok(baseline && corrected && component);
           return {psm,unrotatedExactPairs:baseline.exactPairs,
             estimatedDeskewExactPairs:corrected.exactPairs,
             exactPairDelta:corrected.exactPairs-baseline.exactPairs,
+            componentExactPairs:component.exactPairs,
+            componentExactPairDelta:component.exactPairs-baseline.exactPairs,
             unrotatedCer:baseline.rawCer,estimatedDeskewCer:corrected.rawCer,
             cerDelta:corrected.rawCer-baseline.rawCer,
-            unrotatedMs:baseline.latencyMs,estimatedDeskewMs:corrected.latencyMs};
+            componentCer:component.rawCer,
+            componentCerDelta:component.rawCer-baseline.rawCer,
+            unrotatedMs:baseline.latencyMs,estimatedDeskewMs:corrected.latencyMs,
+            componentMs:component.latencyMs};
         })
       };
     });
-    assert.ok(angleSweep.every(x=>Number.isFinite(x.absoluteAngleErrorDeg)));
+    assert.ok(angleSweep.every(x=>Number.isFinite(x.absoluteAngleErrorDeg) &&
+      Number.isFinite(x.componentAbsoluteAngleErrorDeg)));
+    assert.ok(results.every(r=>Number.isFinite(r.rawCer) && Number.isFinite(r.rawWer)));
+    // Report candidate failures and regressions; never assert that it wins.
     for(const row of angleSweep) {
       console.log('D4.2 SYNTHETIC angle-sweep '+row.fixture+
         ' estimated='+row.estimatedAngle+' oracle='+row.syntheticAngleOnly+
         ' absError='+row.absoluteAngleErrorDeg+
+        ' component='+row.componentAngle+' componentError='+row.componentAbsoluteAngleErrorDeg+
         ' pairDeltas='+row.comparisons.map(x=>'PSM'+x.psm+':'+x.exactPairDelta).join(','));
     }
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
-      purpose:'Compare OCR input pixels/PSM, not a production winner or real accuracy',
+      purpose:'Compare raw source ROI/production auto-deskew/PSM; no production winner or real accuracy',
       oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
-      deskewControl:'2x unrotated uses the same interpolation and pixels; compare with oracle rotation',
+      deskewControl:'All study variants derive from unprocessed raw ROI; editSafe already deskews and upscales production-crop. 2x unrotated matches study interpolation.',
       estimatedDeskew:'Pixel-only horizontal projection, no fixture-angle access; study only',
+      componentDeskew:'Pixel-only connected-component centroid estimator; paired with same-source 2x unrotated control; study only',
       commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       engine:'Chromium Tesseract.js WASM tur+eng',
       note:'No automatic selection, no changes to user corrections or approval',
