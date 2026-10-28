@@ -25,12 +25,18 @@ Future<Uint8List> renderNativeCrop(
   // Snap BOTH crop edges to decoded source pixels. Rounding only the size
   // leaves a fractional source rectangle and resamples tiny printed glyphs.
   // The same integer rectangle is used for every 0/90/180/270 degree turn.
-  final leftPixel = (edit.left * rotatedWidth).round().clamp(0, rotatedWidth);
-  final topPixel = (edit.top * rotatedHeight).round().clamp(0, rotatedHeight);
+  final leftPixel = (edit.left * rotatedWidth).round().clamp(0, rotatedWidth).toInt();
+  final topPixel = (edit.top * rotatedHeight).round().clamp(0, rotatedHeight).toInt();
   final rightPixel =
-      ((edit.left + edit.width) * rotatedWidth).round().clamp(0, rotatedWidth);
+      ((edit.left + edit.width) * rotatedWidth)
+          .round()
+          .clamp(0, rotatedWidth)
+          .toInt();
   final bottomPixel =
-      ((edit.top + edit.height) * rotatedHeight).round().clamp(0, rotatedHeight);
+      ((edit.top + edit.height) * rotatedHeight)
+          .round()
+          .clamp(0, rotatedHeight)
+          .toInt();
   final targetWidth = rightPixel - leftPixel;
   final targetHeight = bottomPixel - topPixel;
   if (targetWidth < 32 ||
