@@ -187,6 +187,45 @@ async function main() {
           canvas.toBlob(b=>b?resolve(b):reject(Error('upscale encode failed')),'image/png'));
         return URL.createObjectURL(blob);
       },rawCropUrl);
+      // Study-only 2x unsharp-mask candidate. The 3x3 blur and gain are
+      // fixed before inspecting OCR results; no OCR text, oracle angle or
+      // composition percentages influence this transform. Textured seams
+      // may be amplified too, so report regressions alongside any gains.
+      const focusControl = ['small-skew-9deg', 'small-skew-9deg-defocus',
+        'small-skew-9deg-defocus-strong'].includes(fixture.id);
+      const unsharp = focusControl ? await page.evaluate(async sourceUrl=>{
+        const img=new Image();img.src=sourceUrl;await img.decode();
+        const canvas=document.createElement('canvas');
+        canvas.width=img.naturalWidth*2;canvas.height=img.naturalHeight*2;
+        const c=canvas.getContext('2d',{willReadFrequently:true});
+        c.fillStyle='#f6f4ef';c.fillRect(0,0,canvas.width,canvas.height);
+        c.imageSmoothingEnabled=true;c.imageSmoothingQuality='high';
+        c.drawImage(img,0,0,canvas.width,canvas.height);
+        const pixels=c.getImageData(0,0,canvas.width,canvas.height);
+        const source=new Uint8ClampedArray(pixels.data);
+        const w=canvas.width,h=canvas.height,gain=1.25;
+        let changedPixels=0;
+        for(let y=1;y<h-1;y++) for(let x=1;x<w-1;x++) {
+          const i=(y*w+x)*4;
+          let changed=false;
+          for(let channel=0;channel<3;channel++) {
+            let sum=0;
+            for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++)
+              sum+=source[((y+dy)*w+x+dx)*4+channel];
+            const next=Math.max(0,Math.min(255,Math.round(
+              source[i+channel]+gain*(source[i+channel]-sum/9))));
+            if(next!==source[i+channel]) changed=true;
+            pixels.data[i+channel]=next;
+          }
+          if(changed) changedPixels++;
+        }
+        c.putImageData(pixels,0,0);
+        const blob=await new Promise((resolve,reject)=>
+          canvas.toBlob(b=>b?resolve(b):reject(Error('unsharp encode failed')),'image/png'));
+        return {url:URL.createObjectURL(blob),changedPixels};
+      },rawCropUrl) : null;
+      if(focusControl) assert.ok(unsharp.changedPixels>0,
+        'Unsharp A/B must actually change the source pixels');
       // Estimate line skew from image pixels, NOT the synthetic fixture angle.
       // A dark-pixel horizontal projection is a small, local candidate for
       // evaluating whether geometry can be inferred without an oracle.
@@ -264,7 +303,8 @@ async function main() {
         ['study-crop-2x-unrotated',upscaleUrl],
         ['study-crop-estimated-deskew-2x',estimatedUrl],
         ['study-crop-component-deskew-2x',componentUrl],
-        ['study-crop-oracle-deskew-2x',deskewUrl]
+        ['study-crop-oracle-deskew-2x',deskewUrl],
+        ...(unsharp ? [['study-crop-2x-unsharp',unsharp.url]] : [])
       ];
       try {
         for(const [variant,url] of variants) {
@@ -293,14 +333,15 @@ async function main() {
           }
         }
       } finally {
-        await page.evaluate(({original,processed,rawCrop,contrast,deskew,upscale,estimated,component})=>{
+        await page.evaluate(({original,processed,rawCrop,contrast,deskew,upscale,estimated,component,unsharp})=>{
           dokuOcr.release(original);dokuOcr.release(processed);
           URL.revokeObjectURL(rawCrop);
-          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);URL.revokeObjectURL(upscale);URL.revokeObjectURL(estimated);URL.revokeObjectURL(component);window.__abPick=null;
-        },{original:source.path,processed:edited.photo.path,rawCrop:rawCropUrl,contrast:contrastUrl,deskew:deskewUrl,upscale:upscaleUrl,estimated:estimatedUrl,component:componentUrl});
+          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);URL.revokeObjectURL(upscale);URL.revokeObjectURL(estimated);URL.revokeObjectURL(component);if(unsharp) URL.revokeObjectURL(unsharp);window.__abPick=null;
+        },{original:source.path,processed:edited.photo.path,rawCrop:rawCropUrl,contrast:contrastUrl,deskew:deskewUrl,upscale:upscaleUrl,estimated:estimatedUrl,component:componentUrl,unsharp:unsharp?.url||null});
       }
     }
-    assert.equal(results.length,fixtures.length*8*3);
+    assert.equal(results.length,fixtures.length*8*3+3*3,
+      'Nine additional unsharp OCR reads are restricted to matched focus controls');
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),
       'No POST or private image upload');
     // Pair each candidate with its exact same-source, same-scale control.
@@ -369,14 +410,35 @@ async function main() {
           sharpWer:sharp.rawWer,blurredWer:blurred.rawWer,
           werDelta:blurred.rawWer-sharp.rawWer};
       });
-    assert.equal(blurImpact.length,blurLevels.length*8*3);
+    assert.equal(blurImpact.length,blurLevels.length*(8*3+3));
     for(const level of blurLevels) {
       const atLevel=blurImpact.filter(r=>r.blurPx===level);
-      assert.equal(atLevel.length,8*3,'Each blur level needs every matched variant/PSM');
+      assert.equal(atLevel.length,8*3+3,'Each blur level needs every matched variant/PSM');
       for(const row of atLevel) console.log('D4.2 SYNTHETIC defocus '+
         level+'px '+row.variant+' PSM'+row.psm+' exactDelta='+row.exactPairDelta+
         ' cerDelta='+row.cerDelta.toFixed(3)+' werDelta='+row.werDelta.toFixed(3));
     }
+    // Compare unsharp against identical 2x interpolation, ROI and PSM.
+    // Never treat improved synthetic CER as a calibrated focus score.
+    const unsharpImpact=results.filter(x=>x.variant==='study-crop-2x-unsharp')
+      .map(sharpened=>{
+        const control=results.find(x=>x.fixture===sharpened.fixture &&
+          x.psm===sharpened.psm && x.variant==='study-crop-2x-unrotated');
+        assert.ok(control,'Missing same-source unsharp control');
+        return {fixture:sharpened.fixture,psm:sharpened.psm,
+          unrotatedExactPairs:control.exactPairs,
+          unsharpExactPairs:sharpened.exactPairs,
+          exactPairDelta:sharpened.exactPairs-control.exactPairs,
+          unrotatedCer:control.rawCer,unsharpCer:sharpened.rawCer,
+          cerDelta:sharpened.rawCer-control.rawCer,
+          unrotatedWer:control.rawWer,unsharpWer:sharpened.rawWer,
+          werDelta:sharpened.rawWer-control.rawWer};
+      });
+    assert.equal(unsharpImpact.length,3*3);
+    for(const row of unsharpImpact)
+      console.log('D4.2 SYNTHETIC unsharp '+row.fixture+' PSM'+row.psm+
+        ' exactDelta='+row.exactPairDelta+' cerDelta='+row.cerDelta.toFixed(3)+
+        ' werDelta='+row.werDelta.toFixed(3));
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
       purpose:'Compare raw source ROI/production auto-deskew/PSM; no production winner or real accuracy',
       oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
@@ -388,7 +450,8 @@ async function main() {
       note:'No automatic selection, no changes to user corrections or approval',
       defocusControl:'Matched sharp/1.25px/2.5px full-frame canvas blur; synthetic camera-defocus proxy only, not a calibrated phone lens',
       blurLevelsPx:blurLevels,
-      blurImpact,angleSweep,results};
+      unsharpControl:'Fixed 2x unsharp 3x3 box kernel, gain 1.25; matched against same-source 2x unrotated, study-only',
+      unsharpImpact,blurImpact,angleSweep,results};
     fs.mkdirSync(out,{recursive:true});
     fs.writeFileSync(path.join(out,'d4-2-skew-contrast-ab.json'),JSON.stringify(report,null,2));
   } finally {
