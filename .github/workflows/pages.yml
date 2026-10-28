@@ -63,6 +63,7 @@ jobs:
           node scripts/web_ocr_smoke.cjs http://127.0.0.1:8082/etiket/
           node scripts/web_ocr_benchmark.cjs http://127.0.0.1:8082/etiket/ --synthetic
           node scripts/web_ocr_roi_matrix.cjs http://127.0.0.1:8082/etiket/
+          node scripts/web_ocr_crop_pixel_resampling_ab.cjs http://127.0.0.1:8082/etiket/
           node scripts/web_ocr_skew_contrast_ab.cjs http://127.0.0.1:8082/etiket/
       - name: Upload browser OCR evidence
         if: always()
