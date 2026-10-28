@@ -121,10 +121,31 @@ async function main() {
           canvas.toBlob(b=>b?resolve(b):reject(Error('deskew encode failed')),'image/png'));
         return URL.createObjectURL(blob);
       },{sourceUrl:edited.photo.path,angle:fixture.angle});
+      // Matched 2x interpolation control: identical source, canvas size,
+      // fill and smoothing to oracle deskew, but no rotation. This isolates
+      // the contribution of geometric correction from mere enlargement.
+      const upscaleUrl=await page.evaluate(async sourceUrl=>{
+        const img=new Image();
+        img.src=sourceUrl;
+        await img.decode();
+        const canvas=document.createElement('canvas');
+        canvas.width=img.naturalWidth*2;
+        canvas.height=img.naturalHeight*2;
+        const c=canvas.getContext('2d');
+        c.fillStyle='#f6f4ef';
+        c.fillRect(0,0,canvas.width,canvas.height);
+        c.imageSmoothingEnabled=true;
+        c.imageSmoothingQuality='high';
+        c.drawImage(img,0,0,canvas.width,canvas.height);
+        const blob=await new Promise((resolve,reject)=>
+          canvas.toBlob(b=>b?resolve(b):reject(Error('upscale encode failed')),'image/png'));
+        return URL.createObjectURL(blob);
+      },edited.photo.path);
       const variants=[
         ['production-full',source.path],
         ['production-crop',edited.photo.path],
         ['study-crop-2x-threshold',contrastUrl],
+        ['study-crop-2x-unrotated',upscaleUrl],
         ['study-crop-oracle-deskew-2x',deskewUrl]
       ];
       try {
@@ -150,18 +171,19 @@ async function main() {
           }
         }
       } finally {
-        await page.evaluate(({original,processed,contrast,deskew})=>{
+        await page.evaluate(({original,processed,contrast,deskew,upscale})=>{
           dokuOcr.release(original);dokuOcr.release(processed);
-          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);window.__abPick=null;
-        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl,deskew:deskewUrl});
+          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);URL.revokeObjectURL(upscale);window.__abPick=null;
+        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl,deskew:deskewUrl,upscale:upscaleUrl});
       }
     }
-    assert.equal(results.length,fixtures.length*4*3);
+    assert.equal(results.length,fixtures.length*5*3);
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),
       'No POST or private image upload');
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
       purpose:'Compare OCR input pixels/PSM, not a production winner or real accuracy',
       oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
+      deskewControl:'2x unrotated uses the same interpolation and pixels; compare with oracle rotation',
       commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       engine:'Chromium Tesseract.js WASM tur+eng',
       note:'No automatic selection, no changes to user corrections or approval',
