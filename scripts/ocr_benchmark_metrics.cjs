@@ -227,8 +227,7 @@ function compareAlternativeReading(fixture, primaryRawText, secondReading) {
   if (fixture?.kind !== 'positive' || !secondReading) return null;
   if (!['autoPage', 'sparseText'].includes(secondReading.mode) ||
       typeof primaryRawText !== 'string' ||
-      typeof secondReading.rawText !== 'string' ||
-      !secondReading.rawText.trim()) return null;
+      typeof secondReading.rawText !== 'string') return null;
   const rawScore = text => scoreCase(fixture, {
     text, rawText: text, code: null
   });
@@ -242,6 +241,7 @@ function compareAlternativeReading(fixture, primaryRawText, secondReading) {
     mode: secondReading.mode,
     firstPsm: 6,
     secondPsm: secondReading.mode === 'autoPage' ? 3 : 11,
+    sameRawText: primaryRawText === secondReading.rawText,
     firstRawCer: cer(first),
     secondRawCer: cer(second),
     firstRawWer: wer(first),
