@@ -24,10 +24,11 @@ class NativePhotoSource
   int _editRevision = 0;
   static const maxBytes = 20 * 1024 * 1024;
   static const maxPixels = 24000000;
-  // D4.2: retain substantially more camera detail for tiny printed glyphs.
-  // 4000x4000 <= maxPixels; the private adopt() boundary still rejects files
-  // above 20 MiB / 24 MP before ML Kit. This is not an OCR accuracy claim.
-  static const pickerMaxEdge = 4000.0;
+  // D4.2: preserve common 4032px camera originals without picker JPEG
+  // resizing. A 4800px square remains below the private 24 MP decode limit;
+  // larger photos are still bounded by the picker and adopt() 20 MiB/24 MP
+  // checks. This preserves input pixels, not proven OCR accuracy.
+  static const pickerMaxEdge = 4800.0;
   @override
   bool get supported => Platform.isAndroid || Platform.isIOS;
 
