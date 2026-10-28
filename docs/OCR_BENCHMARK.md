@@ -68,7 +68,7 @@ Her fotoğrafın manifest kaydı: benzersiz `id`, `kind` (positive/negative), `g
 node scripts/web_ocr_benchmark.cjs http://127.0.0.1:8082/etiket/ --manifest /private/doku/manifest.json --out /private/doku/results
 ```
 
-**`--out` mutlaka repo/build dışında olsun.** Yerel rapor ham OCR metnini ve insan transkripsiyonunu içerebilir; paylaşım istenirse yalnız anonimleştirilmiş toplu metrikleri yayımla. Gerçek veride başarı oranı, `realSampleCount` ve `realAccuracy` doldurulur. OCR karar eşiğini/test verisini otomatik optimize eden kod eklenmemiştir.
+**`--out` ve özel manifest mutlaka repo/build dışında olsun.** Gerçek benchmark yalnız yerel `http://127.0.0.1` / `localhost` sunucusuyla ve CI dışında çalışır. Çalıştırıcı, fotoğrafların özel manifest klasöründe kalmasını ve sembolik bağlantılarla repo/artifact klasörüne yönlendirilmemesini kontrol eder; harici ağ isteklerini engeller. Bu koruma gerçek fotoğraf benchmarkının yapıldığı anlamına gelmez. Yerel rapor ham OCR metnini ve insan transkripsiyonunu içerebilir; paylaşım istenirse yalnız anonimleştirilmiş toplu metrikleri yayımla. Gerçek veride başarı oranı, `realSampleCount` ve `realAccuracy` doldurulur. OCR karar eşiğini/test verisini otomatik optimize eden kod eklenmemiştir.
 
 ## Kalite ve sonraki karar
 
