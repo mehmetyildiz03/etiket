@@ -29,7 +29,7 @@ async function run(engine, baseUrl) {
         c.fillStyle = '#0000ff'; c.fillRect(80, 0, 80, 100);
         return canvas.toDataURL('image/jpeg', .98).split(',')[1];
       }), 'base64');
-      for (const orientation of [6, 8]) {
+      for (const orientation of [1, 2, 3, 4, 5, 6, 7, 8]) {
         const chooserPromise = page.waitForEvent('filechooser');
         await page.evaluate(() => { window.__exifPick = window.dokuOcr.pick(false); });
         const chooser = await chooserPromise;
@@ -42,9 +42,11 @@ async function run(engine, baseUrl) {
           return {width:window.__exifSource.sourceWidth,
             height:window.__exifSource.sourceHeight};
         });
-        assert.deepEqual(source, {width:100,height:160},
+        assert.deepEqual(source, orientation >= 5 ? {width:100,height:160} : {width:160,height:100},
           engine.name() + ' EXIF ' + orientation + ': crop editor dimensions must be oriented');
         const edits = [
+          {name:'left',left:0,top:0,width:.5,height:1,quarterTurns:0},
+          {name:'right',left:.5,top:0,width:.5,height:1,quarterTurns:0},
           {name:'top',left:0,top:0,width:1,height:.5,quarterTurns:0},
           {name:'bottom',left:0,top:.5,width:1,height:.5,quarterTurns:0},
           {name:'rotated-left',left:0,top:0,width:.5,height:1,quarterTurns:1}
@@ -66,14 +68,22 @@ async function run(engine, baseUrl) {
           assert.ok(Number.isFinite(result.mean), 'preprocessing quality probe must sample selected pixels');
           means[edit.name] = result.mean;
         }
-        // Red has greater luminance than blue. EXIF 6 rotates red to the
-        // top; EXIF 8 rotates it to the bottom. Quarter-turn 1 maps the
-        // displayed bottom half to the rotated left half.
-        const difference = means.top - means.bottom;
-        assert.ok((orientation === 6 ? difference : -difference) > 25,
-          engine.name() + ' EXIF ' + orientation + ': wrong top/bottom crop ' + JSON.stringify(means));
-        assert.ok(Math.abs(means['rotated-left'] - means.bottom) < 10,
-          engine.name() + ' EXIF ' + orientation + ': quarter-turn crop mismatch ' + JSON.stringify(means));
+        // All eight EXIF orientations must preserve the intended source pixels.
+        // The original JPEG is red on the left and blue on the right.
+        // EXIF 1/4 keep red left; 2/3 put it right; 5/6 put it on top;
+        // 7/8 put it on the bottom. Red has higher luminance than blue.
+        if (orientation <= 4) {
+          const difference = means.left - means.right;
+          assert.ok(([1, 4].includes(orientation) ? difference : -difference) > 25,
+            engine.name() + ' EXIF ' + orientation + ': wrong left/right crop ' + JSON.stringify(means));
+        } else {
+          const difference = means.top - means.bottom;
+          assert.ok(([5, 6].includes(orientation) ? difference : -difference) > 25,
+            engine.name() + ' EXIF ' + orientation + ': wrong top/bottom crop ' + JSON.stringify(means));
+          // A manual 90-degree turn must use the already EXIF-oriented pixels.
+          assert.ok(Math.abs(means['rotated-left'] - means.bottom) < 10,
+            engine.name() + ' EXIF ' + orientation + ': quarter-turn crop mismatch ' + JSON.stringify(means));
+        }
         await page.evaluate(() => {
           window.dokuOcr.release(window.__exifSource.path);
           delete window.__exifSource;
