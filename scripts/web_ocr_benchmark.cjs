@@ -144,9 +144,26 @@ async function main() {
       const original=Tesseract.createWorker;
       Tesseract.createWorker=async (...args)=>{
         const worker=await original(...args), recognize=worker.recognize.bind(worker);
+        const setParameters=worker.setParameters.bind(worker);
+        let activePsm=null;
+        worker.setParameters=async params=>{
+          const value=await setParameters(params);
+          if (params?.tessedit_pageseg_mode != null) {
+            activePsm=String(params.tessedit_pageseg_mode);
+          }
+          return value;
+        };
         worker.recognize=async (...args)=>{
           const outcome=await recognize(...args);
-          if (!window.__benchmarkRaw) window.__benchmarkRaw={rawText:outcome.data.text,confidence:outcome.data.confidence};
+          // Benchmark-only capture of EVERY completed local OCR pass, even if
+          // PSM3/11 returned identical or empty text. Production deliberately
+          // hides redundant second readings; excluding them here biases A/B.
+          const read={psm:activePsm,rawText:outcome.data.text,
+            confidence:outcome.data.confidence};
+          if (!window.__benchmarkReads) window.__benchmarkReads=[];
+          window.__benchmarkReads.push(read);
+          if (!window.__benchmarkRaw) window.__benchmarkRaw={rawText:read.rawText,
+            confidence:read.confidence};
           return outcome;
         };
         return worker;
@@ -174,9 +191,19 @@ async function main() {
         assert.equal(edit.code,null,'Crop failed: '+f.id);
         target=edit.photo.path;
       }
-      await page.evaluate(()=>{window.__benchmarkRaw=null;});
+      await page.evaluate(()=>{window.__benchmarkRaw=null;window.__benchmarkReads=[];});
       const output=await page.evaluate(path=>dokuOcr.recognizeSafe(path,()=>{}),target);
       const raw=await page.evaluate(()=>window.__benchmarkRaw);
+      const reads=await page.evaluate(()=>window.__benchmarkReads);
+      assert.ok(reads.length>=1 && reads.length<=2,
+        'Expected one PSM6 and at most one alternative OCR pass: '+f.id);
+      assert.equal(reads[0].psm,'6','Primary OCR must explicitly use PSM6: '+f.id);
+      assert.equal(reads[0].rawText,raw.rawText,'Primary raw capture: '+f.id);
+      const secondary=reads[1]||null;
+      if (secondary) {
+        const expected=output.observation.decision==='candidate'?'11':'3';
+        assert.equal(secondary.psm,expected,'Alternative PSM routing: '+f.id);
+      }
       assert.ok(output.observation, 'Diagnostics required: '+f.id);
       assert.equal(output.observation.rawText, raw.rawText, 'Unmodified engine text: '+f.id);
       assert.equal(output.observation.confidence, raw.confidence, 'Engine confidence: '+f.id);
@@ -194,7 +221,8 @@ async function main() {
       // Diagnostic-only paired PSM6/3 or PSM6/11 comparison. No OCR variant
       // is selected, corrected or promoted into the user's accepted text.
       const paired=compareAlternativeReading(f,raw?.rawText||'',
-        output.observation.secondReading);
+        secondary && {mode:secondary.psm==='3'?'autoPage':'sparseText',
+          rawText:secondary.rawText});
       results.push({...metrics,paired,group:f.group||'unknown',split:f.split||'synthetic',
         groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||'',
         confidence:output.observation.confidence,decision:output.observation.decision,
@@ -218,6 +246,7 @@ async function main() {
         ? rows.reduce((total,r)=>total+r[key],0)/rows.length : null;
       return [String(psm),{
         comparedPositiveImages:rows.length,
+        unchangedRawTextImages:rows.filter(r=>r.sameRawText).length,
         firstMacroRawCer:macro('firstRawCer'),
         secondMacroRawCer:macro('secondRawCer'),
         firstMacroRawWer:macro('firstRawWer'),
@@ -280,17 +309,18 @@ async function main() {
       '',
       '## Paired raw PSM diagnostics (conditional second pass; NEVER auto-selected)',
       '',
-      'Only positive images with an observed second reading are compared. PSM3 is',
+      'All completed second OCR passes on positive images are compared, including',
+      'identical or empty output; failed/unattempted passes remain unobserved. PSM3 is',
       'tried after rejected PSM6; PSM11 is tried after a marginal PSM6 candidate.',
       'Missing second readings are unobserved, not counted as OCR failures.',
       'Macro CER/WER is an unweighted mean over paired images, not a population estimate.',
       '',
-      '| Second PSM | Paired labels | PSM6 raw CER | Alternative raw CER | PSM6 exact pairs | Alternative exact pairs |',
-      '|---|---:|---:|---:|---:|---:|',
+      '| Second PSM | Paired labels | Unchanged reads | PSM6 raw CER | Alternative raw CER | PSM6 exact pairs | Alternative exact pairs |',
+      '|---|---:|---:|---:|---:|---:|---:|',
       ...[3,11].map(psm=>{
         const r=pairedByPsm[String(psm)];
         return '| '+psm+' | '+r.comparedPositiveImages+' | '+
-          asPct(r.firstMacroRawCer)+' | '+asPct(r.secondMacroRawCer)+' | '+
+          r.unchangedRawTextImages+' | '+asPct(r.firstMacroRawCer)+' | '+asPct(r.secondMacroRawCer)+' | '+
           r.firstExactPairs+'/'+r.referencePairs+' | '+
           r.secondExactPairs+'/'+r.referencePairs+' |';
       }),

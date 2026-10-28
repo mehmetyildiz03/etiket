@@ -240,8 +240,17 @@ test('paired OCR comparison does not invent missing PSM results or use negative 
   const fixture={id:'psm',kind:'positive',groundTruth:'80% PAMUK',
     expectedPairs:[{percent:'80',fiber:'PAMUK'}]};
   assert.equal(compareAlternativeReading(fixture,'8096 PAMUK',null),null);
-  assert.equal(compareAlternativeReading(fixture,'8096 PAMUK',
-    {mode:'autoPage',rawText:''}),null);
+  const empty=compareAlternativeReading(fixture,'8096 PAMUK',
+    {mode:'autoPage',rawText:''});
+  assert.equal(empty.secondExactPairs,0,
+    'An observed empty PSM3 read is a real miss, not a missing observation');
+  assert.equal(empty.sameRawText,false);
+  const identical=compareAlternativeReading(fixture,'8096 PAMUK',
+    {mode:'autoPage',rawText:'8096 PAMUK'});
+  assert.equal(identical.sameRawText,true,
+    'Identical second-pass output must remain in the paired denominator');
+  assert.equal(identical.firstRawCer,identical.secondRawCer);
+  assert.equal(identical.firstExactPairs,identical.secondExactPairs);
   assert.equal(compareAlternativeReading(fixture,'8096 PAMUK',
     {mode:'unknown',rawText:'80% PAMUK'}),null);
   assert.equal(compareAlternativeReading({id:'negative',kind:'negative'},
