@@ -302,7 +302,10 @@
         data[p]=data[p+1]=data[p+2]=value;
       }
     }
-    context.putImageData(image,0,0);
+    // The preview threshold is optional. WebKit can reject a canvas write
+    // under memory pressure; retain the original selected pixels for OCR.
+    try { context.putImageData(image,0,0); }
+    catch (_) { /* Original canvas crop is still available. */ }
   }
   // Sample the exact selected crop BEFORE deskew, enlargement or thresholding.
   // This is diagnostic evidence only; never silently changes OCR or a percentage.
