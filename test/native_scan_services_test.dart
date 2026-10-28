@@ -38,6 +38,33 @@ class DeniedPicker extends ImagePicker {
       throw PlatformException(code: 'camera_access_denied_without_prompt');
 }
 
+class RecordingPicker extends ImagePicker {
+  RecordingPicker(this.file);
+  final XFile file;
+  ImageSource? requestedSource;
+  double? requestedMaxWidth;
+  double? requestedMaxHeight;
+  int? requestedQuality;
+  bool? requestedMetadata;
+
+  @override
+  Future<XFile?> pickImage({
+    required ImageSource source,
+    double? maxWidth,
+    double? maxHeight,
+    int? imageQuality,
+    CameraDevice preferredCameraDevice = CameraDevice.rear,
+    bool requestFullMetadata = true,
+  }) async {
+    requestedSource = source;
+    requestedMaxWidth = maxWidth;
+    requestedMaxHeight = maxHeight;
+    requestedQuality = imageQuality;
+    requestedMetadata = requestFullMetadata;
+    return file;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory fixtures;
@@ -72,6 +99,35 @@ void main() {
       );
     },
   );
+  test('D4.2 camera and gallery retain finer glyph pixels without bypassing private bounds', () async {
+    final bytes = await fixturePng(); // synthetic only, no user/EXIF data
+    expect(
+      NativePhotoSource.pickerMaxEdge * NativePhotoSource.pickerMaxEdge,
+      lessThanOrEqualTo(NativePhotoSource.maxPixels),
+    );
+    for (final kind in [PhotoSource.camera, PhotoSource.gallery]) {
+      final original = File('${fixtures.path}/${kind.name}.png');
+      await original.writeAsBytes(bytes);
+      final picker = RecordingPicker(XFile(original.path));
+      final source = NativePhotoSource(picker: picker);
+      final photo = await source.pick(kind);
+      expect(photo, isNotNull);
+      expect(
+        picker.requestedSource,
+        kind == PhotoSource.camera ? ImageSource.camera : ImageSource.gallery,
+      );
+      expect(picker.requestedMaxWidth, 4000);
+      expect(picker.requestedMaxHeight, 4000);
+      expect(picker.requestedQuality, isNull);
+      expect(picker.requestedMetadata, isFalse);
+      expect(photo!.previewBytes, orderedEquals(bytes));
+      expect(await File(photo.path).readAsBytes(), orderedEquals(bytes));
+      expect(await original.exists(), isTrue);
+      await source.release(photo);
+      expect(await File(photo.path).exists(), isFalse);
+    }
+  });
+
   test(
     'validated private copy is deleted, gallery original and unknown files are preserved',
     () async {

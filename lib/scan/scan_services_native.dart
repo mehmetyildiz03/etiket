@@ -19,6 +19,10 @@ class NativePhotoSource implements PhotoSourceService {
   Future<void>? _initialization;
   static const maxBytes = 20 * 1024 * 1024;
   static const maxPixels = 24000000;
+  // D4.2: retain substantially more camera detail for tiny printed glyphs.
+  // 4000x4000 <= maxPixels; the private adopt() boundary still rejects files
+  // above 20 MiB / 24 MP before ML Kit. This is not an OCR accuracy claim.
+  static const pickerMaxEdge = 4000.0;
   @override
   bool get supported => Platform.isAndroid || Platform.isIOS;
 
@@ -44,9 +48,10 @@ class NativePhotoSource implements PhotoSourceService {
         source: source == PhotoSource.camera
             ? ImageSource.camera
             : ImageSource.gallery,
-        maxWidth: 2400,
-        maxHeight: 2400,
-        imageQuality: 90,
+        maxWidth: pickerMaxEdge,
+        maxHeight: pickerMaxEdge,
+        // Do not request additional lossy JPEG recompression of small glyphs.
+        // The picker may still re-encode when a source exceeds 4000px.
         requestFullMetadata: false,
       );
       return file == null ? null : await adopt(file);
