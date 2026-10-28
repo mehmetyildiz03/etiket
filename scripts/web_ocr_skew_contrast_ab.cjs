@@ -42,6 +42,14 @@ async function main() {
         const c=canvas.getContext('2d');
         c.fillStyle=f.faint?'#686660':'#ebe9e0';
         c.fillRect(0,0,1100,850);
+        // Match the woven-background skew-small fixture in web_ocr_benchmark:
+        // a clean white label alone is an unrealistically easy deskew test.
+        if (f.angle !== 0) {
+          for(let y=0;y<850;y+=7) {
+            c.strokeStyle=y%14===0?'#a7a69e':'#bbbcb4';
+            c.beginPath();c.moveTo(0,y);c.lineTo(1100,y+7);c.stroke();
+          }
+        }
         c.save();
         c.translate(550,425);c.rotate(f.angle*Math.PI/180);c.translate(-550,-425);
         c.fillStyle=f.faint?'#a8a59b':'#f6f4ef';
