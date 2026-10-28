@@ -141,11 +141,63 @@ async function main() {
           canvas.toBlob(b=>b?resolve(b):reject(Error('upscale encode failed')),'image/png'));
         return URL.createObjectURL(blob);
       },edited.photo.path);
+      // Estimate line skew from image pixels, NOT the synthetic fixture angle.
+      // A dark-pixel horizontal projection is a small, local candidate for
+      // evaluating whether geometry can be inferred without an oracle.
+      // Study only: do not wire into production or select OCR text automatically.
+      const estimated=await page.evaluate(async sourceUrl=>{
+        const img=new Image();img.src=sourceUrl;await img.decode();
+        const sample=document.createElement('canvas');
+        sample.width=img.naturalWidth;sample.height=img.naturalHeight;
+        const sc=sample.getContext('2d',{willReadFrequently:true});
+        sc.drawImage(img,0,0);
+        const rgba=sc.getImageData(0,0,sample.width,sample.height).data;
+        const points=[];
+        for(let y=2;y<sample.height-2;y+=2) {
+          for(let x=2;x<sample.width-2;x+=2) {
+            const p=(y*sample.width+x)*4;
+            const gray=.299*rgba[p]+.587*rgba[p+1]+.114*rgba[p+2];
+            if(gray<110) points.push([x,y]);
+          }
+        }
+        if(points.length<60) return {angle:0,pixels:points.length,usable:false};
+        let bestAngle=0,bestScore=-Infinity;
+        for(let step=-16;step<=16;step++) {
+          const angle=step*.75;
+          const slope=Math.tan(angle*Math.PI/180);
+          const histogram=new Map();
+          for(const [x,y] of points) {
+            const row=Math.round((y-slope*x)/3);
+            histogram.set(row,(histogram.get(row)||0)+1);
+          }
+          let score=0;
+          for(const count of histogram.values()) score+=count*count;
+          if(score>bestScore) {bestScore=score;bestAngle=angle;}
+        }
+        return {angle:bestAngle,pixels:points.length,usable:true};
+      },edited.photo.path);
+      const estimatedUrl=await page.evaluate(async ({sourceUrl,angle})=>{
+        const img=new Image();img.src=sourceUrl;await img.decode();
+        const canvas=document.createElement('canvas');
+        canvas.width=img.naturalWidth*2;canvas.height=img.naturalHeight*2;
+        const c=canvas.getContext('2d');
+        c.fillStyle='#f6f4ef';c.fillRect(0,0,canvas.width,canvas.height);
+        c.imageSmoothingEnabled=true;c.imageSmoothingQuality='high';
+        c.translate(canvas.width/2,canvas.height/2);
+        c.rotate(-angle*Math.PI/180);
+        c.drawImage(img,-canvas.width/2,-canvas.height/2,canvas.width,canvas.height);
+        const blob=await new Promise((resolve,reject)=>
+          canvas.toBlob(b=>b?resolve(b):reject(Error('estimated deskew encode failed')),'image/png'));
+        return URL.createObjectURL(blob);
+      },{sourceUrl:edited.photo.path,angle:estimated.angle});
+      console.log('D4.2 SYNTHETIC pixel-only angle estimate '+fixture.id+
+        ': '+estimated.angle+' degrees, darkPixels='+estimated.pixels);
       const variants=[
         ['production-full',source.path],
         ['production-crop',edited.photo.path],
         ['study-crop-2x-threshold',contrastUrl],
         ['study-crop-2x-unrotated',upscaleUrl],
+        ['study-crop-estimated-deskew-2x',estimatedUrl],
         ['study-crop-oracle-deskew-2x',deskewUrl]
       ];
       try {
@@ -160,7 +212,8 @@ async function main() {
             },{url,psm});
             const distance=textDistance(truth,reading.rawText);
             const exactPairs=pairs.filter(p=>containsExactPair(reading.rawText,p)).length;
-            results.push({fixture:fixture.id,variant,psm,exactPairs,
+            results.push({fixture:fixture.id,variant,psm,estimatedAngle:estimated.angle,
+              oracleAngleForComparisonOnly:fixture.angle,exactPairs,
               referencePairs:pairs.length,
               rawCer:distance.characterEdits/distance.referenceCharacters,
               rawWer:distance.wordEdits/distance.referenceWords,
@@ -171,19 +224,20 @@ async function main() {
           }
         }
       } finally {
-        await page.evaluate(({original,processed,contrast,deskew,upscale})=>{
+        await page.evaluate(({original,processed,contrast,deskew,upscale,estimated})=>{
           dokuOcr.release(original);dokuOcr.release(processed);
-          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);URL.revokeObjectURL(upscale);window.__abPick=null;
-        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl,deskew:deskewUrl,upscale:upscaleUrl});
+          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);URL.revokeObjectURL(upscale);URL.revokeObjectURL(estimated);window.__abPick=null;
+        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl,deskew:deskewUrl,upscale:upscaleUrl,estimated:estimatedUrl});
       }
     }
-    assert.equal(results.length,fixtures.length*5*3);
+    assert.equal(results.length,fixtures.length*6*3);
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),
       'No POST or private image upload');
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
       purpose:'Compare OCR input pixels/PSM, not a production winner or real accuracy',
       oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
       deskewControl:'2x unrotated uses the same interpolation and pixels; compare with oracle rotation',
+      estimatedDeskew:'Pixel-only horizontal projection, no fixture-angle access; study only',
       commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       engine:'Chromium Tesseract.js WASM tur+eng',
       note:'No automatic selection, no changes to user corrections or approval',
