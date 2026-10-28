@@ -364,6 +364,17 @@ test('D4.2 full-size pixel-aligned crop never shrinks for a zero-degree border',
   assert.ok(s.canvases.every(canvas => canvas.width === 0 && canvas.height === 0));
 });
 
+test('D4.2 2352px boundary avoids one-pixel downscale for padding', async () => {
+  const s = setup();
+  const photo = await s.upload(png(2352, 1800));
+  const render = s.canvases.find(canvas =>
+    canvas.operations.some(op => op[0] === 'drawImage' && op[1] === 2352 && op[2] === 1800));
+  assert.ok(render);
+  assert.equal(render.operations.filter(op => op[0] === 'drawImage').length, 1);
+  s.bridge.release(photo.path);
+  assert.equal(s.blobs.size, 0);
+});
+
 test('D4.2 smaller straight crop keeps unscaled OCR border', async () => {
   const s = setup();
   const photo = await s.upload(png(2200, 1800));
