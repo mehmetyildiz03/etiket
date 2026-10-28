@@ -235,9 +235,15 @@
         edit.left + edit.width > 1.000000001 || edit.top + edit.height > 1.000000001) throw fail('invalidCrop');
     const w = edit.quarterTurns % 2 ? source.height : source.width;
     const h = edit.quarterTurns % 2 ? source.width : source.height;
-    const cw = edit.width * w, ch = edit.height * h;
+    // Snap BOTH edges to decoded source pixels, including after a quarter turn.
+    // Fractional crop translations can resample thin percent glyphs even when
+    // the selected region fits at native resolution. Mirror native crop math.
+    const left = Math.round(edit.left * w), top = Math.round(edit.top * h);
+    const right = Math.round((edit.left + edit.width) * w);
+    const bottom = Math.round((edit.top + edit.height) * h);
+    const cw = right - left, ch = bottom - top;
     if (cw < 32 || ch < 32 || cw / ch > 40 || ch / cw > 40) throw fail('invalidCrop');
-    return {w, h, cw, ch};
+    return {w, h, cw, ch, left, top};
   }
   function readablePreview(canvas, deskewed) {
     // Local mean threshold (Bradley-style) avoids Leptonica selecting a pale
@@ -308,7 +314,7 @@
   }
 
   async function renderPhoto(source, edit, decodedImage = null) {
-    const {w, h, cw, ch} = validateEdit(source, edit);
+    const {cw, ch, left, top} = validateEdit(source, edit);
     const render = async image => {
       if (image.naturalWidth !== source.width || image.naturalHeight !== source.height) throw fail('invalidPhoto');
       const factor = Math.min(1, MAX_EDGE / Math.max(cw, ch));
@@ -316,7 +322,11 @@
       try {
         const c = canvas.getContext('2d');
         c.fillStyle = '#fff'; c.fillRect(0, 0, canvas.width, canvas.height);
-        c.scale(factor, factor); c.translate(-edit.left * w, -edit.top * h);
+        // At 1:1 scale use exact source pixels. For downscaled crops keep
+        // smoothing; neither setting alters the user's selected rectangle.
+        c.imageSmoothingEnabled = factor < 1;
+        if (factor < 1) c.imageSmoothingQuality = 'high';
+        c.scale(factor, factor); c.translate(-left, -top);
         if (edit.quarterTurns === 1) { c.translate(source.height, 0); c.rotate(Math.PI / 2); }
         else if (edit.quarterTurns === 2) { c.translate(source.width, source.height); c.rotate(Math.PI); }
         else if (edit.quarterTurns === 3) { c.translate(0, source.width); c.rotate(-Math.PI / 2); }
