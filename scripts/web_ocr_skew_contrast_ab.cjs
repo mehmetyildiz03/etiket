@@ -16,6 +16,8 @@ const fixtures = [
   {id:'small-skew-9deg', angle:-9, font:26, faint:false, woven:true},
   // Matched camera-defocus negative control: same text, crop and angle.
   {id:'small-skew-9deg-defocus', angle:-9, font:26, faint:false, woven:true, blurPx:1.25},
+  // Same pixels and geometry at a stronger blur; report non-monotonic OCR too.
+  {id:'small-skew-9deg-defocus-strong', angle:-9, font:26, faint:false, woven:true, blurPx:2.5},
   {id:'small-skew-plus-9deg', angle:9, font:26, faint:false, woven:true},
   {id:'small-skew-minus-6deg', angle:-6, font:26, faint:false, woven:true},
   {id:'small-straight-woven', angle:0, font:26, faint:false, woven:true},
@@ -348,15 +350,18 @@ async function main() {
         ' component='+row.componentAngle+' componentError='+row.componentAbsoluteAngleErrorDeg+
         ' pairDeltas='+row.comparisons.map(x=>'PSM'+x.psm+':'+x.exactPairDelta).join(','));
     }
-    // Matched defocus-vs-sharp comparison at identical ROI, PSM and transform.
-    // A negative exact-pair delta means lost recognition; positive is not
-    // evidence of improved real-camera accuracy.
-    const blurImpact=results.filter(x=>x.fixture==='small-skew-9deg-defocus')
+    // Paired sharp / mild / stronger blur sweep. Every comparison uses the
+    // identical synthetic label, source geometry, ROI, variant and PSM.
+    // Do not assume OCR quality degrades monotonically as blur increases.
+    const blurLevels=[1.25,2.5];
+    const blurImpact=results.filter(x=>
+      ['small-skew-9deg-defocus','small-skew-9deg-defocus-strong'].includes(x.fixture))
       .map(blurred=>{
         const sharp=results.find(x=>x.fixture==='small-skew-9deg' &&
           x.variant===blurred.variant && x.psm===blurred.psm);
         assert.ok(sharp,'Missing matched sharp control');
-        return {variant:blurred.variant,psm:blurred.psm,
+        const blurPx=blurred.fixture==='small-skew-9deg-defocus' ? 1.25 : 2.5;
+        return {blurPx,variant:blurred.variant,psm:blurred.psm,
           sharpExactPairs:sharp.exactPairs,blurredExactPairs:blurred.exactPairs,
           exactPairDelta:blurred.exactPairs-sharp.exactPairs,
           sharpCer:sharp.rawCer,blurredCer:blurred.rawCer,
@@ -364,10 +369,14 @@ async function main() {
           sharpWer:sharp.rawWer,blurredWer:blurred.rawWer,
           werDelta:blurred.rawWer-sharp.rawWer};
       });
-    assert.equal(blurImpact.length,8*3);
-    for(const row of blurImpact) console.log('D4.2 SYNTHETIC defocus '+
-      row.variant+' PSM'+row.psm+' exactDelta='+row.exactPairDelta+
-      ' cerDelta='+row.cerDelta.toFixed(3));
+    assert.equal(blurImpact.length,blurLevels.length*8*3);
+    for(const level of blurLevels) {
+      const atLevel=blurImpact.filter(r=>r.blurPx===level);
+      assert.equal(atLevel.length,8*3,'Each blur level needs every matched variant/PSM');
+      for(const row of atLevel) console.log('D4.2 SYNTHETIC defocus '+
+        level+'px '+row.variant+' PSM'+row.psm+' exactDelta='+row.exactPairDelta+
+        ' cerDelta='+row.cerDelta.toFixed(3)+' werDelta='+row.werDelta.toFixed(3));
+    }
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
       purpose:'Compare raw source ROI/production auto-deskew/PSM; no production winner or real accuracy',
       oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
@@ -377,7 +386,8 @@ async function main() {
       commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       engine:'Chromium Tesseract.js WASM tur+eng',
       note:'No automatic selection, no changes to user corrections or approval',
-      defocusControl:'Matched sharp/1.25px full-frame Gaussian canvas blur; synthetic camera-defocus proxy only',
+      defocusControl:'Matched sharp/1.25px/2.5px full-frame canvas blur; synthetic camera-defocus proxy only, not a calibrated phone lens',
+      blurLevelsPx:blurLevels,
       blurImpact,angleSweep,results};
     fs.mkdirSync(out,{recursive:true});
     fs.writeFileSync(path.join(out,'d4-2-skew-contrast-ab.json'),JSON.stringify(report,null,2));
