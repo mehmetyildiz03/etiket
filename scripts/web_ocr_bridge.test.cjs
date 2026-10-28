@@ -50,8 +50,13 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
     },
     document: {baseURI: 'https://example.test/etiket/', body: {appendChild: input => nodes.push(input)},
       createElement: type => type === 'input' ? new Input() : (() => { const canvas = {
-        width: 1, height: 1, getContext: () => ({fillRect() {}, drawImage() {}, clearRect() {},
-          scale() {}, translate() {}, rotate() {}, setTransform() {}, putImageData() {},
+        width: 1, height: 1, operations: [], getContext: () => ({
+          fillRect() {},
+          drawImage() { canvas.operations.push(['drawImage', canvas.width, canvas.height, this.imageSmoothingEnabled]); },
+          clearRect() {},
+          scale(x, y) { canvas.operations.push(['scale', x, y]); },
+          translate(x, y) { canvas.operations.push(['translate', x, y]); },
+          rotate() {}, setTransform() {}, putImageData() {},
           getImageData: (x, y, w, h) => {
             // The quality probe reads a <=256px sample first and intentionally
             // fails open. Inject this fault only into the 360px deskew
@@ -334,6 +339,32 @@ test('crop validates original-resolution coordinates and does not allocate on in
   assert.ok(s.blobs.has(photo.sourcePreviewUrl), 'source native image lives while derivative is in use');
   s.bridge.release(crop.path);s.bridge.dispose();
   assert.equal(s.blobs.size,0);assert.ok(s.canvases.every(c=>c.width===0&&c.height===0));
+});
+
+test('D4.2 fractional web crop snaps source pixel edges at every quarter turn', async () => {
+  const s = setup(), original = await s.upload(png(800, 600));
+  const edit = {left: .1013, top: .2013, width: .3127, height: .4111};
+  for (const [turn, left, top, width, height] of [
+    [0, 81, 121, 250, 246],
+    [1, 61, 161, 187, 329],
+    [2, 81, 121, 250, 246],
+    [3, 61, 161, 187, 329]
+  ]) {
+    const before = s.canvases.length;
+    const photo = await s.bridge.edit(original.path, {...edit, quarterTurns: turn});
+    const rendered = s.canvases.slice(before).find(canvas =>
+      canvas.operations.some(op => op[0] === 'translate' && op[1] === -left && op[2] === -top));
+    assert.ok(rendered, 'crop origin must be integer source pixels for turn ' + turn);
+    assert.deepEqual(rendered.operations.find(op => op[0] === 'drawImage'),
+      ['drawImage', width, height, false],
+      '1:1 crop must not interpolate a thin percent stroke at turn ' + turn);
+    await s.bridge.recognize(photo.path, () => {});
+    assert.equal(s.recognizedBlob, s.blobs.get(photo.path));
+    s.bridge.release(photo.path);
+  }
+  s.bridge.release(original.path);
+  assert.equal(s.blobs.size, 0);
+  assert.ok(s.canvases.every(canvas => canvas.width === 0 && canvas.height === 0));
 });
 
 test('latest crop wins; cancel/dispose prevent late URLs and all canvases are cleared', async () => {
