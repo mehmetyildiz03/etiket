@@ -68,15 +68,22 @@ Future<Uint8List> renderNativeCrop(
     final recorder = ui.PictureRecorder();
     final canvas = ui.Canvas(recorder);
     switch (edit.quarterTurns) {
+      case 0:
+        break;
       case 1:
         canvas.translate(targetWidth.toDouble(), 0);
         canvas.rotate(math.pi / 2);
+        break;
       case 2:
         canvas.translate(targetWidth.toDouble(), targetHeight.toDouble());
         canvas.rotate(math.pi);
+        break;
       case 3:
         canvas.translate(0, targetHeight.toDouble());
         canvas.rotate(-math.pi / 2);
+        break;
+      default:
+        throw const ScanFailure(ScanFailureKind.invalidCrop);
     }
     canvas.drawImageRect(
       image,
