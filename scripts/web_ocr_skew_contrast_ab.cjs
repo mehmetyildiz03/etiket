@@ -1,0 +1,155 @@
+'use strict';
+// D4.2 controlled A/B: real Chromium/Tesseract WASM, GENERATED labels only.
+// Diagnostic experiment; NEVER selects OCR text, percentages, or fibers in Doku.
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const {chromium} = require('../tool/web_ocr/node_modules/playwright');
+const {textDistance, containsExactPair} = require('./ocr_benchmark_metrics.cjs');
+const base = process.argv[2] || 'http://127.0.0.1:8082/etiket/';
+const out = path.resolve('build/web-ocr-evidence');
+const truth = '80% PAMUK\n20% POLYESTER';
+const pairs = [{percent:'80',fiber:'PAMUK'},{percent:'20',fiber:'POLYESTER'}];
+const fixtures = [
+  {id:'small-skew-9deg', angle:-9, font:26, faint:false},
+  {id:'small-low-contrast', angle:0, font:26, faint:true}
+];
+const crop = {left:.14, top:.12, width:.74, height:.76, quarterTurns:0};
+async function main() {
+  const browser = await chromium.launch({headless:true,
+    ...(process.env.CHROME_EXECUTABLE ? {executablePath:process.env.CHROME_EXECUTABLE} : {}),
+    args:['--no-sandbox']});
+  const context = await browser.newContext({locale:'tr-TR',viewport:{width:390,height:844}});
+  const page = await context.newPage();
+  const requests = [], results = [];
+  page.on('request',r=>requests.push({method:r.method(),url:r.url()}));
+  try {
+    await page.goto(base,{waitUntil:'networkidle'});
+    await page.evaluate(async()=>{
+      const assets = new URL('./ocr/',location.href);
+      window.__abWorker = await Tesseract.createWorker(['tur','eng'],1,{
+        workerPath:new URL('worker.min.js',assets).href,
+        corePath:new URL('core/',assets).href,
+        langPath:new URL('lang/',assets).href.replace(/\/$/,''),
+        workerBlobURL:false,gzip:true,cachePath:'doku-ocr-6-best-int-v1'
+      });
+      await window.__abWorker.setParameters({preserve_interword_spaces:'1'});
+    });
+    for (const fixture of fixtures) {
+      const encoded = await page.evaluate(f=>{
+        const canvas=document.createElement('canvas');
+        canvas.width=1100;canvas.height=850;
+        const c=canvas.getContext('2d');
+        c.fillStyle=f.faint?'#686660':'#ebe9e0';
+        c.fillRect(0,0,1100,850);
+        // Match the woven-background skew-small fixture in web_ocr_benchmark:
+        // a clean white label alone is an unrealistically easy deskew test.
+        if (f.angle !== 0) {
+          for(let y=0;y<850;y+=7) {
+            c.strokeStyle=y%14===0?'#a7a69e':'#bbbcb4';
+            c.beginPath();c.moveTo(0,y);c.lineTo(1100,y+7);c.stroke();
+          }
+        }
+        c.save();
+        c.translate(550,425);c.rotate(f.angle*Math.PI/180);c.translate(-550,-425);
+        c.fillStyle=f.faint?'#a8a59b':'#f6f4ef';
+        c.fillRect(165,120,770,600);
+        c.fillStyle=f.faint?'#515048':'#242524';
+        c.font=f.font+'px Arial';
+        c.fillText('80% PAMUK',225,205);
+        c.fillText('20% POLYESTER',225,335);
+        c.restore();
+        return canvas.toDataURL('image/png').split(',')[1];
+      },fixture);
+      const picker=page.waitForEvent('filechooser');
+      await page.evaluate(()=>{window.__abPick=dokuOcr.pick(false);});
+      await (await picker).setFiles({name:fixture.id+'.png',mimeType:'image/png',
+        buffer:Buffer.from(encoded,'base64')});
+      const source=await page.evaluate(()=>window.__abPick);
+      assert.ok(source?.path,'Production photo decode failed');
+      const edited=await page.evaluate(async region=>{
+        const picked=await window.__abPick;
+        return dokuOcr.editSafe(picked.path,region);
+      },crop);
+      assert.equal(edited.code,null,'Production crop failed');
+      assert.ok(edited.photo?.path);
+      // An alternative image-processing candidate is created only in this
+      // isolated study. It is never passed to the production acceptance path.
+      const contrastUrl=await page.evaluate(async ({encoded,crop})=>{
+        const img=new Image();
+        img.src='data:image/png;base64,'+encoded;
+        await img.decode();
+        const x=Math.floor(crop.left*img.naturalWidth);
+        const y=Math.floor(crop.top*img.naturalHeight);
+        const w=Math.floor(crop.width*img.naturalWidth);
+        const h=Math.floor(crop.height*img.naturalHeight);
+        const canvas=document.createElement('canvas');
+        canvas.width=w*2;canvas.height=h*2;
+        const c=canvas.getContext('2d',{willReadFrequently:true});
+        c.imageSmoothingEnabled=true;
+        c.drawImage(img,x,y,w,h,0,0,canvas.width,canvas.height);
+        const image=c.getImageData(0,0,canvas.width,canvas.height);
+        for(let p=0;p<image.data.length;p+=4) {
+          const gray=.299*image.data[p]+.587*image.data[p+1]+.114*image.data[p+2];
+          const value=gray<130?0:255;
+          image.data[p]=image.data[p+1]=image.data[p+2]=value;
+        }
+        c.putImageData(image,0,0);
+        const blob=await new Promise((resolve,reject)=>
+          canvas.toBlob(b=>b?resolve(b):reject(Error('encode failed')),'image/png'));
+        return URL.createObjectURL(blob);
+      },{encoded,crop});
+      const variants=[
+        ['production-full',source.path],
+        ['production-crop',edited.photo.path],
+        ['study-crop-2x-threshold',contrastUrl]
+      ];
+      try {
+        for(const [variant,url] of variants) {
+          for(const psm of [3,6,11]) {
+            const start=Date.now();
+            const reading=await page.evaluate(async ({url,psm})=>{
+              await window.__abWorker.setParameters({tessedit_pageseg_mode:String(psm)});
+              const blob=await (await fetch(url)).blob();
+              const data=(await window.__abWorker.recognize(blob)).data;
+              return {rawText:data.text,confidence:data.confidence};
+            },{url,psm});
+            const distance=textDistance(truth,reading.rawText);
+            const exactPairs=pairs.filter(p=>containsExactPair(reading.rawText,p)).length;
+            results.push({fixture:fixture.id,variant,psm,exactPairs,
+              referencePairs:pairs.length,
+              rawCer:distance.characterEdits/distance.referenceCharacters,
+              rawWer:distance.wordEdits/distance.referenceWords,
+              latencyMs:Date.now()-start,confidence:reading.confidence,
+              rawText:reading.rawText});
+            console.log('D4.2 SYNTHETIC '+fixture.id+' '+variant+' PSM'+psm+
+              ': exact='+exactPairs+'/2 CER='+results.at(-1).rawCer.toFixed(3));
+          }
+        }
+      } finally {
+        await page.evaluate(({original,processed,contrast})=>{
+          dokuOcr.release(original);dokuOcr.release(processed);
+          URL.revokeObjectURL(contrast);window.__abPick=null;
+        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl});
+      }
+    }
+    assert.equal(results.length,fixtures.length*3*3);
+    assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),
+      'No POST or private image upload');
+    const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
+      purpose:'Compare OCR input pixels/PSM, not a production winner or real accuracy',
+      commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
+      engine:'Chromium Tesseract.js WASM tur+eng',
+      note:'No automatic selection, no changes to user corrections or approval',
+      results};
+    fs.mkdirSync(out,{recursive:true});
+    fs.writeFileSync(path.join(out,'d4-2-skew-contrast-ab.json'),JSON.stringify(report,null,2));
+  } finally {
+    await page.evaluate(async()=>window.__abWorker?.terminate()).catch(()=>{});
+    await context.close();await browser.close();
+  }
+}
+main().catch(error=>{
+  console.error('::error title=D4.2 OCR A/B::'+String(error));
+  console.error(error);process.exitCode=1;
+});
