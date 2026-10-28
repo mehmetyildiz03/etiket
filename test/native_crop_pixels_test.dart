@@ -31,8 +31,10 @@ Future<Uint8List> twoRegionFixture() async {
 }
 
 Future<({int width, int height, int red, int blue})> centerPixel(
-  Uint8List encoded,
-) async {
+  Uint8List encoded, {
+  int? x,
+  int? y,
+}) async {
   final buffer = await ui.ImmutableBuffer.fromUint8List(encoded);
   ui.ImageDescriptor? descriptor;
   ui.Codec? codec;
@@ -42,8 +44,8 @@ Future<({int width, int height, int red, int blue})> centerPixel(
     codec = await descriptor.instantiateCodec();
     image = (await codec.getNextFrame()).image;
     final rgba = (await image.toByteData(format: ui.ImageByteFormat.rawRgba))!;
-    final center = ((image.height ~/ 2) * image.width +
-        image.width ~/ 2) * 4;
+    final center = ((y ?? image.height ~/ 2) * image.width +
+        (x ?? image.width ~/ 2)) * 4;
     return (
       width: image.width,
       height: image.height,
@@ -82,6 +84,8 @@ void main() {
           width: 100, height: 80, red: true),
         (edit: const PhotoEdit(left: 0, top: 0, width: 1, height: .5, quarterTurns: 3),
           width: 100, height: 80, red: false),
+        (edit: const PhotoEdit(left: 0, top: 0, width: .5, height: 1, quarterTurns: 2),
+          width: 80, height: 100, red: false),
       ];
       for (final sample in crops) {
         final crop = await service.editPhoto(original, sample.edit);
@@ -96,6 +100,25 @@ void main() {
         expect(pixel.blue > pixel.red, !sample.red);
         await service.release(crop);
         expect(await File(crop.path).exists(), isFalse);
+      }
+      // The fractional boundary lies inside a source pixel. The crop must
+      // snap to the blue half and preserve its first pixel exactly, without
+      // bilinear blending red from the neighboring half. Test both native
+      // orientations where the source boundary becomes x or y.
+      final fractionalCrops = [
+        const PhotoEdit(left: .4975, top: 0, width: .5025, height: 1),
+        const PhotoEdit(
+          left: 0, top: .4975, width: 1, height: .5025, quarterTurns: 1),
+      ];
+      for (final edit in fractionalCrops) {
+        final crop = await service.editPhoto(original, edit);
+        final pixel = await centerPixel(crop.previewBytes, x: 0, y: 0);
+        expect(pixel.width * pixel.height, 8000);
+        expect(pixel.red, 0, reason: 'No red fringe at snapped blue edge');
+        expect(pixel.blue, 255, reason: 'Keep the original blue pixel');
+        expect(await File(crop.path).readAsBytes(),
+            orderedEquals(crop.previewBytes));
+        await service.release(crop);
       }
       await expectLater(
         service.editPhoto(original,
