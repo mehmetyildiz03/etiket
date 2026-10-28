@@ -57,10 +57,13 @@ Future<({int width, int height, bool red})> _decodedCenter(Uint8List bytes) asyn
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('D4.2 native EXIF 6/8 crop keeps the intended source pixels', () async {
+  test('D4.2 native EXIF 1–8 crop and manual rotation keep source pixels', () async {
     final directory = await Directory.current.createTemp('synthetic-exif-');
     try {
-      for (final orientation in [6, 8]) {
+      // The fixture is a synthetic 160x100 JPEG: red on its encoded left,
+      // blue on its encoded right. EXIF may mirror, flip or transpose it.
+      // These are orientation/crop tests, not real-phone OCR accuracy data.
+      for (final orientation in [1, 2, 3, 4, 5, 6, 7, 8]) {
         final bytes = _jpegWithOrientation(orientation);
         final file = File('${directory.path}/exif-$orientation.jpg');
         await file.writeAsBytes(bytes);
@@ -69,32 +72,62 @@ void main() {
         try {
           final source = original.sourceImage;
           expect(source, isNotNull);
-          // The native editor must show the EXIF-oriented dimensions, not
-          // the encoded 160x100 JPEG's unrotated pixel grid.
-          expect((source!.width, source.height), (100, 160));
-          final top = await service.editPhoto(original,
-              const PhotoEdit(left: 0, top: 0, width: 1, height: .5));
-          final bottom = await service.editPhoto(original,
-              const PhotoEdit(left: 0, top: .5, width: 1, height: .5));
+          final sideBySide = orientation <= 4;
+          final firstRed = [1, 4, 5, 6].contains(orientation);
+          // EXIF 5–8 exchange the image axes. EXIF 2, 4, 5 and 7
+          // include mirroring; a mere rotation-only decoder is wrong.
+          expect((source!.width, source.height),
+              sideBySide ? (160, 100) : (100, 160),
+              reason: 'EXIF $orientation must be applied before crop UI');
+          final first = await service.editPhoto(
+            original,
+            sideBySide
+                ? const PhotoEdit(left: 0, top: 0, width: .5, height: 1)
+                : const PhotoEdit(left: 0, top: 0, width: 1, height: .5),
+          );
+          final second = await service.editPhoto(
+            original,
+            sideBySide
+                ? const PhotoEdit(left: .5, top: 0, width: .5, height: 1)
+                : const PhotoEdit(left: 0, top: .5, width: 1, height: .5),
+          );
+          // After an additional 90° user rotation, the same physical
+          // halves move to a different axis; this exercises EXIF + editor
+          // transforms together, including the mirrored orientations.
+          final manuallyRotated = await service.editPhoto(
+            original,
+            sideBySide
+                ? const PhotoEdit(
+                    left: 0, top: 0, width: 1, height: .5, quarterTurns: 1)
+                : const PhotoEdit(
+                    left: 0, top: 0, width: .5, height: 1, quarterTurns: 1),
+          );
           try {
             for (final sample in [
-              (photo: top, red: orientation == 6),
-              (photo: bottom, red: orientation == 8),
+              (photo: first, red: firstRed,
+                size: sideBySide ? (80, 100) : (100, 80)),
+              (photo: second, red: !firstRed,
+                size: sideBySide ? (80, 100) : (100, 80)),
+              (photo: manuallyRotated,
+                red: sideBySide ? firstRed : !firstRed,
+                size: sideBySide ? (100, 80) : (80, 100)),
             ]) {
               final encoded = await File(sample.photo.path).readAsBytes();
               expect(encoded, orderedEquals(sample.photo.previewBytes),
                   reason: 'ML Kit must receive exactly the previewed crop');
               final center = await _decodedCenter(encoded);
-              expect((center.width, center.height), (100, 80));
+              expect((center.width, center.height), sample.size,
+                  reason: 'EXIF $orientation + editor crop dimensions');
               expect(center.red, sample.red,
-                  reason: 'EXIF $orientation must crop the correct half');
+                  reason: 'EXIF $orientation must select the correct pixels');
             }
           } finally {
-            await service.release(top);
-            await service.release(bottom);
+            await service.release(first);
+            await service.release(second);
+            await service.release(manuallyRotated);
           }
           expect(await File(file.path).readAsBytes(), orderedEquals(bytes),
-              reason: 'Gallery source and its EXIF metadata stay unchanged');
+              reason: 'Original EXIF and gallery file stay unchanged');
         } finally {
           await service.release(original);
         }
