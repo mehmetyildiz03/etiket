@@ -150,3 +150,66 @@ test('benchmark never joins a number and percent sign across a line boundary', (
   assert.equal(result.correctPairs,0);
   assert.equal(result.fullyCorrectComposition,false);
 });
+
+
+test('section-aware recall rejects swapped outer/lining pairs despite perfect global pair recall', () => {
+  const fixture = {id:'sections',kind:'positive',
+    groundTruth:'DIŞ KUMAŞ\n80% PAMUK\nASTAR\n100% VİSKON',
+    expectedPairs:[{percent:'80',fiber:'PAMUK'},{percent:'100',fiber:'VİSKON'}],
+    expectedSections:[
+      {heading:'DIŞ KUMAŞ',expectedPairs:[{percent:'80',fiber:'PAMUK'}]},
+      {heading:'ASTAR',expectedPairs:[{percent:'100',fiber:'VİSKON'}]}
+    ]};
+  const correct = scoreCase(fixture,{code:null,
+    text:'DIŞ KUMAŞ\n80% PAMUK\nASTAR\n100% VİSKON'});
+  assert.equal(correct.correctPairs,2);
+  assert.equal(correct.sectionEvaluation.correctPairs,2);
+  assert.equal(correct.sectionEvaluation.completeRecall,true);
+  const swapped = scoreCase(fixture,{code:null,
+    text:'DIŞ KUMAŞ\n100% VİSKON\nASTAR\n80% PAMUK'});
+  assert.equal(swapped.correctPairs,2,'global pair recall alone misses the section error');
+  assert.equal(swapped.sectionEvaluation.correctPairs,0);
+  assert.equal(swapped.sectionEvaluation.completeRecall,false);
+  const summary = summarize([correct,swapped]);
+  assert.equal(summary.pairExactRecall,1);
+  assert.equal(summary.sectionAnnotatedCount,2);
+  assert.equal(summary.sectionPairExactRecall,.5);
+  assert.equal(summary.sectionCompleteRecallRate,.5);
+});
+
+test('missing or repeated section headers never inherit another section pairs', () => {
+  const fixture = {id:'sections',kind:'positive',
+    groundTruth:'DIŞ KUMAŞ\n80% PAMUK\nASTAR\n100% VİSKON',
+    expectedPairs:[{percent:'80',fiber:'PAMUK'},{percent:'100',fiber:'VİSKON'}],
+    expectedSections:[
+      {heading:'DIŞ KUMAŞ',expectedPairs:[{percent:'80',fiber:'PAMUK'}]},
+      {heading:'ASTAR',expectedPairs:[{percent:'100',fiber:'VİSKON'}]}
+    ]};
+  const missing = scoreCase(fixture,{code:null,text:'80% PAMUK\nASTAR\n100% VİSKON'});
+  assert.equal(missing.sectionEvaluation.correctPairs,1);
+  assert.equal(missing.sectionEvaluation.completeRecall,false);
+  const repeated = scoreCase(fixture,{code:null,
+    text:'DIŞ KUMAŞ\n80% PAMUK\nDIŞ KUMAŞ\nASTAR\n100% VİSKON'});
+  assert.equal(repeated.sectionEvaluation.correctPairs,1);
+  assert.equal(repeated.sectionEvaluation.details[0].headerUnique,false);
+  const rejected = scoreCase(fixture,{code:'emptyText',text:null,rawText:fixture.groundTruth});
+  assert.equal(rejected.sectionEvaluation.correctPairs,0);
+  assert.equal(rejected.sectionEvaluation.completeRecall,false);
+  assert.equal(summarize([rejected]).sectionPairExactRecall,0);
+});
+
+test('section scoring is opt-in, and invalid section annotations fail closed', () => {
+  const base={id:'unannotated',kind:'positive',groundTruth:'80% PAMUK',
+    expectedPairs:[{percent:'80',fiber:'PAMUK'}]};
+  const unannotated=scoreCase(base,{code:null,text:'80% PAMUK'});
+  assert.equal(unannotated.sectionEvaluation,null);
+  assert.equal(summarize([unannotated]).sectionPairExactRecall,null);
+  assert.equal(summarize([unannotated]).sectionAnnotatedCount,0);
+  assert.throws(() => scoreCase({...base,expectedSections:[
+    {heading:'ASTAR',expectedPairs:[{percent:'100',fiber:'VİSKON'}]}
+  ]},{code:null,text:'ASTAR\n100% VİSKON'}),/partition/);
+  assert.throws(() => scoreCase({...base,expectedSections:[
+    {heading:'ASTAR',expectedPairs:base.expectedPairs},
+    {heading:'ASTAR',expectedPairs:base.expectedPairs}
+  ]},{code:null,text:'ASTAR\n80% PAMUK'}),/unique/);
+});
