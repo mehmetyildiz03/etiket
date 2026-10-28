@@ -12,7 +12,7 @@ function png(width = 800, height = 600) {
   view.setUint32(16, width); view.setUint32(20, height);
   return new File([bytes], 'label.png', {type: 'image/png'});
 }
-function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, guidanceAvailable = true, failDeskewRead = false} = {}) {
+function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, guidanceAvailable = true, failDeskewRead = false, failPreviewRead = false} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
   let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, pageText = null, pageConfidence = null, mode = '3', recognizes = 0, recognitionModes = [];
   const canvases = [], imageSources = [];
@@ -61,6 +61,10 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
             // The quality probe reads a <=256px sample first and intentionally
             // fails open. Inject this fault only into the 360px deskew
             // sample so the test exercises the intended cleanup path.
+            if (failPreviewRead && Math.max(w, h) > 360) {
+              failPreviewRead = false;
+              throw new Error('synthetic threshold read failure');
+            }
             if (failDeskewRead && Math.max(w, h) > 256) {
               failDeskewRead = false;
               throw new Error('synthetic canvas read failure');
@@ -557,16 +561,33 @@ test('weak alternate with invented or empty text is never promoted to accepted O
   s.bridge.dispose();
 });
 
-// The 360px deskew scratch canvas must be released even if WebKit rejects pixel reads.
-test('deskew canvas read failure releases every canvas and allows a clean retry', async () => {
+// WebKit may refuse optional canvas pixel reads on memory-constrained devices.
+// The selected pixels must still reach OCR, without losing the original crop.
+test('deskew read failure falls back to the original crop and permits OCR/edit', async () => {
   const s = setup({failDeskewRead: true});
-  await assert.rejects(s.upload(), {message: 'invalidPhoto'});
-  assert.equal(s.blobs.size, 0);
-  assert.ok(s.canvases.length >= 3);
-  assert.ok(s.canvases.every(c => c.width === 0 && c.height === 0),
-    'a failed sample must not leak the bounded canvas pixel budget');
   const photo = await s.upload();
   assert.ok(photo.bytes instanceof Uint8Array);
+  assert.match(await s.bridge.recognize(photo.path, () => {}), /Pamuk/);
+  assert.equal(s.recognizedBlob, s.blobs.get(photo.path));
+  const edited = await s.bridge.edit(photo.path,
+    {left: .1, top: .1, width: .7, height: .7, quarterTurns: 0});
+  assert.match(await s.bridge.recognize(edited.path, () => {}), /Pamuk/);
+  assert.equal(s.recognizedBlob, s.blobs.get(edited.path));
+  s.bridge.release(edited.path);
+  s.bridge.release(photo.path);
+  s.bridge.dispose();
+  assert.equal(s.blobs.size, 0);
+  assert.ok(s.canvases.every(c => c.width === 0 && c.height === 0),
+    'optional deskew failure must release the bounded canvas pixel budget');
+});
+
+test('threshold pixel read failure preserves a usable OCR crop and cleans up', async () => {
+  const s = setup({failPreviewRead: true});
+  const photo = await s.upload();
+  assert.ok(photo.bytes instanceof Uint8Array);
+  assert.match(await s.bridge.recognize(photo.path, () => {}), /Pamuk/);
+  assert.equal(s.recognizedBlob, s.blobs.get(photo.path),
+    'OCR must receive the same preview Blob despite the optional failure');
   s.bridge.release(photo.path);
   s.bridge.dispose();
   assert.equal(s.blobs.size, 0);

@@ -131,7 +131,11 @@
     const sw = sample.width, sh = sample.height;
     const sc = sample.getContext('2d', {willReadFrequently: true});
     sc.drawImage(canvas, 0, 0, sw, sh);
-    const rgba = sc.getImageData(0, 0, sw, sh).data;
+    // Deskew is optional. If WebKit cannot read the analysis canvas,
+    // keep the pixel-aligned crop instead of rejecting a usable photo.
+    let rgba;
+    try { rgba = sc.getImageData(0, 0, sw, sh).data; }
+    catch (_) { return 0; }
     const luma = new Uint8Array(sw * sh);
     const stride = sw + 1;
     const integral = new Float64Array(stride * (sh + 1));
@@ -259,7 +263,12 @@
     const stride=Math.ceil(w/4)+1, rows=Math.ceil(h/4)+1;
     if (canvasPixels + pixels + stride*rows > MAX_CANVAS_PIXELS) throw fail('tooLarge');
     const context=canvas.getContext('2d', {willReadFrequently:true});
-    const image=context.getImageData(0,0,w,h), data=image.data;
+    // Local thresholding is optional. A failed pixel read must not prevent
+    // OCR of the original crop; no automatic text repair is attempted.
+    let image;
+    try { image=context.getImageData(0,0,w,h); }
+    catch (_) { return; }
+    const data=image.data;
     // 4x4 block sums then an in-place integral image: <= 361,201 uint32s.
     // Sum <= 255 * 5,760,000, safely within uint32; include partial edge blocks.
     const integral=new Uint32Array(stride*rows);
