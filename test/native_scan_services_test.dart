@@ -2,16 +2,19 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:etiket/scan/photo_scan.dart';
+import 'package:etiket/scan/native_capture_guidance.dart';
 import 'package:etiket/scan/scan_services_native.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 
-Future<Uint8List> fixturePng() async {
+Future<Uint8List> fixturePng([
+  ui.Color color = const ui.Color(0xffffffff),
+]) async {
   final recorder = ui.PictureRecorder();
   ui.Canvas(recorder).drawRect(
     const ui.Rect.fromLTWH(0, 0, 20, 20),
-    ui.Paint()..color = const ui.Color(0xffffffff),
+    ui.Paint()..color = color,
   );
   final picture = recorder.endRecording();
   final image = await picture.toImage(20, 20);
@@ -126,6 +129,52 @@ void main() {
       await source.release(photo);
       expect(await File(photo.path).exists(), isFalse);
     }
+  });
+
+  test('D4.2 native capture hints use only local pixels and never rewrite the original', () async {
+    for (final sample in [
+      (color: const ui.Color(0xff080808), hint: PhotoCaptureHint.veryDark),
+      (color: const ui.Color(0xfff8f8f8), hint: PhotoCaptureHint.veryBright),
+      (color: const ui.Color(0xff808080), hint: PhotoCaptureHint.lowDetail),
+    ]) {
+      final bytes = await fixturePng(sample.color);
+      final original = File('${fixtures.path}/${sample.hint.name}.png');
+      await original.writeAsBytes(bytes);
+      final source = NativePhotoSource();
+      final photo = await source.adopt(XFile(original.path));
+      expect(photo.captureHint, sample.hint);
+      expect(photo.previewBytes, orderedEquals(bytes));
+      expect(await File(photo.path).readAsBytes(), orderedEquals(bytes));
+      await source.release(photo);
+      expect(await original.exists(), isTrue);
+      expect(await File(photo.path).exists(), isFalse);
+    }
+  });
+
+  test('D4.2 native quality guidance fails open on textured or malformed samples', () {
+    Uint8List solid(int value) {
+      final rgba = Uint8List(64 * 64 * 4);
+      for (var i = 0; i < rgba.length; i += 4) {
+        rgba[i] = rgba[i + 1] = rgba[i + 2] = value;
+        rgba[i + 3] = 255;
+      }
+      return rgba;
+    }
+    final checker = solid(255);
+    for (var y = 0; y < 64; y++) {
+      for (var x = 0; x < 64; x++) {
+        if ((x + y).isEven) {
+          final p = (y * 64 + x) * 4;
+          checker[p] = checker[p + 1] = checker[p + 2] = 0;
+        }
+      }
+    }
+    expect(nativeCaptureHintFromRgba(checker, 64, 64), isNull);
+    expect(nativeCaptureHintFromRgba(Uint8List(4), 64, 64), isNull);
+    expect(nativeCaptureHintFromRgba(solid(12), 64, 64),
+        PhotoCaptureHint.veryDark);
+    expect(nativeCaptureHintFromRgba(solid(245), 64, 64),
+        PhotoCaptureHint.veryBright);
   });
 
   test(
