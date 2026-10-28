@@ -23,7 +23,6 @@ class NativePhotoSource implements PhotoSourceService {
   // 4000x4000 <= maxPixels; the private adopt() boundary still rejects files
   // above 20 MiB / 24 MP before ML Kit. This is not an OCR accuracy claim.
   static const pickerMaxEdge = 4000.0;
-  static const pickerJpegQuality = 95;
   @override
   bool get supported => Platform.isAndroid || Platform.isIOS;
 
@@ -51,7 +50,8 @@ class NativePhotoSource implements PhotoSourceService {
             : ImageSource.gallery,
         maxWidth: pickerMaxEdge,
         maxHeight: pickerMaxEdge,
-        imageQuality: pickerJpegQuality,
+        // Do not request additional lossy JPEG recompression of small glyphs.
+        // The picker may still re-encode when a source exceeds 4000px.
         requestFullMetadata: false,
       );
       return file == null ? null : await adopt(file);
