@@ -11,6 +11,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const {chromium} = require('../tool/web_ocr/node_modules/playwright');
 const {scoreCase, summarize} = require('./ocr_benchmark_metrics.cjs');
+const {validatePrivateBenchmark} = require('./private_benchmark_guard.cjs');
 
 const baseUrl = process.argv[2] || 'http://127.0.0.1:8082/etiket/';
 const index = process.argv.indexOf('--manifest');
@@ -21,10 +22,6 @@ if (!synthetic && outIndex < 0) throw new Error('Private run requires --out OUTS
 const dest = outIndex >= 0
   ? path.resolve(process.argv[outIndex + 1])
   : path.resolve('build/web-ocr-evidence/benchmark-synthetic');
-if (!synthetic && (dest === process.cwd() || dest.startsWith(process.cwd() + path.sep))) {
-  throw new Error('Private OCR/GT report must stay outside repo build/artifact directories');
-}
-fs.mkdirSync(dest, {recursive:true});
 
 const syntheticFixtures = [
   {id:'clean-tr',kind:'positive',group:'clear',generator:'clean',
@@ -107,10 +104,29 @@ async function makeSynthetic(page, kind) {
 
 async function main() {
   const fixtures = getFixtures();
+  // Check all real-photo locations BEFORE creating reports or opening a browser.
+  // Use the repository root, not process.cwd(), and resolve symlink targets.
+  const privateOrigin = synthetic ? null : validatePrivateBenchmark({
+    repoRoot: path.resolve(__dirname, '..'), manifestPath, dest, baseUrl, fixtures
+  });
+  fs.mkdirSync(dest, {recursive:true});
   const browser = await chromium.launch({headless:true,
     ...(process.env.CHROME_EXECUTABLE?{executablePath:process.env.CHROME_EXECUTABLE}:{}),
     args:['--no-sandbox']});
-  const context = await browser.newContext({locale:'tr-TR',viewport:{width:390,height:844}});
+  const context = await browser.newContext({locale:'tr-TR',
+    viewport:{width:390,height:844},
+    serviceWorkers: synthetic ? 'allow' : 'block'});
+  if (privateOrigin) {
+    // Real photos and GT must never reach an external origin, even if the
+    // served app unexpectedly adds a remote resource in the future.
+    await context.route('**/*', route => {
+      const request = route.request().url();
+      try {
+        if (new URL(request).origin === privateOrigin) return route.continue();
+      } catch (_) { /* deny unknown network URLs */ }
+      return route.abort();
+    });
+  }
   const page = await context.newPage();
   const requests=[];
   page.on('request',request=>requests.push({method:request.method(),url:request.url()}));
