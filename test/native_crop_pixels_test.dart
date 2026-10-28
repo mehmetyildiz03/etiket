@@ -8,16 +8,19 @@ import 'package:etiket/scan/scan_services_native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
 
-Future<Uint8List> twoRegionFixture() async {
+Future<Uint8List> twoRegionFixture({
+  ui.Color leftColor = const ui.Color(0xffff0000),
+  ui.Color rightColor = const ui.Color(0xff0000ff),
+}) async {
   final recorder = ui.PictureRecorder();
   final canvas = ui.Canvas(recorder);
   canvas.drawRect(
     const ui.Rect.fromLTWH(0, 0, 80, 100),
-    ui.Paint()..color = const ui.Color(0xffff0000),
+    ui.Paint()..color = leftColor,
   );
   canvas.drawRect(
     const ui.Rect.fromLTWH(80, 0, 80, 100),
-    ui.Paint()..color = const ui.Color(0xff0000ff),
+    ui.Paint()..color = rightColor,
   );
   final picture = recorder.endRecording();
   final image = await picture.toImage(160, 100);
@@ -134,4 +137,41 @@ void main() {
       await fixtureDir.delete(recursive: true);
     }
   });
+  test('D4.2 native quality hint measures the OCR crop, not the full frame', () async {
+    final fixtureDir = await Directory.current.createTemp('native-roi-hint-');
+    final originalFile = File('${fixtureDir.path}/dark-bright.png');
+    final bytes = await twoRegionFixture(
+      leftColor: const ui.Color(0xff080808),
+      rightColor: const ui.Color(0xfff8f8f8),
+    );
+    await originalFile.writeAsBytes(bytes);
+    final service = NativePhotoSource();
+    try {
+      final original = await service.adopt(XFile(originalFile.path));
+      expect(original.captureHint, isNull,
+          reason: 'Mixed dark/bright full frame is not a flat frame');
+      for (final sample in [
+        (left: 0.0, hint: PhotoCaptureHint.veryDark),
+        (left: 0.5, hint: PhotoCaptureHint.veryBright),
+      ]) {
+        final crop = await service.editPhoto(
+          original,
+          PhotoEdit(left: sample.left, width: .5),
+        );
+        expect(crop.captureHint, sample.hint,
+            reason: 'Warning must describe the exact selected OCR region');
+        expect(await File(crop.path).readAsBytes(),
+            orderedEquals(crop.previewBytes),
+            reason: 'Quality probe must not alter the OCR-bound pixels');
+        await service.release(crop);
+        expect(await File(crop.path).exists(), isFalse);
+      }
+      expect(await File(original.path).readAsBytes(), orderedEquals(bytes));
+      await service.release(original);
+      expect(await File(original.path).exists(), isFalse);
+    } finally {
+      await fixtureDir.delete(recursive: true);
+    }
+  });
+
 }
