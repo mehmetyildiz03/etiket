@@ -12,7 +12,7 @@ function png(width = 800, height = 600) {
   view.setUint32(16, width); view.setUint32(20, height);
   return new File([bytes], 'label.png', {type: 'image/png'});
 }
-function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, guidanceAvailable = true, failDeskewRead = false, failPreviewRead = false} = {}) {
+function setup({mobile = false, secure = true, supported = true, qualityAvailable = true, guidanceAvailable = true, failDeskewRead = false, failPreviewRead = false, failPreviewWrite = false} = {}) {
   const nodes = [], revoked = [], blobs = new Map(), workers = [], listeners = {}, optionsHistory = [];
   let options, initialized = 0, decoded = 0, creation, confidence = 93, recognizedBlob, result = 'Dış kumaş\n70% Pamuk\n30% Polyester', secondText = null, secondConfidence = null, pageText = null, pageConfidence = null, mode = '3', recognizes = 0, recognitionModes = [];
   const canvases = [], imageSources = [];
@@ -56,7 +56,12 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
           clearRect() {},
           scale(x, y) { canvas.operations.push(['scale', x, y]); },
           translate(x, y) { canvas.operations.push(['translate', x, y]); },
-          rotate() {}, setTransform() {}, putImageData() {},
+          rotate() {}, setTransform() {}, putImageData() {
+            if (failPreviewWrite) {
+              failPreviewWrite = false;
+              throw new Error('synthetic threshold write failure');
+            }
+          },
           getImageData: (x, y, w, h) => {
             // The quality probe reads a <=256px sample first and intentionally
             // fails open. Inject this fault only into the 360px deskew
@@ -69,7 +74,10 @@ function setup({mobile = false, secure = true, supported = true, qualityAvailabl
               failDeskewRead = false;
               throw new Error('synthetic canvas read failure');
             }
-            return {data: new Uint8ClampedArray(w * h * 4).fill(255)};
+            const data = new Uint8ClampedArray(w * h * 4).fill(255);
+            // Trigger the optional threshold path on the full-size canvas.
+            if (failPreviewWrite && Math.max(w, h) > 360) data[0] = 60;
+            return {data};
           }}),
         toBlob: callback => callback(new Blob([new Uint8Array(32)], {type: 'image/jpeg'}))
       }; canvases.push(canvas); return canvas; })()},
@@ -588,6 +596,20 @@ test('threshold pixel read failure preserves a usable OCR crop and cleans up', a
   assert.match(await s.bridge.recognize(photo.path, () => {}), /Pamuk/);
   assert.equal(s.recognizedBlob, s.blobs.get(photo.path),
     'OCR must receive the same preview Blob despite the optional failure');
+  s.bridge.release(photo.path);
+  s.bridge.dispose();
+  assert.equal(s.blobs.size, 0);
+  assert.ok(s.canvases.every(c => c.width === 0 && c.height === 0));
+});
+
+
+test('threshold canvas write failure keeps original crop available to OCR', async () => {
+  const s = setup({failPreviewWrite: true});
+  const photo = await s.upload();
+  assert.ok(photo.bytes instanceof Uint8Array);
+  assert.match(await s.bridge.recognize(photo.path, () => {}), /Pamuk/);
+  assert.equal(s.recognizedBlob, s.blobs.get(photo.path),
+    'OCR must receive the same selected preview Blob after optional write failure');
   s.bridge.release(photo.path);
   s.bridge.dispose();
   assert.equal(s.blobs.size, 0);
