@@ -79,6 +79,73 @@ function containsExactPair(hypothesis, pair) {
   return countExactPairOccurrences(hypothesis, pair) > 0;
 }
 
+// Optional section-aware exact-pair recall. A correctly read percentage/fiber
+// in ASTAR must not earn credit for DIŞ KUMAŞ (or vice versa). This is
+// benchmark-only: no text repair, parser guesses or production OCR selection.
+function scoreSections(fixture, acceptedText) {
+  if (fixture.expectedSections === undefined) return null;
+  const sections = fixture.expectedSections;
+  if (!Array.isArray(sections) || sections.length === 0) {
+    throw new TypeError('expectedSections requires annotated sections');
+  }
+  const key = value => value.normalize('NFC').trim()
+    .replace(/[^\S\n]+/gu, ' ').toLocaleUpperCase('tr-TR');
+  const pairKey = pair => JSON.stringify([
+    String(pair.percent).replace(',', '.'), key(pair.fiber)
+  ]);
+  const headings = sections.map(section => {
+    if (!section || typeof section.heading !== 'string' ||
+        !section.heading.trim() || /[\r\n\u2028\u2029]/u.test(section.heading) ||
+        !Array.isArray(section.expectedPairs) || !section.expectedPairs.length) {
+      throw new TypeError('Each expected section requires a heading and pairs');
+    }
+    return key(section.heading);
+  });
+  if (new Set(headings).size !== headings.length) {
+    throw new TypeError('Section headings must be unique');
+  }
+  const allPairs = sections.flatMap(section => section.expectedPairs);
+  if (JSON.stringify(allPairs.map(pairKey).sort()) !==
+      JSON.stringify(fixture.expectedPairs.map(pairKey).sort())) {
+    throw new TypeError('Section pairs must exactly partition expectedPairs');
+  }
+  const lines = acceptedText.normalize('NFC').replace(/\r\n?/gu, '\n')
+    .split(/[\n\u2028\u2029]/u);
+  const locations = new Map(headings.map(heading => [heading, []]));
+  lines.forEach((line, index) => {
+    const hits = locations.get(key(line));
+    if (hits) hits.push(index);
+  });
+  const boundaries = [...locations.values()].flat().sort((a, b) => a - b);
+  const details = sections.map((section, index) => {
+    const positions = locations.get(headings[index]);
+    const referencePairs = section.expectedPairs.length;
+    if (positions.length !== 1) {
+      return {heading: section.heading, headerUnique: false,
+        referencePairs, correctPairs: 0};
+    }
+    const start = positions[0];
+    const end = boundaries.find(position => position > start) ?? lines.length;
+    const content = lines.slice(start + 1, end).join('\n');
+    // Reuse the strict percent/fiber ownership and multiplicity scorer,
+    // constrained to the text physically below this exact section header.
+    const scored = scoreCase({
+      id: fixture.id + '-section-' + index, kind: 'positive',
+      groundTruth: section.expectedPairs.map(pair =>
+        pair.percent + '% ' + pair.fiber).join('\n'),
+      expectedPairs: section.expectedPairs
+    }, {code: null, text: content});
+    return {heading: section.heading, headerUnique: true,
+      referencePairs, correctPairs: scored.correctPairs};
+  });
+  const referencePairs = details.reduce((n, item) => n + item.referencePairs, 0);
+  const correctPairs = details.reduce((n, item) => n + item.correctPairs, 0);
+  return {referencePairs, correctPairs,
+    completeRecall: correctPairs === referencePairs &&
+      details.every(item => item.headerUnique),
+    details};
+}
+
 function scoreCase(fixture, output) {
   if (!fixture || !fixture.id || !['positive','negative'].includes(fixture.kind)) {
     throw new TypeError('A fixture must have id and positive/negative kind');
@@ -139,7 +206,8 @@ function scoreCase(fixture, output) {
     return {fiber: pair.fiber, percent: pair.percent,
       correct: accepted && used <= availableByKey.get(key)};
   });
-  return {...result, falseRejected: !accepted, ...distance,
+  const sectionEvaluation = scoreSections(fixture, accepted ? text : '');
+  return {...result, falseRejected: !accepted, sectionEvaluation, ...distance,
     rawCharacterEdits: rawDistance.characterEdits,
     rawWordEdits: rawDistance.wordEdits,
     referencePairs: pairs.length,
@@ -156,6 +224,7 @@ function summarize(results) {
   const totalCharacters = sum(positive, 'referenceCharacters');
   const totalWords = sum(positive, 'referenceWords');
   const totalPairs = sum(positive, 'referencePairs');
+  const annotated = positive.filter(v => v.sectionEvaluation !== null);
   const rate = (a,b) => b ? a / b : null;
   const mean = xs => xs.length ? xs.reduce((a,b) => a+b,0)/xs.length : null;
   const q = (xs,p) => !xs.length ? null :
@@ -173,6 +242,13 @@ function summarize(results) {
     rawCer: rate(sum(positive,'rawCharacterEdits'),totalCharacters),
     rawWer: rate(sum(positive,'rawWordEdits'),totalWords),
     pairExactRecall: rate(sum(positive,'correctPairs'),totalPairs),
+    sectionAnnotatedCount: annotated.length,
+    sectionPairExactRecall: rate(
+      annotated.reduce((n, v) => n + v.sectionEvaluation.correctPairs, 0),
+      annotated.reduce((n, v) => n + v.sectionEvaluation.referencePairs, 0)),
+    sectionCompleteRecallRate: rate(
+      annotated.filter(v => v.sectionEvaluation.completeRecall).length,
+      annotated.length),
     fullyCorrectCompositionRate: rate(positive.filter(v=>v.fullyCorrectComposition).length, positive.length),
     falseRejectRate: rate(positive.filter(v=>v.falseRejected).length,positive.length),
     falseAcceptRate: rate(negative.filter(v=>v.falseAccepted).length,negative.length),
