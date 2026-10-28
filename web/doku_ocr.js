@@ -36,7 +36,7 @@
     // At the 2400px limit a zero-degree border would force a downscale,
     // blending thin % strokes AFTER the pixel-aligned source crop. Keep the
     // exact selected pixels instead; nonzero deskew still needs expanded bounds.
-    if (radians === 0 && Math.max(w, h) + 2 * border > MAX_EDGE) return;
+    if (radians === 0 && Math.max(w, h) + 2 * border + 1 > MAX_EDGE) return;
     const sine = Math.abs(Math.sin(radians)), cosine = Math.abs(Math.cos(radians));
     const boundW = w * cosine + h * sine, boundH = w * sine + h * cosine;
     const scale = Math.min(1, (MAX_EDGE - 2 * border - 1) / Math.max(boundW, boundH));
