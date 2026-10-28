@@ -341,6 +341,53 @@ test('crop validates original-resolution coordinates and does not allocate on in
   assert.equal(s.blobs.size,0);assert.ok(s.canvases.every(c=>c.width===0&&c.height===0));
 });
 
+test('D4.2 full-size pixel-aligned crop never shrinks for a zero-degree border', async () => {
+  const s = setup();
+  const original = await s.upload(png(4000, 3000));
+  const before = s.canvases.length;
+  // Selected source ROI is exactly 2400 x 1800; a 24px border would
+  // previously shrink it to 2351px before Tesseract saw thin % strokes.
+  const crop = await s.bridge.edit(original.path, {
+    left: .1, top: .2, width: .6, height: .6, quarterTurns: 0
+  });
+  const render = s.canvases.slice(before).find(canvas =>
+    canvas.operations.some(op => op[0] === 'drawImage' && op[1] === 2400 && op[2] === 1800));
+  assert.ok(render, 'must render original crop at 1:1 source resolution');
+  assert.equal(render.operations.filter(op => op[0] === 'drawImage').length, 1,
+    'zero-degree border must not resample or redraw the full-size crop');
+  await s.bridge.recognize(crop.path, () => {});
+  assert.equal(s.recognizedBlob, s.blobs.get(crop.path),
+    'OCR still receives the exact reviewed crop Blob');
+  s.bridge.release(crop.path);
+  s.bridge.release(original.path);
+  assert.equal(s.blobs.size, 0);
+  assert.ok(s.canvases.every(canvas => canvas.width === 0 && canvas.height === 0));
+});
+
+test('D4.2 2352px boundary avoids one-pixel downscale for padding', async () => {
+  const s = setup();
+  const photo = await s.upload(png(2352, 1800));
+  const render = s.canvases.find(canvas =>
+    canvas.operations.some(op => op[0] === 'drawImage' && op[1] === 2352 && op[2] === 1800));
+  assert.ok(render);
+  assert.equal(render.operations.filter(op => op[0] === 'drawImage').length, 1);
+  s.bridge.release(photo.path);
+  assert.equal(s.blobs.size, 0);
+});
+
+test('D4.2 smaller straight crop keeps unscaled OCR border', async () => {
+  const s = setup();
+  const photo = await s.upload(png(2200, 1800));
+  const render = s.canvases.find(canvas =>
+    canvas.operations.some(op => op[0] === 'drawImage' && op[1] === 2200 && op[2] === 1800));
+  assert.ok(render);
+  const draws = render.operations.filter(op => op[0] === 'drawImage');
+  assert.equal(draws.length, 2, 'border is retained when it fits without resampling');
+  assert.deepEqual(draws[1].slice(0, 3), ['drawImage', 2248, 1848]);
+  s.bridge.release(photo.path);
+  assert.equal(s.blobs.size, 0);
+});
+
 test('D4.2 fractional web crop snaps source pixel edges at every quarter turn', async () => {
   const s = setup(), original = await s.upload(png(800, 600));
   const edit = {left: .1013, top: .2013, width: .3127, height: .4111};
