@@ -6,18 +6,22 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image_picker/image_picker.dart';
 
 import 'photo_scan.dart';
+import 'photo_edit.dart';
+import 'native_crop_pixels.dart';
 import 'native_capture_guidance.dart';
 
 ({PhotoSourceService photos, TextRecognitionService recognizer})
 createScanServices() =>
     (photos: NativePhotoSource(), recognizer: NativeTextRecognizer());
 
-class NativePhotoSource implements PhotoSourceService {
+class NativePhotoSource
+    implements PhotoSourceService, PhotoEditingService, CancelablePhotoEditingService {
   NativePhotoSource({ImagePicker? picker}) : _picker = picker ?? ImagePicker();
   final ImagePicker _picker;
   final Map<ScanPhoto, Directory> _owned = {};
   static final Set<String> _activeDirectories = {};
   Future<void>? _initialization;
+  int _editRevision = 0;
   static const maxBytes = 20 * 1024 * 1024;
   static const maxPixels = 24000000;
   // D4.2: retain substantially more camera detail for tiny printed glyphs.
@@ -89,6 +93,7 @@ class NativePhotoSource implements PhotoSourceService {
       if (length > maxBytes) throw const ScanFailure(ScanFailureKind.tooLarge);
       final bytes = await file.readAsBytes();
       PhotoCaptureHint? captureHint;
+      PhotoImageSource? sourceImage;
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       ui.ImageDescriptor? descriptor;
       try {
@@ -113,6 +118,28 @@ class NativePhotoSource implements PhotoSourceService {
         try {
           final frame = await codec.getNextFrame();
           try {
+            // The native crop editor previews the decoder's EXIF-oriented
+            // pixels, not a separately interpreted JPEG thumbnail.
+            try {
+              final preview = await frame.image.toByteData(
+                format: ui.ImageByteFormat.png,
+              );
+              if (preview != null) {
+                final swap = (descriptor.width > descriptor.height &&
+                        frame.image.width < frame.image.height) ||
+                    (descriptor.width < descriptor.height &&
+                        frame.image.width > frame.image.height);
+                sourceImage = PhotoImageSource(
+                  width: swap ? descriptor.height : descriptor.width,
+                  height: swap ? descriptor.width : descriptor.height,
+                  previewBytes: Uint8List.fromList(preview.buffer.asUint8List(
+                    preview.offsetInBytes, preview.lengthInBytes,
+                  )),
+                );
+              }
+            } catch (_) {
+              // Cropping is optional; never block the original ML Kit input.
+            }
             // Hints are best-effort and cannot prevent OCR or change pixels.
             // The original encoded bytes still go to private ML Kit input.
             try {
@@ -151,6 +178,7 @@ class NativePhotoSource implements PhotoSourceService {
         path: copy.path,
         previewBytes: bytes,
         captureHint: captureHint,
+        sourceImage: sourceImage,
       );
       _owned[photo] = directory;
       return photo;
@@ -165,6 +193,52 @@ class NativePhotoSource implements PhotoSourceService {
           if (directory != null) _activeDirectories.remove(directory.path);
         } finally {
           await _removePickerCache(file);
+        }
+      }
+    }
+  }
+
+  @override
+  void cancelPhotoEditing() => ++_editRevision;
+
+  @override
+  Future<ScanPhoto> editPhoto(ScanPhoto original, PhotoEdit edit) async {
+    final source = original.sourceImage;
+    if (source == null || !_owned.containsKey(original) ||
+        !edit.isValidFor(source.width, source.height)) {
+      throw const ScanFailure(ScanFailureKind.invalidCrop);
+    }
+    final revision = _editRevision;
+    Directory? directory;
+    try {
+      final pixels = await renderNativeCrop(original.previewBytes, source, edit);
+      if (revision != _editRevision || !_owned.containsKey(original)) {
+        throw const ScanFailure(ScanFailureKind.invalidCrop);
+      }
+      directory = await Directory.systemTemp.createTemp('doku-scan-');
+      _activeDirectories.add(directory.path);
+      final copy = File('${directory.path}/label-crop.png');
+      await copy.writeAsBytes(pixels, flush: true);
+      if (revision != _editRevision || !_owned.containsKey(original)) {
+        throw const ScanFailure(ScanFailureKind.invalidCrop);
+      }
+      final photo = ScanPhoto(
+        path: copy.path,
+        previewBytes: pixels,
+        sourceImage: source,
+      );
+      _owned[photo] = directory;
+      return photo;
+    } on ScanFailure {
+      rethrow;
+    } catch (_) {
+      throw const ScanFailure(ScanFailureKind.invalidPhoto);
+    } finally {
+      if (directory != null && !_owned.values.contains(directory)) {
+        try {
+          await directory.delete(recursive: true);
+        } finally {
+          _activeDirectories.remove(directory.path);
         }
       }
     }
