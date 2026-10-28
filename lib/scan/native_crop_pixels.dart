@@ -22,8 +22,17 @@ Future<Uint8List> renderNativeCrop(
       edit.quarterTurns.isEven ? source.width : source.height;
   final rotatedHeight =
       edit.quarterTurns.isEven ? source.height : source.width;
-  final targetWidth = (edit.width * rotatedWidth).round();
-  final targetHeight = (edit.height * rotatedHeight).round();
+  // Snap BOTH crop edges to decoded source pixels. Rounding only the size
+  // leaves a fractional source rectangle and resamples tiny printed glyphs.
+  // The same integer rectangle is used for every 0/90/180/270 degree turn.
+  final leftPixel = (edit.left * rotatedWidth).round().clamp(0, rotatedWidth);
+  final topPixel = (edit.top * rotatedHeight).round().clamp(0, rotatedHeight);
+  final rightPixel =
+      ((edit.left + edit.width) * rotatedWidth).round().clamp(0, rotatedWidth);
+  final bottomPixel =
+      ((edit.top + edit.height) * rotatedHeight).round().clamp(0, rotatedHeight);
+  final targetWidth = rightPixel - leftPixel;
+  final targetHeight = bottomPixel - topPixel;
   if (targetWidth < 32 ||
       targetHeight < 32 ||
       targetWidth * targetHeight > maxPixels) {
@@ -49,10 +58,10 @@ Future<Uint8List> renderNativeCrop(
       throw const ScanFailure(ScanFailureKind.invalidCrop);
     }
 
-    final left = edit.left * rotatedWidth;
-    final top = edit.top * rotatedHeight;
-    final width = edit.width * rotatedWidth;
-    final height = edit.height * rotatedHeight;
+    final left = leftPixel.toDouble();
+    final top = topPixel.toDouble();
+    final width = targetWidth.toDouble();
+    final height = targetHeight.toDouble();
     final sourceRect = switch (edit.quarterTurns) {
       0 => ui.Rect.fromLTWH(left, top, width, height),
       1 => ui.Rect.fromLTWH(top, image.height - left - width, height, width),
@@ -94,7 +103,9 @@ Future<Uint8List> renderNativeCrop(
         (edit.quarterTurns.isEven ? targetWidth : targetHeight).toDouble(),
         (edit.quarterTurns.isEven ? targetHeight : targetWidth).toDouble(),
       ),
-      ui.Paint()..filterQuality = ui.FilterQuality.low,
+      // No bilinear filtering: a 1:1 pixel-aligned crop should preserve
+      // thin strokes and percent signs rather than blend adjacent pixels.
+      ui.Paint()..filterQuality = ui.FilterQuality.none,
     );
     picture = recorder.endRecording();
     cropped = await picture.toImage(targetWidth, targetHeight);
