@@ -99,10 +99,33 @@ async function main() {
           canvas.toBlob(b=>b?resolve(b):reject(Error('encode failed')),'image/png'));
         return URL.createObjectURL(blob);
       },{encoded,crop});
+      // Oracle deskew is an upper-bound diagnostic: the fixture generator
+      // knows the exact rotation. Production does NOT know this angle and
+      // must not automatically apply or select this candidate.
+      const deskewUrl=await page.evaluate(async ({sourceUrl,angle})=>{
+        const img=new Image();
+        img.src=sourceUrl;
+        await img.decode();
+        const canvas=document.createElement('canvas');
+        canvas.width=img.naturalWidth*2;
+        canvas.height=img.naturalHeight*2;
+        const c=canvas.getContext('2d');
+        c.fillStyle='#f6f4ef';
+        c.fillRect(0,0,canvas.width,canvas.height);
+        c.imageSmoothingEnabled=true;
+        c.imageSmoothingQuality='high';
+        c.translate(canvas.width/2,canvas.height/2);
+        c.rotate(-angle*Math.PI/180);
+        c.drawImage(img,-canvas.width/2,-canvas.height/2,canvas.width,canvas.height);
+        const blob=await new Promise((resolve,reject)=>
+          canvas.toBlob(b=>b?resolve(b):reject(Error('deskew encode failed')),'image/png'));
+        return URL.createObjectURL(blob);
+      },{sourceUrl:edited.photo.path,angle:fixture.angle});
       const variants=[
         ['production-full',source.path],
         ['production-crop',edited.photo.path],
-        ['study-crop-2x-threshold',contrastUrl]
+        ['study-crop-2x-threshold',contrastUrl],
+        ['study-crop-oracle-deskew-2x',deskewUrl]
       ];
       try {
         for(const [variant,url] of variants) {
@@ -127,17 +150,18 @@ async function main() {
           }
         }
       } finally {
-        await page.evaluate(({original,processed,contrast})=>{
+        await page.evaluate(({original,processed,contrast,deskew})=>{
           dokuOcr.release(original);dokuOcr.release(processed);
-          URL.revokeObjectURL(contrast);window.__abPick=null;
-        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl});
+          URL.revokeObjectURL(contrast);URL.revokeObjectURL(deskew);window.__abPick=null;
+        },{original:source.path,processed:edited.photo.path,contrast:contrastUrl,deskew:deskewUrl});
       }
     }
-    assert.equal(results.length,fixtures.length*3*3);
+    assert.equal(results.length,fixtures.length*4*3);
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),
       'No POST or private image upload');
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
       purpose:'Compare OCR input pixels/PSM, not a production winner or real accuracy',
+      oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
       commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       engine:'Chromium Tesseract.js WASM tur+eng',
       note:'No automatic selection, no changes to user corrections or approval',
