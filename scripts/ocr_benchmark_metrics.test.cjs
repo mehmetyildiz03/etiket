@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const {normalizeText, levenshtein, textDistance, containsExactPair, scoreCase, summarize} =
+const {normalizeText, levenshtein, textDistance, containsExactPair, scoreCase, summarize, compareAlternativeReading} =
   require('./ocr_benchmark_metrics.cjs');
 
 test('NFC keeps Turkish dotted/dotless I, percentages and punctuation significant', () => {
@@ -212,4 +212,44 @@ test('section scoring is opt-in, and invalid section annotations fail closed', (
     {heading:'ASTAR',expectedPairs:base.expectedPairs},
     {heading:'ASTAR',expectedPairs:base.expectedPairs}
   ]},{code:null,text:'ASTAR\n80% PAMUK'}),/unique/);
+});
+
+test('paired PSM diagnostics measure raw %/fiber recovery without auto-accepting PSM3', () => {
+  const fixture={id:'psm',kind:'positive',groundTruth:'DIŞ KUMAŞ\n80% PAMUK',
+    expectedPairs:[{percent:'80',fiber:'PAMUK'}],
+    expectedSections:[{heading:'DIŞ KUMAŞ',expectedPairs:[{percent:'80',fiber:'PAMUK'}]}]};
+  const first='DIŞ KUMAŞ\n8096 PAMUK';
+  const second={mode:'autoPage',rawText:'DIŞ KUMAŞ\n80% PAMUK'};
+  const comparison=compareAlternativeReading(fixture,first,second);
+  assert.equal(comparison.firstPsm,6);
+  assert.equal(comparison.secondPsm,3);
+  assert.equal(comparison.firstExactPairs,0);
+  assert.equal(comparison.secondExactPairs,1);
+  assert.equal(comparison.firstSectionPairs,0);
+  assert.equal(comparison.secondSectionPairs,1);
+  assert.ok(comparison.firstRawCer>comparison.secondRawCer);
+  assert.equal(comparison.secondRawCer,0);
+  // This helper returns only evidence; the rejected production proposal
+  // remains rejected and must never be replaced by the second OCR result.
+  const rejected=scoreCase(fixture,{code:'emptyText',text:null,rawText:first});
+  assert.equal(rejected.accepted,false);
+  assert.equal(rejected.correctPairs,0);
+});
+
+test('paired OCR comparison does not invent missing PSM results or use negative controls', () => {
+  const fixture={id:'psm',kind:'positive',groundTruth:'80% PAMUK',
+    expectedPairs:[{percent:'80',fiber:'PAMUK'}]};
+  assert.equal(compareAlternativeReading(fixture,'8096 PAMUK',null),null);
+  assert.equal(compareAlternativeReading(fixture,'8096 PAMUK',
+    {mode:'autoPage',rawText:''}),null);
+  assert.equal(compareAlternativeReading(fixture,'8096 PAMUK',
+    {mode:'unknown',rawText:'80% PAMUK'}),null);
+  assert.equal(compareAlternativeReading({id:'negative',kind:'negative'},
+    'noise',{mode:'sparseText',rawText:'80% PAMUK'}),null);
+  const sparse=compareAlternativeReading(fixture,'80% PAMUK',
+    {mode:'sparseText',rawText:'8096 PAMUK'});
+  assert.equal(sparse.secondPsm,11);
+  assert.equal(sparse.firstExactPairs,1);
+  assert.equal(sparse.secondExactPairs,0);
+  assert.equal(sparse.referenceSectionPairs,null);
 });

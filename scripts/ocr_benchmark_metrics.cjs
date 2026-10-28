@@ -216,6 +216,45 @@ function scoreCase(fixture, output) {
     pairs};
 }
 
+
+/**
+ * Benchmark-only paired comparison of the ORIGINAL PSM 6 output with an
+ * optional PSM 3 / PSM 11 second reading. Never selects or accepts OCR text.
+ * This scores raw, unapproved hypotheses against manually checked GT.
+ * A missing second reading is NOT a failed second pass: it is unobserved.
+ */
+function compareAlternativeReading(fixture, primaryRawText, secondReading) {
+  if (fixture?.kind !== 'positive' || !secondReading) return null;
+  if (!['autoPage', 'sparseText'].includes(secondReading.mode) ||
+      typeof primaryRawText !== 'string' ||
+      typeof secondReading.rawText !== 'string' ||
+      !secondReading.rawText.trim()) return null;
+  const rawScore = text => scoreCase(fixture, {
+    text, rawText: text, code: null
+  });
+  const first = rawScore(primaryRawText);
+  const second = rawScore(secondReading.rawText);
+  const cer = result => result.referenceCharacters
+    ? result.rawCharacterEdits / result.referenceCharacters : null;
+  const wer = result => result.referenceWords
+    ? result.rawWordEdits / result.referenceWords : null;
+  return {
+    mode: secondReading.mode,
+    firstPsm: 6,
+    secondPsm: secondReading.mode === 'autoPage' ? 3 : 11,
+    firstRawCer: cer(first),
+    secondRawCer: cer(second),
+    firstRawWer: wer(first),
+    secondRawWer: wer(second),
+    referencePairs: first.referencePairs,
+    firstExactPairs: first.correctPairs,
+    secondExactPairs: second.correctPairs,
+    referenceSectionPairs: first.sectionEvaluation?.referencePairs ?? null,
+    firstSectionPairs: first.sectionEvaluation?.correctPairs ?? null,
+    secondSectionPairs: second.sectionEvaluation?.correctPairs ?? null
+  };
+}
+
 function summarize(results) {
   const positive = results.filter(v => v.kind === 'positive');
   const negative = results.filter(v => v.kind === 'negative');
@@ -257,4 +296,4 @@ function summarize(results) {
   };
 }
 
-module.exports = {normalizeText, levenshtein, textDistance, containsExactPair, scoreCase, summarize};
+module.exports = {normalizeText, levenshtein, textDistance, containsExactPair, scoreCase, summarize, compareAlternativeReading};
