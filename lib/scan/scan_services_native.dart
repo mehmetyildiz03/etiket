@@ -212,6 +212,9 @@ class NativePhotoSource
     Directory? directory;
     try {
       final pixels = await renderNativeCrop(original.previewBytes, source, edit);
+      // Evaluate the exact OCR-bound crop, not the unrelated background in the
+      // full camera frame. This remains advisory and cannot reject a scan.
+      final cropHint = await _captureHintForCrop(pixels);
       if (revision != _editRevision || !_owned.containsKey(original)) {
         throw const ScanFailure(ScanFailureKind.invalidCrop);
       }
@@ -225,6 +228,7 @@ class NativePhotoSource
       final photo = ScanPhoto(
         path: copy.path,
         previewBytes: pixels,
+        captureHint: cropHint,
         sourceImage: source,
       );
       _owned[photo] = directory;
@@ -241,6 +245,47 @@ class NativePhotoSource
           _activeDirectories.remove(directory.path);
         }
       }
+    }
+  }
+
+  /// Bounded local quality probe of the exact crop pixels shown to the user
+  /// and passed to ML Kit. No EXIF, raw OCR or metrics are persisted or sent.
+  /// A decoder failure only removes the optional hint, never the crop/OCR.
+  Future<PhotoCaptureHint?> _captureHintForCrop(Uint8List png) async {
+    ui.ImmutableBuffer? buffer;
+    ui.ImageDescriptor? descriptor;
+    ui.Codec? codec;
+    ui.Image? image;
+    try {
+      buffer = await ui.ImmutableBuffer.fromUint8List(png);
+      descriptor = await ui.ImageDescriptor.encoded(buffer);
+      if (descriptor.width <= 0 ||
+          descriptor.height <= 0 ||
+          descriptor.width * descriptor.height > maxPixels) {
+        return null;
+      }
+      final landscape = descriptor.width >= descriptor.height;
+      final longEdge = landscape ? descriptor.width : descriptor.height;
+      final boundedEdge = longEdge > 720 ? 720 : longEdge;
+      codec = await descriptor.instantiateCodec(
+        targetWidth: landscape ? boundedEdge : null,
+        targetHeight: landscape ? null : boundedEdge,
+      );
+      image = (await codec.getNextFrame()).image;
+      final rgba = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      if (rgba == null) return null;
+      return nativeCaptureHintFromRgba(
+        rgba.buffer.asUint8List(rgba.offsetInBytes, rgba.lengthInBytes),
+        image.width,
+        image.height,
+      );
+    } catch (_) {
+      return null;
+    } finally {
+      image?.dispose();
+      codec?.dispose();
+      descriptor?.dispose();
+      buffer?.dispose();
     }
   }
 
