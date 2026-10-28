@@ -108,6 +108,11 @@ void main() {
       NativePhotoSource.pickerMaxEdge * NativePhotoSource.pickerMaxEdge,
       lessThanOrEqualTo(NativePhotoSource.maxPixels),
     );
+    // Common 12 MP phone images (4032x3024) should no longer be
+    // downscaled by the picker solely because of the old 4000px cap.
+    expect(NativePhotoSource.pickerMaxEdge, greaterThan(4032));
+    // The new bound still fits even a square source within 24 MP.
+    expect(NativePhotoSource.pickerMaxEdge, lessThanOrEqualTo(4800));
     for (final kind in [PhotoSource.camera, PhotoSource.gallery]) {
       final original = File('${fixtures.path}/${kind.name}.png');
       await original.writeAsBytes(bytes);
@@ -119,8 +124,8 @@ void main() {
         picker.requestedSource,
         kind == PhotoSource.camera ? ImageSource.camera : ImageSource.gallery,
       );
-      expect(picker.requestedMaxWidth, 4000);
-      expect(picker.requestedMaxHeight, 4000);
+      expect(picker.requestedMaxWidth, 4800);
+      expect(picker.requestedMaxHeight, 4800);
       expect(picker.requestedQuality, isNull);
       expect(picker.requestedMetadata, isFalse);
       expect(photo!.previewBytes, orderedEquals(bytes));
