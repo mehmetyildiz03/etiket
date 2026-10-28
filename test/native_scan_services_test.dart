@@ -118,7 +118,7 @@ void main() {
       );
       expect(picker.requestedMaxWidth, 4000);
       expect(picker.requestedMaxHeight, 4000);
-      expect(picker.requestedQuality, 95);
+      expect(picker.requestedQuality, isNull);
       expect(picker.requestedMetadata, isFalse);
       expect(photo!.previewBytes, orderedEquals(bytes));
       expect(await File(photo.path).readAsBytes(), orderedEquals(bytes));
