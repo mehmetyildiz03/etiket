@@ -6,6 +6,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image_picker/image_picker.dart';
 
 import 'photo_scan.dart';
+import 'native_capture_guidance.dart';
 
 ({PhotoSourceService photos, TextRecognitionService recognizer})
 createScanServices() =>
@@ -87,17 +88,53 @@ class NativePhotoSource implements PhotoSourceService {
       if (length == 0) throw const ScanFailure(ScanFailureKind.invalidPhoto);
       if (length > maxBytes) throw const ScanFailure(ScanFailureKind.tooLarge);
       final bytes = await file.readAsBytes();
+      PhotoCaptureHint? captureHint;
       final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
       ui.ImageDescriptor? descriptor;
       try {
         descriptor = await ui.ImageDescriptor.encoded(buffer);
+        if (descriptor.width <= 0 || descriptor.height <= 0) {
+          throw const ScanFailure(ScanFailureKind.invalidPhoto);
+        }
         if (descriptor.width * descriptor.height > maxPixels) {
           throw const ScanFailure(ScanFailureKind.tooLarge);
         }
-        // Verify the actual encoded data, not just its header, at bounded size.
-        final codec = await descriptor.instantiateCodec(targetWidth: 720);
+        // Bound the LONG edge, not just the width: a 100x4000 portrait
+        // must not be upscaled into a huge validation decode.
+        final landscape = descriptor.width >= descriptor.height;
+        final codec = await descriptor.instantiateCodec(
+          targetWidth: landscape
+              ? (descriptor.width > 720 ? 720 : descriptor.width)
+              : null,
+          targetHeight: landscape
+              ? null
+              : (descriptor.height > 720 ? 720 : descriptor.height),
+        );
         try {
-          (await codec.getNextFrame()).image.dispose();
+          final frame = await codec.getNextFrame();
+          try {
+            // Hints are best-effort and cannot prevent OCR or change pixels.
+            // The original encoded bytes still go to private ML Kit input.
+            try {
+              final rgba = await frame.image.toByteData(
+                format: ui.ImageByteFormat.rawRgba,
+              );
+              if (rgba != null) {
+                captureHint = nativeCaptureHintFromRgba(
+                  rgba.buffer.asUint8List(
+                    rgba.offsetInBytes,
+                    rgba.lengthInBytes,
+                  ),
+                  frame.image.width,
+                  frame.image.height,
+                );
+              }
+            } catch (_) {
+              // Some platform decoders cannot export RGBA; omit the hint.
+            }
+          } finally {
+            frame.image.dispose();
+          }
         } finally {
           codec.dispose();
         }
@@ -110,7 +147,11 @@ class NativePhotoSource implements PhotoSourceService {
       final copy = File('${directory.path}/label-image');
       await copy.writeAsBytes(bytes, flush: true);
       await _removePickerCache(file);
-      final photo = ScanPhoto(path: copy.path, previewBytes: bytes);
+      final photo = ScanPhoto(
+        path: copy.path,
+        previewBytes: bytes,
+        captureHint: captureHint,
+      );
       _owned[photo] = directory;
       return photo;
     } on ScanFailure {
