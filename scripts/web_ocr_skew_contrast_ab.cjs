@@ -10,9 +10,14 @@ const base = process.argv[2] || 'http://127.0.0.1:8082/etiket/';
 const out = path.resolve('build/web-ocr-evidence');
 const truth = '80% PAMUK\n20% POLYESTER';
 const pairs = [{percent:'80',fiber:'PAMUK'},{percent:'20',fiber:'POLYESTER'}];
+// Include both rotation directions, a smaller skew, and an unrotated
+// textured negative control. All fixtures are generated at test time.
 const fixtures = [
-  {id:'small-skew-9deg', angle:-9, font:26, faint:false},
-  {id:'small-low-contrast', angle:0, font:26, faint:true}
+  {id:'small-skew-9deg', angle:-9, font:26, faint:false, woven:true},
+  {id:'small-skew-plus-9deg', angle:9, font:26, faint:false, woven:true},
+  {id:'small-skew-minus-6deg', angle:-6, font:26, faint:false, woven:true},
+  {id:'small-straight-woven', angle:0, font:26, faint:false, woven:true},
+  {id:'small-low-contrast', angle:0, font:26, faint:true, woven:false}
 ];
 const crop = {left:.14, top:.12, width:.74, height:.76, quarterTurns:0};
 async function main() {
@@ -44,7 +49,7 @@ async function main() {
         c.fillRect(0,0,1100,850);
         // Match the woven-background skew-small fixture in web_ocr_benchmark:
         // a clean white label alone is an unrealistically easy deskew test.
-        if (f.angle !== 0) {
+        if (f.angle !== 0 || f.woven) {
           for(let y=0;y<850;y+=7) {
             c.strokeStyle=y%14===0?'#a7a69e':'#bbbcb4';
             c.beginPath();c.moveTo(0,y);c.lineTo(1100,y+7);c.stroke();
@@ -54,6 +59,15 @@ async function main() {
         c.translate(550,425);c.rotate(f.angle*Math.PI/180);c.translate(-550,-425);
         c.fillStyle=f.faint?'#a8a59b':'#f6f4ef';
         c.fillRect(165,120,770,600);
+        if(f.woven) {
+          // Subtle stitch lines inside the label challenge the projection
+          // estimator without using any private camera imagery.
+          c.strokeStyle='#d8d6cf';
+          c.lineWidth=1;
+          for(let y=126;y<718;y+=11) {
+            c.beginPath();c.moveTo(170,y);c.lineTo(930,y+2);c.stroke();
+          }
+        }
         c.fillStyle=f.faint?'#515048':'#242524';
         c.font=f.font+'px Arial';
         c.fillText('80% PAMUK',225,205);
@@ -233,6 +247,38 @@ async function main() {
     assert.equal(results.length,fixtures.length*6*3);
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),
       'No POST or private image upload');
+    // Pair each candidate with its exact same-source, same-scale control.
+    // Report regressions as well as gains; never pick a production OCR winner.
+    const angleSweep=fixtures.map(fixture=>{
+      const sample=results.filter(r=>r.fixture===fixture.id);
+      const estimatedAngle=sample[0].estimatedAngle;
+      return {
+        fixture:fixture.id,
+        syntheticAngleOnly:fixture.angle,
+        estimatedAngle,
+        absoluteAngleErrorDeg:Math.abs(estimatedAngle-fixture.angle),
+        comparisons:[3,6,11].map(psm=>{
+          const baseline=sample.find(r=>r.psm===psm &&
+            r.variant==='study-crop-2x-unrotated');
+          const corrected=sample.find(r=>r.psm===psm &&
+            r.variant==='study-crop-estimated-deskew-2x');
+          assert.ok(baseline && corrected);
+          return {psm,unrotatedExactPairs:baseline.exactPairs,
+            estimatedDeskewExactPairs:corrected.exactPairs,
+            exactPairDelta:corrected.exactPairs-baseline.exactPairs,
+            unrotatedCer:baseline.rawCer,estimatedDeskewCer:corrected.rawCer,
+            cerDelta:corrected.rawCer-baseline.rawCer,
+            unrotatedMs:baseline.latencyMs,estimatedDeskewMs:corrected.latencyMs};
+        })
+      };
+    });
+    assert.ok(angleSweep.every(x=>Number.isFinite(x.absoluteAngleErrorDeg)));
+    for(const row of angleSweep) {
+      console.log('D4.2 SYNTHETIC angle-sweep '+row.fixture+
+        ' estimated='+row.estimatedAngle+' oracle='+row.syntheticAngleOnly+
+        ' absError='+row.absoluteAngleErrorDeg+
+        ' pairDeltas='+row.comparisons.map(x=>'PSM'+x.psm+':'+x.exactPairDelta).join(','));
+    }
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
       purpose:'Compare OCR input pixels/PSM, not a production winner or real accuracy',
       oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
@@ -241,7 +287,7 @@ async function main() {
       commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       engine:'Chromium Tesseract.js WASM tur+eng',
       note:'No automatic selection, no changes to user corrections or approval',
-      results};
+      angleSweep,results};
     fs.mkdirSync(out,{recursive:true});
     fs.writeFileSync(path.join(out,'d4-2-skew-contrast-ab.json'),JSON.stringify(report,null,2));
   } finally {
