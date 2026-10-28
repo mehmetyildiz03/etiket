@@ -32,7 +32,31 @@
         "width": 1,
         "height": 1,
         "quarterTurns": 0
-      }
+      },
+      "expectedSections": [
+        {
+          "heading": "DIŞ KUMAŞ",
+          "expectedPairs": [
+            {
+              "fiber": "PAMUK",
+              "percent": "80"
+            },
+            {
+              "fiber": "POLYESTER",
+              "percent": "20"
+            }
+          ]
+        },
+        {
+          "heading": "ASTAR",
+          "expectedPairs": [
+            {
+              "fiber": "VİSKON",
+              "percent": "100"
+            }
+          ]
+        }
+      ]
     },
     {
       "id": "example-private-no-text-001",
