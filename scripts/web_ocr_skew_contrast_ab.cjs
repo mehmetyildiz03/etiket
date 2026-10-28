@@ -14,6 +14,8 @@ const pairs = [{percent:'80',fiber:'PAMUK'},{percent:'20',fiber:'POLYESTER'}];
 // textured negative control. All fixtures are generated at test time.
 const fixtures = [
   {id:'small-skew-9deg', angle:-9, font:26, faint:false, woven:true},
+  // Matched camera-defocus negative control: same text, crop and angle.
+  {id:'small-skew-9deg-defocus', angle:-9, font:26, faint:false, woven:true, blurPx:1.25},
   {id:'small-skew-plus-9deg', angle:9, font:26, faint:false, woven:true},
   {id:'small-skew-minus-6deg', angle:-6, font:26, faint:false, woven:true},
   {id:'small-straight-woven', angle:0, font:26, faint:false, woven:true},
@@ -42,6 +44,7 @@ async function main() {
       });
       await window.__abWorker.setParameters({preserve_interword_spaces:'1'});
     });
+    let sharpReferenceEncoded=null;
     for (const fixture of fixtures) {
       const encoded = await page.evaluate(f=>{
         const canvas=document.createElement('canvas');
@@ -75,8 +78,21 @@ async function main() {
         c.fillText('80% PAMUK',225,205);
         c.fillText('20% POLYESTER',225,335);
         c.restore();
+        // Apply optical-style defocus to the WHOLE generated camera frame,
+        // not just text; preserve source geometry and the same crop/PSM paths.
+        if(f.blurPx) {
+          const blurred=document.createElement('canvas');
+          blurred.width=canvas.width;blurred.height=canvas.height;
+          const b=blurred.getContext('2d');
+          b.filter='blur('+f.blurPx+'px)';
+          b.drawImage(canvas,0,0);
+          return blurred.toDataURL('image/png').split(',')[1];
+        }
         return canvas.toDataURL('image/png').split(',')[1];
       },fixture);
+      if(fixture.id==='small-skew-9deg') sharpReferenceEncoded=encoded;
+      if(fixture.blurPx) assert.notEqual(encoded,sharpReferenceEncoded,
+        'Defocus fixture must differ in source pixels from its sharp pair');
       const picker=page.waitForEvent('filechooser');
       await page.evaluate(()=>{window.__abPick=dokuOcr.pick(false);});
       await (await picker).setFiles({name:fixture.id+'.png',mimeType:'image/png',
@@ -332,6 +348,26 @@ async function main() {
         ' component='+row.componentAngle+' componentError='+row.componentAbsoluteAngleErrorDeg+
         ' pairDeltas='+row.comparisons.map(x=>'PSM'+x.psm+':'+x.exactPairDelta).join(','));
     }
+    // Matched defocus-vs-sharp comparison at identical ROI, PSM and transform.
+    // A negative exact-pair delta means lost recognition; positive is not
+    // evidence of improved real-camera accuracy.
+    const blurImpact=results.filter(x=>x.fixture==='small-skew-9deg-defocus')
+      .map(blurred=>{
+        const sharp=results.find(x=>x.fixture==='small-skew-9deg' &&
+          x.variant===blurred.variant && x.psm===blurred.psm);
+        assert.ok(sharp,'Missing matched sharp control');
+        return {variant:blurred.variant,psm:blurred.psm,
+          sharpExactPairs:sharp.exactPairs,blurredExactPairs:blurred.exactPairs,
+          exactPairDelta:blurred.exactPairs-sharp.exactPairs,
+          sharpCer:sharp.rawCer,blurredCer:blurred.rawCer,
+          cerDelta:blurred.rawCer-sharp.rawCer,
+          sharpWer:sharp.rawWer,blurredWer:blurred.rawWer,
+          werDelta:blurred.rawWer-sharp.rawWer};
+      });
+    assert.equal(blurImpact.length,8*3);
+    for(const row of blurImpact) console.log('D4.2 SYNTHETIC defocus '+
+      row.variant+' PSM'+row.psm+' exactDelta='+row.exactPairDelta+
+      ' cerDelta='+row.cerDelta.toFixed(3));
     const report={kind:'SYNTHETIC ONLY',realPhotoCount:0,realAccuracy:null,
       purpose:'Compare raw source ROI/production auto-deskew/PSM; no production winner or real accuracy',
       oracleDeskew:'Known synthetic fixture angle only; not deployable angle estimation',
@@ -341,7 +377,8 @@ async function main() {
       commit:process.env.OCR_COMMIT_SHA||process.env.GITHUB_SHA||null,
       engine:'Chromium Tesseract.js WASM tur+eng',
       note:'No automatic selection, no changes to user corrections or approval',
-      angleSweep,results};
+      defocusControl:'Matched sharp/1.25px full-frame Gaussian canvas blur; synthetic camera-defocus proxy only',
+      blurImpact,angleSweep,results};
     fs.mkdirSync(out,{recursive:true});
     fs.writeFileSync(path.join(out,'d4-2-skew-contrast-ab.json'),JSON.stringify(report,null,2));
   } finally {
