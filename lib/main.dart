@@ -5,6 +5,9 @@ import 'domain/analysis.dart';
 import 'domain/composition_draft.dart';
 import 'scan/photo_scan.dart';
 import 'scan/scan_services.dart';
+import 'scan/live_camera_entry_stub.dart'
+    if (dart.library.io) 'scan/live_camera_entry_native.dart'
+    as native_live_camera;
 import 'ui/photo_scan_panel.dart';
 import 'ui/photo_crop_editor.dart';
 import 'ui/doku_mobile_shell.dart';
@@ -544,6 +547,9 @@ class _EtiketHomeState extends State<EtiketHome> with WidgetsBindingObserver {
   Widget camera() => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
     pageTitle('Etiketi tara', 'Etiketi net ve aydınlık çek. Okunan yazıyı kontrol etmeden doğrulamıyoruz.'),
     PhotoScanPanel(scan: scan, onReview: openOcrLabel, onEdit: openPhotoEditor,
+      onLiveCapture: native_live_camera.supported(scan.photos)
+          ? () => scan.pickCustom(() => native_live_camera.capture(context, scan.photos))
+          : null,
       onManual: () => navigate(_Page.edit), onPaste: () => openLabel(_Page.camera)),
     const SizedBox(height: 24),
     const Text('DEMO — fotoğraf veya OCR kullanılmaz', style: TextStyle(color: Colors.black54)),

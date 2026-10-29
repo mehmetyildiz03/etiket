@@ -207,6 +207,11 @@ class PhotoScanController {
 
   Future<void> pick(PhotoSource source) =>
       _select(() => photos.pick(source), recovering: false);
+
+  /// A platform camera can hand off a real still without bypassing revision,
+  /// cancellation, ownership, or explicit post-capture OCR review.
+  Future<void> pickCustom(Future<ScanPhoto?> Function() select) =>
+      _select(select, recovering: false);
   Future<void> recover() async {
     if (!photos.supported) return;
     await _select(photos.recover, recovering: true);
