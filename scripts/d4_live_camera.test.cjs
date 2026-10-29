@@ -7,9 +7,18 @@ const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../web/doku_live_camera.js'), 'utf8');
 const stability = require('../web/doku_live_stability.js');
 
-function setup({permission = true, delayed = false, withOcr = false} = {}) {
+function setup({permission = true, delayed = false, withOcr = false,
+  torch = false, torchReject = false} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
-  const tracks = [{stopped: false, stop() { this.stopped = true; }}];
+  const tracks = [{stopped: false, torchEnabled: false, torchCalls: [],
+    stop() { this.stopped = true; this.torchEnabled = false; },
+    getCapabilities() { return {torch}; },
+    async applyConstraints(constraints) {
+      this.torchCalls.push(constraints);
+      if (torchReject) throw new DOMException('unsupported', 'OverconstrainedError');
+      this.torchEnabled = constraints.advanced?.[0]?.torch === true;
+    }
+  }];
   const stream = {getTracks: () => tracks, getVideoTracks: () => tracks};
   let requested, requestResolve, requestReject, timer, cameraCalls = 0, ocrResult;
   const clock = {now: 1000};
@@ -93,6 +102,59 @@ test('mobile web camera opens a private rear-camera preview and captures a still
   assert.equal(s.timer, null);
   assert.equal(s.docEvents.size, 0);
   assert.equal(s.pageEvents.size, 0);
+});
+
+test('optional hardware torch can be toggled without touching OCR or captured data', async () => {
+  const s = setup({torch: true});
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  const control = s.button('Kamera ışığını aç');
+  assert.equal(control.style.display, '');
+  assert.equal(control.attributes['aria-pressed'], 'false');
+  await control.emit('click');
+  assert.equal(s.tracks[0].torchEnabled, true);
+  assert.equal(control.textContent, 'Kamera ışığını kapat');
+  assert.equal(control.attributes['aria-pressed'], 'true');
+  assert.equal(s.tracks[0].torchCalls.length, 1);
+  assert.equal(s.tracks[0].torchCalls[0].advanced[0].torch, true);
+  await control.emit('click');
+  assert.equal(s.tracks[0].torchEnabled, false);
+  assert.equal(control.attributes['aria-pressed'], 'false');
+  await control.emit('click');
+  s.api.cancel();
+  assert.equal(await pending, null);
+  assert.equal(s.tracks[0].stopped, true);
+  assert.equal(s.tracks[0].torchEnabled, false,
+    'closing the preview releases the hardware light');
+});
+
+test('unsupported camera torch is hidden while capture remains usable', async () => {
+  const s = setup();
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(s.button('Kamera ışığını aç').style.display, 'none');
+  assert.equal(s.tracks[0].torchCalls.length, 0);
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.ok((await pending).size > 0);
+});
+
+test('rejected torch constraints safely retain preview and system camera fallback', async () => {
+  const s = setup({torch: true, torchReject: true});
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  const control = s.button('Kamera ışığını aç');
+  await control.emit('click');
+  assert.equal(control.style.display, 'none');
+  assert.equal(s.tracks[0].torchEnabled, false);
+  assert.equal(s.nodes.length, 1);
+  assert.match(s.nodes[0].children[2].textContent, /ortam ışığını artır/);
+  await s.button('Sistem kamerası').emit('click');
+  assert.equal(s.tracks[0].stopped, true);
+  s.api.cancel();
+  assert.equal(await pending, null);
 });
 
 test('cancelling while camera permission is pending stops a late stream', async () => {
