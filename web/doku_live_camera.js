@@ -234,8 +234,11 @@
         liveScanner = root.dokuLiveOcr?.create?.(
           observation => {
             if (done || capturing || usingSystemPicker) return;
-            stability?.observe(observation, Date.now());
-            showBoxes(observation);
+            const reading = stability?.observe(observation, Date.now());
+            // Ignore late/duplicate observations; render only validated geometry.
+            if (reading && !reading.stale && reading.sequence === observation.sequence) {
+              showBoxes(reading);
+            }
             renderStatus();
           },
           () => {
