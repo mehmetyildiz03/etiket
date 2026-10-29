@@ -211,3 +211,24 @@ test('live OCR status counts independent frames, resets motion and expires stale
   s.api.cancel();
   assert.equal(await pending, null);
 });
+
+
+test('late OCR callback clears old boxes and never displays an outdated pair', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const panel = s.nodes[0];
+  const status = panel.children[2];
+  const overlay = panel.children[1].children[1];
+  const obs = (sequence, durationMs) => ({sequence, durationMs,
+    width: 1200, height: 675, textPresent: true,
+    boxes: [{x0: 50, y0: 70, x1: 250, y1: 120}],
+    cues: [{percent: 80, fiber: 'pamuk'}]});
+  s.emitOcr(obs(1, 800));
+  assert.equal(overlay.children.length, 1);
+  s.emitOcr(obs(2, 7500));
+  assert.equal(overlay.children.length, 0);
+  assert.match(status.textContent, /Gri/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
