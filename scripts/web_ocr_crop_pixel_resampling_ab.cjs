@@ -1,5 +1,5 @@
 'use strict';
-// D4.2: isolate fractional source-pixel crop resampling on generated labels.
+// D4.2: compare fractional crop resampling AND 2x interpolation on generated labels.
 // This is a paired Chromium/Tesseract WASM study, NOT a real-photo benchmark.
 // Neither variant changes the production OCR proposal or user approval.
 const assert = require('node:assert/strict');
@@ -14,7 +14,8 @@ const truth = '80% PAMUK\n20% POLYESTER';
 const pairs = [{percent:'80', fiber:'PAMUK'}, {percent:'20', fiber:'POLYESTER'}];
 const cases = [
   {id:'small-dark', font:22, ink:'#292929', background:'#f4f3ed'},
-  {id:'small-faint', font:22, ink:'#77736d', background:'#e8e5dd'}
+  {id:'small-faint', font:22, ink:'#77736d', background:'#e8e5dd'},
+  {id:'small-defocus', font:22, ink:'#292929', background:'#f4f3ed', blurPx:1.25}
 ];
 
 async function main() {
@@ -49,8 +50,18 @@ async function main() {
         s.fillStyle = f.ink; s.font = 'bold ' + f.font + 'px Arial';
         s.fillText('80% PAMUK', 260, 265);
         s.fillText('20% POLYESTER', 260, 340);
+        // Defocus the entire generated frame, not only the printed text.
+        let frame = source;
+        if (f.blurPx) {
+          const blurred = document.createElement('canvas');
+          blurred.width = source.width; blurred.height = source.height;
+          const bc = blurred.getContext('2d');
+          bc.filter = 'blur(' + f.blurPx + 'px)';
+          bc.drawImage(source, 0, 0);
+          frame = blurred;
+        }
         const img = new Image();
-        img.src = source.toDataURL('image/png');
+        img.src = frame.toDataURL('image/png');
         await img.decode();
         // The two arms have identical integer output dimensions, input
         // pixels, crop size and PSM. ONLY subpixel translation differs.
@@ -63,6 +74,25 @@ async function main() {
           return {canvas:c, rgba:g.getImageData(0,0,c.width,c.height).data};
         };
         const aligned = render(false), subpixel = render(true);
+        // Independent 2x interpolation control: identical native crop pixels.
+        // The production bridge enlarges small crops; this isolates that step
+        // without silently choosing the best OCR text or altering the UI.
+        const enlarged = document.createElement('canvas');
+        enlarged.width = aligned.canvas.width * 2;
+        enlarged.height = aligned.canvas.height * 2;
+        const ec = enlarged.getContext('2d', {willReadFrequently:true});
+        ec.imageSmoothingEnabled = true;
+        ec.imageSmoothingQuality = 'high';
+        ec.drawImage(aligned.canvas, 0, 0, enlarged.width, enlarged.height);
+        const upscaledRgba = ec.getImageData(0, 0, enlarged.width, enlarged.height).data;
+        let upscaleChanged = 0;
+        for (let y = 0; y < aligned.canvas.height; y++) for (let x = 0; x < aligned.canvas.width; x++) {
+          const p = (y * aligned.canvas.width + x) * 4;
+          const q = ((2 * y) * enlarged.width + 2 * x) * 4;
+          if (aligned.rgba[p] !== upscaledRgba[q] ||
+              aligned.rgba[p+1] !== upscaledRgba[q+1] ||
+              aligned.rgba[p+2] !== upscaledRgba[q+2]) upscaleChanged++;
+        }
         let changed = 0;
         for (let i=0; i<aligned.rgba.length; i+=4) {
           if (aligned.rgba[i] !== subpixel.rgba[i] ||
@@ -75,12 +105,15 @@ async function main() {
           return URL.createObjectURL(blob);
         };
         return {aligned:await url(aligned.canvas), subpixel:await url(subpixel.canvas),
-          changedPixels:changed, width:aligned.canvas.width, height:aligned.canvas.height};
+          upscaled:await url(enlarged), changedPixels:changed,
+          upscaleChangedPixels:upscaleChanged,
+          width:aligned.canvas.width, height:aligned.canvas.height};
       }, fixture);
       assert.deepEqual([sample.width,sample.height],[730,240]);
       assert.ok(sample.changedPixels>0, 'The paired resampling arms must differ in pixels');
+      assert.ok(sample.upscaleChangedPixels>0, 'The 2x interpolation arm must change source pixels');
       try {
-        for (const variant of ['aligned','subpixel']) {
+        for (const variant of ['aligned','subpixel','upscaled']) {
           for (const psm of [3,6,11]) {
             const start = Date.now();
             const text = await page.evaluate(async arg => {
@@ -99,35 +132,39 @@ async function main() {
               cer:distance.characterEdits / distance.referenceCharacters,
               wer:distance.wordEdits / distance.referenceWords,
               latencyMs:Date.now()-start,
-              changedPixels:sample.changedPixels
+              changedPixels:sample.changedPixels,
+              upscaleChangedPixels:sample.upscaleChangedPixels
             });
           }
         }
       } finally {
         await page.evaluate(urls => urls.forEach(url => URL.revokeObjectURL(url)),
-          [sample.aligned,sample.subpixel]);
+          [sample.aligned,sample.subpixel,sample.upscaled]);
       }
     }
-    assert.equal(results.length,12);
+    assert.equal(results.length,27);
     assert.ok(requests.every(method => method==='GET' || method==='HEAD'),
       'Generated image and OCR text must not be uploaded');
     const summary = [];
     for (const fixture of cases) for (const psm of [3,6,11]) {
       const a=results.find(r=>r.fixture===fixture.id && r.psm===psm && r.variant==='aligned');
       const b=results.find(r=>r.fixture===fixture.id && r.psm===psm && r.variant==='subpixel');
+      const c=results.find(r=>r.fixture===fixture.id && r.psm===psm && r.variant==='upscaled');
       summary.push({fixture:fixture.id,psm,
-        alignedExact:a.exactPairs,subpixelExact:b.exactPairs,
-        alignedCer:a.cer,subpixelCer:b.cer,
-        alignedWer:a.wer,subpixelWer:b.wer,
-        deltaExact:a.exactPairs-b.exactPairs});
+        alignedExact:a.exactPairs,subpixelExact:b.exactPairs,upscaledExact:c.exactPairs,
+        alignedCer:a.cer,subpixelCer:b.cer,upscaledCer:c.cer,
+        alignedWer:a.wer,subpixelWer:b.wer,upscaledWer:c.wer,
+        deltaExact:a.exactPairs-b.exactPairs,
+        deltaUpscaledExact:c.exactPairs-a.exactPairs});
       console.log('SYNTHETIC '+fixture.id+' PSM'+psm+
-        ' pixel-aligned '+a.exactPairs+'/2 vs subpixel '+b.exactPairs+'/2');
+        ' pixel-aligned '+a.exactPairs+'/2 vs subpixel '+b.exactPairs+
+        '/2 vs 2x '+c.exactPairs+'/2');
     }
     fs.mkdirSync(out,{recursive:true});
     fs.writeFileSync(path.join(out,'crop-pixel-resampling-ab.json'),JSON.stringify({
       kind:'SYNTHETIC ONLY', realPhotoCount:0, realAccuracy:null,
       engine:'Chromium + local Tesseract.js WASM tur/eng',
-      caveat:'Paired resampling experiment only; not a production accuracy claim',
+      caveat:'Paired fractional-crop and 2x interpolation experiments only; not a real-phone accuracy claim',
       selection:'No OCR hypothesis is selected, repaired, or accepted',
       summary,results
     },null,2));
