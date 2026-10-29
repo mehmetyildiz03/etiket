@@ -5,12 +5,14 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 const source = fs.readFileSync(path.join(__dirname, '../web/doku_live_camera.js'), 'utf8');
+const stability = require('../web/doku_live_stability.js');
 
-function setup({permission = true, delayed = false} = {}) {
+function setup({permission = true, delayed = false, withOcr = false} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
   const tracks = [{stopped: false, stop() { this.stopped = true; }}];
   const stream = {getTracks: () => tracks, getVideoTracks: () => tracks};
-  let requested, requestResolve, requestReject, timer, cameraCalls = 0;
+  let requested, requestResolve, requestReject, timer, cameraCalls = 0, ocrResult;
+  const clock = {now: 1000};
   const pending = new Promise((resolve, reject) => { requestResolve = resolve; requestReject = reject; });
   if (!delayed) queueMicrotask(() => permission ? requestResolve(stream) :
     requestReject(new DOMException('denied', 'NotAllowedError')));
@@ -18,8 +20,10 @@ function setup({permission = true, delayed = false} = {}) {
     const events = new Map();
     const el = {
       type, style: {}, children: [], attributes: {}, textContent: '', files: [],
+      clientWidth: 390, clientHeight: 220,
       setAttribute(k, v) { this.attributes[k] = v; },
       appendChild(child) { this.children.push(child); },
+      replaceChildren(...children) { this.children = children; },
       addEventListener(k, fn) { events.set(k, fn); },
       async emit(k) { await events.get(k)?.(); },
       remove() { const index = nodes.indexOf(this); if (index >= 0) nodes.splice(index, 1); },
@@ -43,6 +47,7 @@ function setup({permission = true, delayed = false} = {}) {
   };
   const context = vm.createContext({
     DOMException, Blob, Uint8Array, Uint8ClampedArray, Promise,
+    Date: class extends Date { static now() { return clock.now; } },
     isSecureContext: true, document,
     navigator: {mediaDevices: {getUserMedia: constraints => {
       requested = constraints; cameraCalls++; return pending;
@@ -52,12 +57,19 @@ function setup({permission = true, delayed = false} = {}) {
     setInterval: fn => { timer = fn; return 1; },
     clearInterval: () => { timer = null; },
     setTimeout, clearTimeout,
-    dokuCaptureGuidance: {evaluate: () => null}
+    dokuCaptureGuidance: {evaluate: () => null},
+    dokuLiveStability: stability,
+    dokuLiveOcr: withOcr ? {create: onResult => {
+      ocrResult = onResult;
+      return {sample() {}, stop() {}};
+    }} : undefined
   });
   vm.runInContext(source, context);
   return {api: context.dokuLiveCamera, context, nodes, buttons, tracks, stream,
     get requested() { return requested; }, get cameraCalls() { return cameraCalls; },
     get timer() { return timer; }, docEvents, pageEvents, requestResolve, requestReject,
+    advance(ms) { clock.now += ms; },
+    emitOcr(observation) { assert.equal(typeof ocrResult, 'function'); ocrResult(observation); },
     button(label) { const b = buttons.find(b => b.textContent.startsWith(label));
       assert.ok(b, 'Missing '+label); return b; }};
 }
@@ -171,4 +183,31 @@ test('native picker cancellation releases the session without a fake photo', asy
   assert.equal(await pending, null);
   assert.equal(s.tracks[0].stopped, true);
   assert.equal(s.nodes.length, 0);
+});
+
+
+test('live OCR status counts independent frames, resets motion and expires stale boxes', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  const panel = s.nodes[0];
+  const status = panel.children[2];
+  const overlay = panel.children[1].children[1];
+  const observation = sequence => ({sequence, width: 1200, height: 675,
+    boxes: [{x0: 50, y0: 70, x1: 250, y1: 120}],
+    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true});
+  s.emitOcr(observation(1));
+  assert.match(status.textContent, /Tek kare adayı/);
+  assert.equal(overlay.children.length, 1);
+  s.advance(2000);
+  s.emitOcr(observation(2));
+  assert.match(status.textContent, /2 ayrı OCR karesinde/);
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.advance(7000);
+  s.timer();
+  assert.match(status.textContent, /Gri/);
+  assert.equal(overlay.children.length, 0, 'stale OCR boxes must disappear');
+  s.api.cancel();
+  assert.equal(await pending, null);
 });
