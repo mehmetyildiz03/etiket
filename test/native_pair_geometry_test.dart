@@ -34,6 +34,14 @@ void main() {
     expect(result.center!.dy, greaterThan(.6));
   });
 
+  test('12MP still-sized stream coordinates remain supported', () {
+    final result = assessNativePairGeometry(
+      imageSize: const Size(3024, 4032),
+      pairLineBoxes: [const Rect.fromLTWH(700, 1400, 900, 80)]);
+    expect(result.hint, NativeFramingHint.steady);
+    expect(result.center, isNotNull);
+  });
+
   test('invalid, empty and out-of-frame boxes fail closed', () {
     for (final boxes in <List<Rect>>[
       [], [const Rect.fromLTWH(-2, 20, 50, 50)],
