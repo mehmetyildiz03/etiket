@@ -72,6 +72,13 @@ test('multi-fiber line never pairs a percentage with the neighboring fiber', () 
     ['80:pamuk', '20:keten']);
 });
 
+test('malformed three/four digit ratios never yield a truncated percentage', () => {
+  const s = setup();
+  const out = s.api.extract(result(line('120% PAMUK'),
+    line('1000% KETEN'), line('PAMUK 120%')).data, 1200, 675, 1, 1);
+  assert.equal(out.cues.length, 0);
+});
+
 test('separate line percent and fiber, blank text and invalid boxes never create cues', () => {
   const s = setup();
   const out = s.api.extract(result(line('80%'), line('PAMUK'),
