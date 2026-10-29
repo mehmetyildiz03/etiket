@@ -46,10 +46,11 @@
     function view(now) {
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
         clear();
-        return {cues: [], boxes: [], textPresent: false, stableFrames: 0,
+        return {cues: [], boxes: [], pairBoxes: [], textPresent: false, stableFrames: 0,
           moved: false, stale: true, level: 'gray', sequence: -1};
       }
       return {cues: observation.cues, boxes: observation.boxes,
+        pairBoxes: observation.pairBoxes,
         width: observation.width, height: observation.height, sequence: lastSequence,
         textPresent: observation.textPresent, stableFrames, moved,
         stale: false, level: observation.textPresent ? 'yellow' : 'gray'};
@@ -74,6 +75,11 @@
         b && [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) &&
         b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
         b.x1 <= next.width && b.y1 <= next.height).slice(0, 24) : [];
+      // Never highlight an invented/unrelated rectangle as a matched pair:
+      // its coordinates must be one of the retained, valid OCR line boxes.
+      const pairBoxes = Array.isArray(next.pairBoxes) ? next.pairBoxes.filter(b =>
+        b && boxes.some(line => line.x0 === b.x0 && line.y0 === b.y0 &&
+          line.x1 === b.x1 && line.y1 === b.y1)).slice(0, 24) : [];
       const hasGeometry = Number.isFinite(next.width) && next.width > 0 &&
         Number.isFinite(next.height) && next.height > 0 && boxes.length > 0;
       const bounds = hasGeometry ? {
@@ -93,7 +99,7 @@
       fingerprint = nextFingerprint;
       center = bounds;
       lastTime = now;
-      observation = {cues, boxes, width: next.width, height: next.height,
+      observation = {cues, boxes, pairBoxes, width: next.width, height: next.height,
         textPresent: next.textPresent === true || cues.length > 0};
       return view(now);
     }
