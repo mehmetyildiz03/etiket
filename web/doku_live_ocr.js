@@ -35,9 +35,9 @@
           // Do not infer missing %, section, full-label coverage or correctness.
           // Select a single reading order per line. Running both regexes
           // would invent "20% PAMUK" from "80% PAMUK 20% KETEN".
-          const firstRatio = value.search(/(?:%\\s*\\d{1,3}|\\d{1,3}\\s*%)/u);
+          const firstRatio = value.search(/(?:%\s*\d{1,3}|\d{1,3}\s*%)/u);
           const firstFiber = value.search(new RegExp(
-            '(?:^|[^\\\\p{L}])(?:' + fibers + ')(?![\\\\p{L}])', 'iu'));
+            '(?:^|[^\\p{L}])(?:' + fibers + ')(?![\\p{L}])', 'iu'));
           if (firstRatio < 0 || firstFiber < 0) continue;
           const ratioFirst = firstRatio <= firstFiber;
           const pattern = ratioFirst ? before : after;
