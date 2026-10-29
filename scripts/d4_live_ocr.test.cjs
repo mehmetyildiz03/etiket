@@ -82,7 +82,7 @@ test('malformed three/four digit ratios never yield a truncated percentage', () 
 test('separate line percent and fiber, blank text and invalid boxes never create cues', () => {
   const s = setup();
   const out = s.api.extract(result(line('80%'), line('PAMUK'),
-    line(' ', {x0: -1, y0: 0, x1: 2, y1: 3})).data, 100, 100, 1, 1);
+    line(' ', {x0: -1, y0: 0, x1: 2, y1: 3})).data, 300, 100, 1, 1);
   assert.equal(out.cues.length, 0);
   assert.equal(out.boxes.length, 2);
   assert.equal(out.textPresent, true);
