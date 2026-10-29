@@ -6,6 +6,30 @@ import 'package:etiket/scan/native_pair_geometry.dart';
 void main() {
   const portrait = Size(1080, 1920);
 
+  test('Android OCR box dimensions follow the exact input rotation', () {
+    for (final angle in [90, 270]) {
+      expect(nativeOcrImageSize(width: 1920, height: 1080,
+        rotationDegrees: angle, android: true), portrait);
+    }
+    for (final angle in [0, 180]) {
+      expect(nativeOcrImageSize(width: 1920, height: 1080,
+        rotationDegrees: angle, android: true), const Size(1920, 1080));
+    }
+    // iOS geometry must not speculate about rotated boxes; its framing
+    // remains disabled pending real-device orientation calibration.
+    expect(nativeOcrImageSize(width: 1920, height: 1080,
+      rotationDegrees: 90, android: false), const Size(1920, 1080));
+  });
+
+  test('malformed orientation and dimensions fail closed', () {
+    expect(nativeOcrImageSize(width: 1920, height: 1080,
+      rotationDegrees: 45, android: true), isNull);
+    expect(nativeOcrImageSize(width: 0, height: 1080,
+      rotationDegrees: 90, android: true), isNull);
+    expect(nativeOcrImageSize(width: 9000, height: 9000,
+      rotationDegrees: 90, android: true), isNull);
+  });
+
   test('small matched line asks for closer focus, not green', () {
     final result = assessNativePairGeometry(imageSize: portrait,
       pairLineBoxes: [const Rect.fromLTWH(200, 600, 380, 24)]);
