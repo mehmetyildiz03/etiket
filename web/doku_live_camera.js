@@ -90,6 +90,7 @@
     return new Promise((resolve, reject) => {
       let done = false, stream = null, interval = null, capturing = false;
       let liveScanner = null, lastMetrics = null;
+      let torchTrack = null, torchEnabled = false, torchBusy = false;
       const stability = root.dokuLiveStability?.create?.() || null;
       let usingSystemPicker = false;
       const panel = doc.createElement('div');
@@ -156,6 +157,7 @@
         }
         status.style.color = liveScanner && (reading.cues.length || reading.textPresent)
           ? '#ffd45c' : '#c4cbd0';
+        if (torchEnabled) message += ' Kamera ışığı açık.';
         // Avoid repeating the same aria-live announcement every 700ms.
         if (status.textContent !== message) status.textContent = message;
       };
@@ -207,6 +209,8 @@
         }
         try { video.pause(); } catch (_) { /* Failed startup. */ }
         video.srcObject = null;
+        torchTrack = null;
+        torchEnabled = false;
       };
       const close = (value, failure) => {
         if (done) return;
@@ -258,6 +262,37 @@
           if (!done) { capturing = false; status.textContent = 'Çekim başarısız. Tekrar dene veya sistem kamerasını kullan.'; }
         }
       });
+      // Hardware torch is an optional local camera capability (often absent
+      // in Safari). Never request it on unsupported tracks or treat it as OCR
+      // confidence. Stopping the track also releases the light.
+      const torchButton = button('Kamera ışığını aç', async () => {
+        const track = torchTrack;
+        if (!track || torchBusy || done || capturing || usingSystemPicker ||
+            track.readyState === 'ended') return;
+        torchBusy = true;
+        torchButton.disabled = true;
+        try {
+          const next = !torchEnabled;
+          await track.applyConstraints({advanced: [{torch: next}]});
+          if (done || usingSystemPicker || torchTrack !== track) return;
+          torchEnabled = next;
+          torchButton.textContent = next ? 'Kamera ışığını kapat' : 'Kamera ışığını aç';
+          torchButton.setAttribute('aria-pressed', String(next));
+          renderStatus();
+        } catch (_) {
+          // Some browsers report torch support but reject constraints.
+          // Keep preview, OCR and the high-resolution system picker usable.
+          if (!done && !usingSystemPicker) {
+            torchButton.style.display = 'none';
+            status.textContent = 'Kamera ışığı kontrol edilemiyor; ortam ışığını artır veya sistem kamerasını kullan.';
+          }
+        } finally {
+          torchBusy = false;
+          torchButton.disabled = false;
+        }
+      });
+      torchButton.style.display = 'none';
+      torchButton.setAttribute('aria-pressed', 'false');
       button('Sistem kamerası (yüksek çözünürlük)', () => {
         // Native camera may return focus well before its file change event.
         // Never auto-close on focus: a slow still photo must not be discarded.
@@ -288,6 +323,14 @@
         if (done || usingSystemPicker) { got.getTracks().forEach(track => track.stop()); return; }
         stream = got;
         video.srcObject = stream;
+        try {
+          const track = got.getVideoTracks()[0];
+          if (track && typeof track.applyConstraints === 'function' &&
+              track.getCapabilities?.().torch === true) {
+            torchTrack = track;
+            torchButton.style.display = '';
+          }
+        } catch (_) { /* Safari or device does not expose torch capability. */ }
         Promise.resolve(video.play()).catch(() => {});
         liveScanner = root.dokuLiveOcr?.create?.(
           observation => {
