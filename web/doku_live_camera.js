@@ -74,17 +74,26 @@
       status.setAttribute('aria-live', 'polite');
       status.style.cssText = 'margin:0;text-align:center;max-width:560px;font-size:14px';
       status.textContent = 'Kamera hazırlanıyor… Canlı OCR henüz etkin değil; çekimden sonra metni doğrula.';
-      const adviceFor = metrics => {
+      const adviceFor = (metrics, reading) => {
         const hint = root.dokuCaptureGuidance?.evaluate?.(metrics);
-        return hint === 'veryDark' ? 'Işığı artır.'
-          : hint === 'veryBright' ? 'Parlamayı azalt.'
-          : hint === 'lowDetail' ? 'Etiketi yaklaştır ve odakla.'
-          : 'Etiketi kadraja al, kamerayı sabit tut.';
+        if (hint === 'veryDark') return 'Işığı artır.';
+        if (hint === 'veryBright') return 'Parlamayı azalt.';
+        if (hint === 'lowDetail') return 'Etiketi yaklaştır ve odakla.';
+        // A visible OCR line at the edge suggests possible clipping, not
+        // proof that the label is incomplete. Never authorize green here.
+        const geometry = root.dokuLiveStability?.geometryHint?.(reading);
+        if (geometry === 'edgeText') {
+          return 'Görünen yazı kadraj kenarında; biraz uzaklaş ve tüm etiketi göster.';
+        }
+        if (geometry === 'smallText') {
+          return 'Yazılar kadrajda küçük; etikete yaklaş, sabitle ve odakla.';
+        }
+        return 'Etiketi kadraja al, kamerayı sabit tut.';
       };
       const renderStatus = () => {
-        const advice = adviceFor(lastMetrics);
         const reading = stability?.view(Date.now()) ||
           {cues: [], textPresent: false, stableFrames: 0, stale: true};
+        const advice = adviceFor(lastMetrics, reading);
         if (reading.stale) overlay.replaceChildren();
         let message;
         if (!liveScanner) {
