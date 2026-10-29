@@ -275,3 +275,42 @@ test('live camera distinguishes ordinary text from exact pair lines without gree
   s.api.cancel();
   assert.equal(await pending, null);
 });
+
+
+test('live quality uses observed OCR text pixels instead of dark surroundings', () => {
+  const s = setup();
+  const canvas = {
+    width: 0, height: 0,
+    getContext() {
+      return {drawImage() {}, getImageData: (_x, _y, w, h) => {
+        const data = new Uint8ClampedArray(w * h * 4);
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+          const v = x >= 60 && x < 100 && y >= 35 && y < 55
+            ? (x % 5 === 0 ? 25 : 240) : 8;
+          const p = (y * w + x) * 4;
+          data[p] = data[p + 1] = data[p + 2] = v;
+          data[p + 3] = 255;
+        }
+        return {data};
+      }};
+    }
+  };
+  const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
+  const reading = {stale: false, width: 1200, height: 675,
+    boxes: [{x0: 450, y0: 260, x1: 750, y1: 410}],
+    pairBoxes: [{x0: 450, y0: 260, x1: 750, y1: 410}]};
+  const measured = s.api.sampleQuality(video, canvas, reading);
+  assert.ok(measured.meanLuminance < 30, 'dark surroundings dominate full frame');
+  assert.ok(measured.textMetrics.meanLuminance > 100,
+    'text-region luminance must reflect the visible label');
+  assert.ok(measured.textMetrics.dynamicRange > 100);
+  assert.ok(measured.textMetrics.sampleWidth >= 16);
+  assert.equal('image' in measured, false);
+  assert.equal('rawText' in measured, false);
+  assert.equal(s.api.sampleQuality(video, canvas, {...reading, stale: true}).textMetrics,
+    null, 'stale OCR geometry cannot drive image-quality advice');
+  assert.equal(s.api.sampleQuality(video, canvas, {...reading,
+    pairBoxes: [{x0: -10, y0: 0, x1: 20, y1: 30}],
+    boxes: [{x0: -10, y0: 0, x1: 20, y1: 30}]}).textMetrics, null,
+  'invalid geometry cannot drive image-quality advice');
+});
