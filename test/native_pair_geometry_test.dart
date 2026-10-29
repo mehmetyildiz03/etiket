@@ -24,7 +24,10 @@ void main() {
       pairLineBoxes: [const Rect.fromLTWH(200, 500, 400, 60),
                       const Rect.fromLTWH(200, 600, 400, 60)]);
     expect(result.hint, NativeFramingHint.steady);
-    expect(result.center, const Offset(400 / 1080, 580 / 1920));
+    // Floating-point accumulation can differ by a few ULPs from division.
+    expect(result.center, isNotNull);
+    expect(result.center!.dx, closeTo(400 / 1080, 1e-12));
+    expect(result.center!.dy, closeTo(580 / 1920, 1e-12));
   });
 
   test('rotated image dimensions are used, never raw landscape dimensions', () {
