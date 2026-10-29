@@ -100,6 +100,7 @@
         if (interval !== null) root.clearInterval(interval);
         if (pickerTimer !== null) root.clearTimeout(pickerTimer);
         doc.removeEventListener('visibilitychange', hidden);
+        doc.removeEventListener('keydown', onKeyDown);
         root.removeEventListener('pagehide', pagehide);
         root.removeEventListener('focus', onFocus);
         stopStream();
@@ -109,10 +110,11 @@
         failure ? reject(failure) : resolve(value);
       };
       const hidden = () => { if (doc.hidden && !usingSystemPicker) close(null); };
+      const onKeyDown = event => { if (event.key === 'Escape') close(null); };
       const pagehide = () => close(null);
       const session = {cancel: () => close(null)};
       active = session;
-      button('Fotoğrafı çek', async () => {
+      const captureButton = button('Fotoğrafı çek', async () => {
         if (capturing || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
         status.textContent = 'Fotoğraf hazırlanıyor…';
@@ -158,6 +160,8 @@
       panel.appendChild(actions);
       doc.body.appendChild(panel);
       doc.addEventListener('visibilitychange', hidden);
+      doc.addEventListener('keydown', onKeyDown);
+      captureButton.focus?.();
       root.addEventListener('pagehide', pagehide);
       root.addEventListener('focus', onFocus);
       root.navigator.mediaDevices.getUserMedia({audio: false, video: {
