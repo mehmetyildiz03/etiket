@@ -232,3 +232,22 @@ test('late OCR callback clears old boxes and never displays an outdated pair', a
   s.api.cancel();
   assert.equal(await pending, null);
 });
+
+test('live OCR gives concrete camera-distance advice from observed text geometry', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const status = s.nodes[0].children[2];
+  const reading = (sequence, box) => ({
+    sequence, width: 1200, height: 675, textPresent: true,
+    boxes: [box], cues: [{percent: 80, fiber: 'pamuk'}]
+  });
+  s.emitOcr(reading(1, {x0: 2, y0: 70, x1: 250, y1: 120}));
+  assert.match(status.textContent, /kadraj kenarında; biraz uzaklaş/);
+  s.advance(2000);
+  s.emitOcr(reading(2, {x0: 50, y0: 70, x1: 250, y1: 78}));
+  assert.match(status.textContent, /etikete yaklaş, sabitle ve odakla/);
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
