@@ -33,6 +33,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   List<String> _pairs = const [];
   String _fingerprint = '';
   Offset? _lastCenter;
+  Map<String, Rect>? _lastPairBoxes;
+  int? _lastPairRotation;
   String _advice = 'Etiketi kameraya getir.';
   String? _error;
   bool _textPresent = false;
@@ -50,6 +52,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           _textPresent = false;
           _fingerprint = '';
           _lastCenter = null;
+          _lastPairBoxes = null;
+          _lastPairRotation = null;
           _stableFrames = 0;
           _advice = 'Önceki okuma eskidi. Etiketi sabitle ve tekrar odakla.';
         });
@@ -182,17 +186,25 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         : assessLiveLuminance(samples);
   }
 
-  ({List<String> pairs, Offset? center, NativeFramingHint framing})
+  ({List<String> pairs, Offset? center, NativeFramingHint framing,
+      Map<String, Rect>? trackedBoxes})
       _extract(RecognizedText recognized, CameraImage frame,
           int rotationDegrees) {
     final pairs = <String>[];
     final boxes = <Rect>[];
+    final pairBoxes = <String, Rect>{};
+    var duplicatePair = false;
     for (final block in recognized.blocks) {
       for (final line in block.lines) {
         final matches = livePairsFromLine(line.text);
         if (matches.isEmpty) continue;
         for (final pair in matches) {
           if (!pairs.contains(pair) && pairs.length < 8) pairs.add(pair);
+          if (pairBoxes.containsKey(pair)) {
+            duplicatePair = true;
+          } else {
+            pairBoxes[pair] = line.boundingBox;
+          }
         }
         boxes.add(line.boundingBox);
       }
@@ -207,8 +219,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         ? const NativePairGeometry(null, NativeFramingHint.unknown)
         : assessNativePairGeometry(
             imageSize: dimensions, pairLineBoxes: boxes);
+    final trackedBoxes = dimensions == null ? null : normalizeNativePairBoxes(
+        imageSize: dimensions, pairBoxes: pairBoxes,
+        duplicatePair: duplicatePair);
     return (pairs: pairs, center: geometry.center,
-        framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown);
+        framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown,
+        trackedBoxes: trackedBoxes);
   }
 
   void _onFrame(CameraImage frame) {
@@ -257,7 +273,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       final drift = _lastCenter != null && result.center != null &&
           (_lastCenter! - result.center!).distance > .15;
       final withinGap = DateTime.now().difference(_lastResult).inMilliseconds <= 5000;
-      final stable = key.isNotEmpty && key == _fingerprint && !drift && withinGap;
+      final goodObservation = quality == LiveFrameQuality.usable &&
+          result.trackedBoxes != null;
+      final stable = goodObservation && key.isNotEmpty &&
+          key == _fingerprint && !drift && withinGap &&
+          _lastPairRotation == rotationDegrees &&
+          nativePairBoxesAgree(_lastPairBoxes, result.trackedBoxes);
       setState(() {
         _pairs = result.pairs;
         _textPresent = recognized.text.trim().isNotEmpty;
@@ -272,9 +293,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                   'Eşleşen satır görünüyor. Tüm etiketi kadraja al ve sabitle.',
                 NativeFramingHint.unknown => liveQualityAdvice(quality),
               };
-        _stableFrames = key.isEmpty ? 0 : stable ? _stableFrames + 1 : 1;
-        _fingerprint = key;
-        _lastCenter = result.center;
+        _stableFrames = !goodObservation || key.isEmpty
+            ? 0 : stable ? _stableFrames + 1 : 1;
+        _fingerprint = goodObservation ? key : '';
+        _lastCenter = goodObservation ? result.center : null;
+        _lastPairBoxes = goodObservation ? result.trackedBoxes : null;
+        _lastPairRotation = goodObservation ? rotationDegrees : null;
         _lastResult = DateTime.now();
       });
     } catch (_) {
@@ -284,6 +308,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           _textPresent = false;
           _fingerprint = '';
           _lastCenter = null;
+          _lastPairBoxes = null;
+          _lastPairRotation = null;
           _stableFrames = 0;
           _advice = 'Canlı okuma yapılamadı. Sistem kamerasıyla çekmeyi dene.';
         });
@@ -319,6 +345,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     _textPresent = false;
     _fingerprint = '';
     _lastCenter = null;
+    _lastPairBoxes = null;
+    _lastPairRotation = null;
     _stableFrames = 0;
     final camera = _controller;
     final recognizer = _recognizer;
