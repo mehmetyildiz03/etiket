@@ -70,3 +70,28 @@ test('out-of-order and duplicate OCR frames cannot replace accepted geometry', (
   assert.equal(repeated.boxes[0].x0, first.boxes[0].x0);
   assert.equal(s.observe(sample(9), 1200).sequence, 10);
 });
+
+test('camera geometry advice is based on real line boxes, never a green decision', () => {
+  const s = create();
+  const edge = s.observe({...sample(1), boxes: [box(1)]}, 1000);
+  assert.equal(require('../web/doku_live_stability.js').geometryHint(edge), 'edgeText');
+  const small = s.observe({...sample(2), boxes: [
+    {x0: 50, y0: 50, x1: 150, y1: 56}
+  ]}, 2000);
+  assert.equal(require('../web/doku_live_stability.js').geometryHint(small), 'smallText');
+  assert.equal(small.level, 'yellow');
+  const normal = s.observe(sample(3), 3000);
+  assert.equal(require('../web/doku_live_stability.js').geometryHint(normal), null);
+  const stale = s.view(10000);
+  assert.equal(require('../web/doku_live_stability.js').geometryHint(stale), null);
+  assert.equal(stale.level, 'gray');
+});
+
+test('invalid OCR geometry cannot trigger framing advice', () => {
+  const {geometryHint} = require('../web/doku_live_stability.js');
+  assert.equal(geometryHint({width: 1200, height: 675,
+    boxes: [{x0: -2, y0: 0, x1: 50, y1: 30}]}), null);
+  assert.equal(geometryHint({width: NaN, height: 675,
+    boxes: [{x0: 0, y0: 0, x1: 50, y1: 30}]}), null);
+  assert.equal(geometryHint({width: 1200, height: 675, boxes: []}), null);
+});
