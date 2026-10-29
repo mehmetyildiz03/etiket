@@ -27,6 +27,11 @@ jobs:
           flutter-version: ${{ steps.flutter-version.outputs.version }}
           cache: true
       - run: flutter pub get
+      - name: Report resolved public dependency lock for reproducibility
+        run: |
+          echo 'DOKU_LOCK_BEGIN'
+          cat pubspec.lock
+          echo 'DOKU_LOCK_END'
       - run: flutter analyze
       - run: flutter test
       - run: flutter build apk --debug
