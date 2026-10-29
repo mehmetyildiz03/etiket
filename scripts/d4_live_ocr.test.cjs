@@ -60,6 +60,18 @@ test('same-line literal fiber+percentage cues only, no invented pairs', () => {
   assert.equal('rawText' in out, false);
 });
 
+test('multi-fiber line never pairs a percentage with the neighboring fiber', () => {
+  const s = setup();
+  const forward = s.api.extract(result(line('80% PAMUK 20% KETEN')).data,
+    1200, 675, 1, 1);
+  assert.deepEqual(Array.from(forward.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk', '20:keten']);
+  const reverse = s.api.extract(result(line('PAMUK 80% KETEN 20%')).data,
+    1200, 675, 2, 1);
+  assert.deepEqual(Array.from(reverse.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk', '20:keten']);
+});
+
 test('separate line percent and fiber, blank text and invalid boxes never create cues', () => {
   const s = setup();
   const out = s.api.extract(result(line('80%'), line('PAMUK'),
