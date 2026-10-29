@@ -16,7 +16,7 @@
   const after = new RegExp('(?:^|[^\\p{L}])(' + fibers + ')\\s*(?:%\\s*(' + number + ')|(' + number + ')\\s*%)', 'giu');
 
   function extract(data, width, height, sequence, durationMs) {
-    const boxes = [], cues = [], unique = new Set();
+    const boxes = [], pairBoxes = [], cues = [], unique = new Set();
     let textPresent = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
     for (const block of blocks) {
@@ -26,11 +26,12 @@
           if (!value.trim()) continue;
           textPresent = true;
           const bb = line.bbox;
-          if (bb && [bb.x0, bb.y0, bb.x1, bb.y1].every(Number.isFinite) &&
-              bb.x0 >= 0 && bb.y0 >= 0 && bb.x1 > bb.x0 && bb.y1 > bb.y0 &&
-              bb.x1 <= width && bb.y1 <= height && boxes.length < 24) {
-            boxes.push({x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1});
-          }
+          const validBox = bb && [bb.x0, bb.y0, bb.x1, bb.y1].every(Number.isFinite) &&
+            bb.x0 >= 0 && bb.y0 >= 0 && bb.x1 > bb.x0 && bb.y1 > bb.y0 &&
+            bb.x1 <= width && bb.y1 <= height;
+          // Only a visible, retained OCR line can receive a matched-pair box.
+          const retainedBox = validBox && boxes.length < 24;
+          if (retainedBox) boxes.push({x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1});
           // Only literal percent-marked fiber pairs on the SAME OCR line.
           // Do not infer missing %, section, full-label coverage or correctness.
           // Select a single reading order per line. Running both regexes
@@ -44,23 +45,30 @@
           const fiberIndex = ratioFirst ? 3 : 1;
           const percentIndices = ratioFirst ? [1, 2] : [2, 3];
           {
+            let lineHasPair = false;
             pattern.lastIndex = 0;
             for (const match of value.matchAll(pattern)) {
               const percent = Number(match[percentIndices[0]] || match[percentIndices[1]]);
               const fiber = match[fiberIndex].toLocaleLowerCase('tr');
               if (!(percent > 0 && percent <= 100)) continue;
+              lineHasPair = true;
               const key = percent + ':' + fiber;
               if (!unique.has(key) && cues.length < 8) {
                 unique.add(key);
                 cues.push({percent, fiber});
               }
             }
+            // Distinguish actual same-line ratio+fiber matches from unrelated
+            // OCR text. This geometry is advisory and never verifies a pair.
+            if (lineHasPair && retainedBox) {
+              pairBoxes.push({x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1});
+            }
           }
         }
       }
     }
     // Tesseract's raw text is intentionally not returned to the camera UI.
-    return {boxes, cues, textPresent, width, height, sequence, durationMs};
+    return {boxes, pairBoxes, cues, textPresent, width, height, sequence, durationMs};
   }
 
   function create(onResult, onError) {

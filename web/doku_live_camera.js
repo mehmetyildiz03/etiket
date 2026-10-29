@@ -125,15 +125,22 @@
         const drawnW = video.videoWidth * scale, drawnH = video.videoHeight * scale;
         const offsetX = (video.clientWidth - drawnW) / 2;
         const offsetY = (video.clientHeight - drawnH) / 2;
-        for (const bb of observation.boxes) {
-          const mark = doc.createElement('div');
-          mark.style.cssText = 'position:absolute;box-sizing:border-box;border:2px solid #ffd45c;border-radius:3px';
-          mark.style.left = (offsetX + bb.x0 / observation.width * drawnW) + 'px';
-          mark.style.top = (offsetY + bb.y0 / observation.height * drawnH) + 'px';
-          mark.style.width = ((bb.x1 - bb.x0) / observation.width * drawnW) + 'px';
-          mark.style.height = ((bb.y1 - bb.y0) / observation.height * drawnH) + 'px';
-          overlay.appendChild(mark);
-        }
+        const paint = (boxes, border) => {
+          for (const bb of boxes) {
+            const mark = doc.createElement('div');
+            mark.style.cssText = 'position:absolute;box-sizing:border-box;border:' +
+              border + ';border-radius:3px';
+            mark.style.left = (offsetX + bb.x0 / observation.width * drawnW) + 'px';
+            mark.style.top = (offsetY + bb.y0 / observation.height * drawnH) + 'px';
+            mark.style.width = ((bb.x1 - bb.x0) / observation.width * drawnW) + 'px';
+            mark.style.height = ((bb.y1 - bb.y0) / observation.height * drawnH) + 'px';
+            overlay.appendChild(mark);
+          }
+        };
+        // Gray dashed = any detected text; yellow solid = same-line
+        // percentage+fiber candidate. Neither is a verification signal.
+        paint(observation.boxes, '2px dashed #c4cbd0');
+        paint(observation.pairBoxes || [], '3px solid #ffd45c');
       };
       const actions = doc.createElement('div');
       actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:center';

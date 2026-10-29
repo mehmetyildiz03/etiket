@@ -140,3 +140,30 @@ test('insecure context disables live OCR without preventing camera fallback', ()
   // A module's availability does not authorize photo selection or uploads.
   assert.equal(s.api.extract({blocks: []}, 100, 100, 1, 0).cues.length, 0);
 });
+
+test('matched-line boxes identify real same-line pairs, not unrelated OCR lines', () => {
+  const s = setup();
+  const paired = {x0: 20, y0: 60, x1: 250, y1: 90};
+  const other = {x0: 20, y0: 100, x1: 250, y1: 130};
+  const data = result(line('80% PAMUK 20% KETEN', paired),
+    line('HAND WASH ONLY', other), line('100%', other), line('POLYESTER', other));
+  const out = s.api.extract(data.data, 1200, 675, 1, 80);
+  assert.equal(out.cues.length, 2);
+  assert.equal(out.boxes.length, 4);
+  assert.equal(out.pairBoxes.length, 1, 'one matched OCR line, not one box per cue');
+  assert.equal(out.pairBoxes[0].y0, paired.y0);
+  assert.equal(out.pairBoxes[0].y1, paired.y1);
+  assert.equal('verified' in out, false);
+});
+
+test('invalid or overflowed OCR line boxes cannot be highlighted as pairs', () => {
+  const s = setup();
+  const lines = Array.from({length: 24}, (_, i) =>
+    line('CARE ' + i, {x0: 10, y0: i * 15, x1: 150, y1: i * 15 + 12}));
+  lines.push(line('80% PAMUK', {x0: 10, y0: 380, x1: 150, y1: 400}));
+  lines.push(line('20% KETEN', {x0: -10, y0: 400, x1: 150, y1: 430}));
+  const out = s.api.extract(result(...lines).data, 1200, 675, 1, 80);
+  assert.equal(out.cues.length, 2, 'candidates may be shown without a valid box');
+  assert.equal(out.boxes.length, 24);
+  assert.equal(out.pairBoxes.length, 0, 'never highlight a box not retained as visible text');
+});

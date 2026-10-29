@@ -251,3 +251,27 @@ test('live OCR gives concrete camera-distance advice from observed text geometry
   s.api.cancel();
   assert.equal(await pending, null);
 });
+
+test('live camera distinguishes ordinary text from exact pair lines without green', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const panel = s.nodes[0];
+  const overlay = panel.children[1].children[1];
+  const status = panel.children[2];
+  const matched = {x0: 50, y0: 70, x1: 250, y1: 120};
+  const other = {x0: 50, y0: 140, x1: 250, y1: 180};
+  s.emitOcr({sequence: 1, width: 1200, height: 675, textPresent: true,
+    boxes: [matched, other], pairBoxes: [matched],
+    cues: [{percent: 80, fiber: 'pamuk'}]});
+  assert.equal(overlay.children.length, 3);
+  assert.match(overlay.children[0].style.cssText, /dashed #c4cbd0/);
+  assert.match(overlay.children[1].style.cssText, /dashed #c4cbd0/);
+  assert.match(overlay.children[2].style.cssText, /solid #ffd45c/);
+  assert.match(status.textContent, /Sarı/);
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.advance(7000); s.timer();
+  assert.equal(overlay.children.length, 0);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
