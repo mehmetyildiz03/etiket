@@ -13,7 +13,7 @@
   const available = () => !!(root.isSecureContext && root.navigator?.mediaDevices?.getUserMedia
     && root.document?.createElement);
 
-  function sampleQuality(video, canvas) {
+  function sampleQuality(video, canvas, reading = null) {
     if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
     const scale = 160 / Math.max(video.videoWidth, video.videoHeight);
     const w = Math.max(16, Math.round(video.videoWidth * scale));
@@ -25,20 +25,62 @@
     const pixels = ctx.getImageData(0, 0, w, h).data;
     let total = 0, min = 255, max = 0, edges = 0;
     const previous = new Uint8Array(w);
+    const lumas = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) {
       let left = 0;
       for (let x = 0; x < w; x++) {
         const p = (y * w + x) * 4;
         const luma = Math.round(.299 * pixels[p] + .587 * pixels[p + 1] + .114 * pixels[p + 2]);
+        lumas[y * w + x] = luma;
         total += luma; min = Math.min(min, luma); max = Math.max(max, luma);
         if (x) edges += Math.abs(luma - left);
         if (y) edges += Math.abs(luma - previous[x]);
         previous[x] = luma; left = luma;
       }
     }
-    // Numeric hints only; do not infer focus or OCR confidence from sharpness.
+    // Sample the actual OCR text region, not only the surrounding garment or
+    // dark background. OCR rectangles are unverified and used for advice only.
+    // Stale, invalid and tiny regions are ignored; no pixels are persisted.
+    let textMetrics = null;
+    if (reading && reading.stale === false &&
+        Number.isFinite(reading.width) && reading.width > 0 &&
+        Number.isFinite(reading.height) && reading.height > 0) {
+      const source = Array.isArray(reading.pairBoxes) && reading.pairBoxes.length
+        ? reading.pairBoxes : reading.boxes;
+      const valid = Array.isArray(source) ? source.filter(b => b &&
+        [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) &&
+        b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
+        b.x1 <= reading.width && b.y1 <= reading.height).slice(0, 24) : [];
+      if (valid.length) {
+        const left = Math.max(0, Math.floor(Math.min(...valid.map(b => b.x0)) /
+          reading.width * w) - 5);
+        const right = Math.min(w, Math.ceil(Math.max(...valid.map(b => b.x1)) /
+          reading.width * w) + 5);
+        const top = Math.max(0, Math.floor(Math.min(...valid.map(b => b.y0)) /
+          reading.height * h) - 5);
+        const bottom = Math.min(h, Math.ceil(Math.max(...valid.map(b => b.y1)) /
+          reading.height * h) + 5);
+        const rw = right - left, rh = bottom - top;
+        if (rw >= 16 && rh >= 16) {
+          let sum = 0, lo = 255, hi = 0, detail = 0;
+          for (let y = top; y < bottom; y++) {
+            for (let x = left; x < right; x++) {
+              const value = lumas[y * w + x];
+              sum += value; lo = Math.min(lo, value); hi = Math.max(hi, value);
+              if (x > left) detail += Math.abs(value - lumas[y * w + x - 1]);
+              if (y > top) detail += Math.abs(value - lumas[(y - 1) * w + x]);
+            }
+          }
+          textMetrics = {meanLuminance: sum / (rw * rh),
+            dynamicRange: hi - lo, edgeEnergy: detail / (2 * rw * rh),
+            sampleWidth: rw, sampleHeight: rh};
+        }
+      }
+    }
+    // Numeric hints only; neither the text region nor frame verifies OCR.
     return {meanLuminance: total / (w * h), dynamicRange: max - min,
-      edgeEnergy: edges / (2 * w * h), sampleWidth: w, sampleHeight: h};
+      edgeEnergy: edges / (2 * w * h), sampleWidth: w, sampleHeight: h,
+      textMetrics};
   }
 
   function open() {
@@ -75,7 +117,7 @@
       status.style.cssText = 'margin:0;text-align:center;max-width:560px;font-size:14px';
       status.textContent = 'Kamera hazırlanıyor… Canlı OCR henüz etkin değil; çekimden sonra metni doğrula.';
       const adviceFor = (metrics, reading) => {
-        const hint = root.dokuCaptureGuidance?.evaluate?.(metrics);
+        const hint = root.dokuCaptureGuidance?.evaluate?.(metrics?.textMetrics || metrics);
         if (hint === 'veryDark') return 'Işığı artır.';
         if (hint === 'veryBright') return 'Parlamayı azalt.';
         if (hint === 'lowDetail') return 'Etiketi yaklaştır ve odakla.';
@@ -269,7 +311,7 @@
         interval = root.setInterval(() => {
           if (done || capturing) return;
           try {
-            lastMetrics = sampleQuality(video, canvas);
+            lastMetrics = sampleQuality(video, canvas, stability?.view(Date.now()));
             renderStatus();
             // At most one local OCR pass in flight; the scanner drops stale
             // timer ticks and uses a separate bounded 1200px frame.
