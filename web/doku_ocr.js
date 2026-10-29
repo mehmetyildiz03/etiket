@@ -590,7 +590,7 @@
     else if (plausibleLabelText(rawText, 100)) decision = 'lowConfidence';
     else decision = 'noComposition';
     return Object.freeze({rawText, confidence, decision,
-      acceptedText: decision === 'candidate' ? rawText : null, secondReading: null});
+      acceptedText: decision === 'candidate' ? rawText : null, secondReading: null, thirdReading: null});
   }
 
   async function readObservation(path, progress) {
@@ -664,39 +664,40 @@
       if (typeof text !== 'string') throw fail('recognition');
       if (text.length > 20000) throw fail('tooMuchText');
       const observation = observationFor(text, result.data.confidence);
-      // A marginal candidate uses sparse-text PSM 11 as before. When PSM 6
-      // fails to find a composition, try automatic layout PSM 3 once: on
-      // synthetic textile labels this segmentation recovered some printed
-      // percentages that PSM 6 missed. This is NEVER a verified correction:
-      // the first decision, accepted text and user-approval gate stay intact.
-      // Extra work is bounded to one local second pass and only shown after
-      // the user explicitly opens the diagnostics.
-      const alternativePsm = observation.decision === 'candidate'
-        ? (observation.confidence < 65 ? '11' : null)
-        : '3';
-      let secondReading = null;
-      if (alternativePsm !== null) {
+      // A rejected PSM6 photo may be a single sparse label: PSM3 and PSM11
+      // inspect the SAME private image independently. Neither output becomes
+      // the accepted text, and neither is used to infer/choose a percentage.
+      // Both are bounded to one extra local attempt each, only on rejection.
+      const alternatives = observation.decision === 'candidate'
+        ? (observation.confidence < 65 ? ['11'] : [])
+        : ['3', '11'];
+      let secondReading = null, thirdReading = null;
+      for (const alternativePsm of alternatives) {
+        if (!worker || job !== current) break;
         try {
           await worker.setParameters({tessedit_pageseg_mode: alternativePsm});
           if (job !== current) throw fail('canceled');
-          const second = await worker.recognize(photos.get(path).blob, {}, {text:true});
+          const second = await worker.recognize(photos.get(path).blob, {}, {text: true});
           if (job !== current) throw fail('canceled');
           const secondText = second.data.text;
           const secondScore = second.data.confidence;
           if (typeof secondText === 'string' && secondText.trim() &&
-              secondText !== text && secondText.length <= 20000) {
-            secondReading = Object.freeze({
+              secondText !== text && secondText.length <= 20000 &&
+              secondText !== secondReading?.rawText) {
+            const reading = Object.freeze({
               rawText: secondText,
               confidence: Number.isFinite(secondScore) && secondScore >= 0 && secondScore <= 100
                 ? secondScore : null,
               mode: alternativePsm === '11' ? 'sparseText' : 'autoPage'
             });
+            if (!secondReading) secondReading = reading;
+            else thirdReading = reading;
           }
         } catch (error) {
           if (job !== current) throw fail('canceled');
-          // OCR alternatives are best-effort. Never suppress a first-pass
-          // result if switching the secondary page segmentation fails.
+          // One failed alternative cannot promote or overwrite the first pass.
           stopWorker();
+          break;
         } finally {
           if (worker && job === current) {
             try { await worker.setParameters({tessedit_pageseg_mode: '6'}); }
@@ -705,7 +706,7 @@
         }
       }
       if (observation.decision !== 'candidate') stopWorker();
-      return Object.freeze({...observation, secondReading});
+      return Object.freeze({...observation, secondReading, thirdReading});
     };
     try { return await Promise.race([run(), signal]); }
     catch (error) {

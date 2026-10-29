@@ -22,6 +22,7 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
   Widget build(BuildContext context) {
     final observation = widget.observation;
     final second = observation.secondReading;
+    final third = observation.thirdReading;
     final verifiedSparseText = second?.engine == OcrReadingEngine.tesseractJs &&
         second?.variant == OcrReadingVariant.sparseTextPsm11;
     final verifiedAutoPage = second?.engine == OcrReadingEngine.tesseractJs &&
@@ -140,6 +141,43 @@ class _OcrDiagnosticsState extends State<OcrDiagnostics> {
                 child: SelectableText(
                   observation.secondReading!.rawText,
                   key: const ValueKey('second-ocr-diagnostic'),
+                ),
+              ),
+            ),
+          ],
+          if (third != null) ...[
+            const SizedBox(height: 16),
+            const Text(
+              'Üçüncü OCR denemesi — alternatif okuma, doğrulanmamış',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Üçüncü okuma kaynağı: Tesseract.js — seyrek metin (PSM 11).',
+              key: ValueKey('third-ocr-provenance'),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'İlk PSM 6 okuması reddedildi. Bu metin farklı bir sayfa düzeniyle '
+              'üretilmiş alternatif kanıttır; yüzde ve elyaf bilgisi otomatik '
+              'seçilmez veya kabul edilmez. Fotoğraftan elle doğrula.',
+            ),
+            const SizedBox(height: 8),
+            Text(third.confidence == null
+                ? 'Üçüncü okuma güven puanı: mevcut değil.'
+                : 'Üçüncü okuma güven puanı: ${third.confidence!.toStringAsFixed(1)} / 100'),
+            const SizedBox(height: 8),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 200),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                border: Border.all(color: Theme.of(context).colorScheme.primary),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  third.rawText,
+                  key: const ValueKey('third-ocr-diagnostic'),
                 ),
               ),
             ),

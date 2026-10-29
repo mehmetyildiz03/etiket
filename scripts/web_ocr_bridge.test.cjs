@@ -470,7 +470,7 @@ test('diagnostics retain readable non-composition text instead of reporting a bl
   const result=await s.bridge.recognizeSafe(photo.path,()=>{});
   assert.equal(result.text,null);assert.equal(result.code,'emptyText'); // Legacy contract stays compatible.
   assert.deepEqual(JSON.parse(JSON.stringify(result.observation)),{
-    rawText:'PLEASE CLOSE THE DOOR\n',confidence:94,decision:'noComposition',acceptedText:null,secondReading:null
+    rawText:'PLEASE CLOSE THE DOOR\n',confidence:94,decision:'noComposition',acceptedText:null,secondReading:null,thirdReading:null
   });
   s.bridge.dispose();
 });
@@ -511,8 +511,9 @@ test('rejected PSM6 label attempts local PSM3 and keeps manual verification mand
   assert.equal(out.observation.secondReading.mode, 'autoPage');
   assert.equal(out.observation.secondReading.rawText, s.pageText);
   assert.equal(out.observation.secondReading.confidence, 91);
-  assert.equal(s.recognizes, 2, 'one bounded additional page-segmentation attempt');
-  assert.deepEqual(s.recognitionModes, ['6', '3'], 'primary PSM6 is explicit, secondary PSM3 independent');
+  assert.equal(s.recognizes, 3, 'two bounded unverified local alternatives');
+  assert.deepEqual(s.recognitionModes, ['6', '3', '11'], 'PSM6 is primary; PSM3 and PSM11 independently observe the same photo');
+  assert.equal(out.observation.thirdReading, null, 'identical fallback text is not duplicated');
   assert.equal(s.mode, '6', 'PSM is restored even for an initially rejected scan');
   s.bridge.release(photo.path);
   assert.equal(s.blobs.size, 0, 'no persistent user photo');
@@ -533,6 +534,29 @@ test('PSM3 alternative is only diagnostic for no text/no composition, not a fals
   assert.equal(blank.observation.secondReading, null);
   assert.equal(blank.text, null);
   s.bridge.dispose();
+});
+
+test('rejected legible single-line label keeps separate unverified PSM3 and sparse PSM11 readings', async () => {
+  const s = setup(), photo = await s.upload();
+  s.result = 'SYNTHETIC UNREADABLE FRAGMENTS';
+  s.confidence = 35;
+  s.pageText = 'Fiber Sample';
+  s.pageConfidence = 67;
+  s.secondText = '80% Polyester';
+  s.secondConfidence = 75;
+  const out = await s.bridge.recognizeSafe(photo.path, () => {});
+  assert.equal(out.observation.rawText, 'SYNTHETIC UNREADABLE FRAGMENTS');
+  assert.equal(out.observation.decision, 'lowConfidence');
+  assert.equal(out.text, null, 'no candidate auto-selection even when alternative looks complete');
+  assert.equal(out.observation.acceptedText, null);
+  assert.equal(out.observation.secondReading.mode, 'autoPage');
+  assert.equal(out.observation.secondReading.rawText, 'Fiber Sample');
+  assert.equal(out.observation.thirdReading.mode, 'sparseText');
+  assert.equal(out.observation.thirdReading.rawText, '80% Polyester');
+  assert.deepEqual(s.recognitionModes, ['6', '3', '11']);
+  assert.equal(s.mode, '6');
+  s.bridge.release(photo.path);
+  assert.equal(s.blobs.size, 0);
 });
 
 test('weak candidate obtains an independent sparse-text second reading without replacing original', async () => {
