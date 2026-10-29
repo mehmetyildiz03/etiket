@@ -13,6 +13,29 @@
   const available = () => !!(root.isSecureContext && root.navigator?.mediaDevices?.getUserMedia
     && root.document?.createElement);
 
+  // A full-resolution ImageCapture still must fit the SAME private limits as
+  // doku_ocr.adopt(). Otherwise a 48MP/large camera photo would appear to
+  // capture successfully but fail only after leaving the camera. Validate
+  // decoded dimensions locally, release the bitmap, and use the bounded video
+  // frame fallback when the camera returns an unsupported still format.
+  async function acceptableStill(blob) {
+    if (!blob || !blob.size || blob.size > 20 * 1024 * 1024 ||
+        !['image/jpeg', 'image/png', 'image/webp'].includes(blob.type) ||
+        typeof root.createImageBitmap !== 'function') return false;
+    let bitmap;
+    try {
+      bitmap = await root.createImageBitmap(blob);
+      return Number.isFinite(bitmap.width) && Number.isFinite(bitmap.height) &&
+        bitmap.width >= 32 && bitmap.height >= 32 &&
+        bitmap.width * bitmap.height <= 24000000 &&
+        Math.max(bitmap.width, bitmap.height) <= 32768;
+    } catch (_) {
+      return false;
+    } finally {
+      bitmap?.close?.();
+    }
+  }
+
   function sampleQuality(video, canvas, reading = null) {
     if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
     const scale = 160 / Math.max(video.videoWidth, video.videoHeight);
@@ -241,8 +264,10 @@
           let blob = null;
           const track = stream.getVideoTracks()[0];
           if (track && typeof root.ImageCapture === 'function') {
-            try { blob = await new root.ImageCapture(track).takePhoto(); }
-            catch (_) { /* Not supported on all Safari/Chromium cameras. */ }
+            try {
+              const candidate = await new root.ImageCapture(track).takePhoto();
+              if (await acceptableStill(candidate)) blob = candidate;
+            } catch (_) { /* Camera still unavailable; use bounded frame. */ }
           }
           if (!blob) {
             // Video capture has less detail than a native still photo. Offer

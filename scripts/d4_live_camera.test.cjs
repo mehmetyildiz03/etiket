@@ -8,7 +8,8 @@ const source = fs.readFileSync(path.join(__dirname, '../web/doku_live_camera.js'
 const stability = require('../web/doku_live_stability.js');
 
 function setup({permission = true, delayed = false, withOcr = false,
-  torch = false, torchReject = false} = {}) {
+  torch = false, torchReject = false, still = null,
+  stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
   const tracks = [{stopped: false, torchEnabled: false, torchCalls: [],
     stop() { this.stopped = true; this.torchEnabled = false; },
@@ -22,6 +23,7 @@ function setup({permission = true, delayed = false, withOcr = false,
   const stream = {getTracks: () => tracks, getVideoTracks: () => tracks};
   let requested, requestResolve, requestReject, timer, cameraCalls = 0, ocrResult;
   const clock = {now: 1000};
+  let bitmapCloses = 0;
   const pending = new Promise((resolve, reject) => { requestResolve = resolve; requestReject = reject; });
   if (!delayed) queueMicrotask(() => permission ? requestResolve(stream) :
     requestReject(new DOMException('denied', 'NotAllowedError')));
@@ -66,6 +68,12 @@ function setup({permission = true, delayed = false, withOcr = false,
     setInterval: fn => { timer = fn; return 1; },
     clearInterval: () => { timer = null; },
     setTimeout, clearTimeout,
+    ImageCapture: still ? class { async takePhoto() { return still; } } : undefined,
+    createImageBitmap: still ? async () => {
+      if (stillDecodeReject) throw new Error('image decoder rejected still');
+      return {width: stillWidth, height: stillHeight,
+        close() { bitmapCloses++; }};
+    } : undefined,
     dokuCaptureGuidance: {evaluate: () => null},
     dokuLiveStability: stability,
     dokuLiveOcr: withOcr ? {create: onResult => {
@@ -75,6 +83,7 @@ function setup({permission = true, delayed = false, withOcr = false,
   });
   vm.runInContext(source, context);
   return {api: context.dokuLiveCamera, context, nodes, buttons, tracks, stream,
+    get bitmapCloses() { return bitmapCloses; },
     get requested() { return requested; }, get cameraCalls() { return cameraCalls; },
     get timer() { return timer; }, docEvents, pageEvents, requestResolve, requestReject,
     advance(ms) { clock.now += ms; },
@@ -102,6 +111,59 @@ test('mobile web camera opens a private rear-camera preview and captures a still
   assert.equal(s.timer, null);
   assert.equal(s.docEvents.size, 0);
   assert.equal(s.pageEvents.size, 0);
+});
+
+test('full-resolution still is retained when decoded pixels fit the private OCR bounds', async () => {
+  const original = new Blob(['synthetic-still'], {type: 'image/jpeg'});
+  const s = setup({still: original, stillWidth: 4032, stillHeight: 3024});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.equal(await pending, original, 'preserve actual camera still, not 1080p preview');
+  assert.equal(s.bitmapCloses, 1, 'release decoded bitmap from device memory');
+  assert.equal(s.tracks[0].stopped, true);
+});
+
+test('oversized 48MP still falls back to bounded preview before the OCR handoff', async () => {
+  const original = new Blob(['synthetic-48mp'], {type: 'image/jpeg'});
+  const s = setup({still: original, stillWidth: 8064, stillHeight: 6048});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  await s.button('Fotoğrafı çek').emit('click');
+  const result = await pending;
+  assert.notEqual(result, original);
+  assert.equal(result.type, 'image/jpeg');
+  assert.ok(result.size > 0);
+  assert.equal(s.bitmapCloses, 1);
+  assert.equal(s.tracks[0].stopped, true);
+});
+
+test('over-20MiB or unsupported camera still uses the safe local fallback', async () => {
+  for (const still of [
+    {type: 'image/jpeg', size: 20 * 1024 * 1024 + 1},
+    new Blob(['unsupported'], {type: 'image/heic'})
+  ]) {
+    const s = setup({still});
+    const pending = s.api.open();
+    await Promise.resolve(); await Promise.resolve();
+    await s.button('Fotoğrafı çek').emit('click');
+    const result = await pending;
+    assert.equal(result.type, 'image/jpeg');
+    assert.ok(result.size > 0);
+    assert.equal(s.bitmapCloses, 0, 'reject unsupported payload before decode');
+  }
+});
+
+test('undecodable camera still falls back rather than losing the photo session', async () => {
+  const original = new Blob(['broken-still'], {type: 'image/jpeg'});
+  const s = setup({still: original, stillDecodeReject: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  await s.button('Fotoğrafı çek').emit('click');
+  const result = await pending;
+  assert.notEqual(result, original);
+  assert.equal(result.type, 'image/jpeg');
+  assert.equal(s.bitmapCloses, 0);
 });
 
 test('optional hardware torch can be toggled without touching OCR or captured data', async () => {
