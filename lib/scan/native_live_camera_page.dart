@@ -255,6 +255,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             _textPresent = false;
             _fingerprint = '';
             _lastCenter = null;
+            _lastPairBoxes = null;
+            _lastPairRotation = null;
             _stableFrames = 0;
           });
         }
