@@ -82,18 +82,23 @@
       };
       const renderStatus = () => {
         const advice = adviceFor(lastMetrics);
+        let message;
         if (!liveScanner) {
-          status.textContent = advice + ' Canlı OCR kullanılamıyor; fotoğraf sonrası doğrula.';
+          message = 'Gri — ' + advice + ' Canlı OCR kullanılamıyor; fotoğraf sonrası doğrula.';
         } else if (lastOcr?.cues?.length) {
           const pairs = lastOcr.cues.map(cue => cue.percent + '% ' + cue.fiber).join(', ');
-          status.textContent = 'Sarı — doğrulanmamış OCR adayları: ' + pairs +
+          message = 'Sarı — doğrulanmamış OCR adayları: ' + pairs +
             '. Etiketin tamamı henüz doğrulanmadı. ' + advice +
             ' Fotoğraf sonrası kontrol ve açık onay gerekir.';
         } else if (lastOcr?.textPresent) {
-          status.textContent = 'Sarı — yazı var, güvenilir yüzde–elyaf çifti yok. ' + advice;
+          message = 'Sarı — yazı var, güvenilir yüzde–elyaf çifti yok. ' + advice;
         } else {
-          status.textContent = 'Gri — yüzde ve elyaf henüz okunmadı. ' + advice;
+          message = 'Gri — yüzde ve elyaf henüz okunmadı. ' + advice;
         }
+        status.style.color = liveScanner && (lastOcr?.cues?.length || lastOcr?.textPresent)
+          ? '#ffd45c' : '#c4cbd0';
+        // Avoid repeating the same aria-live announcement every 700ms.
+        if (status.textContent !== message) status.textContent = message;
       };
       const showBoxes = observation => {
         overlay.replaceChildren();
