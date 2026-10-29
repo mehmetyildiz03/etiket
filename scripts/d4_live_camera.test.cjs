@@ -106,7 +106,7 @@ test('system camera fallback can supply a higher-resolution original file', asyn
   const pending = s.api.open();
   await Promise.resolve();
   const panel = s.nodes[0];
-  const input = panel.children[3].children.find(child => child.type === 'input');
+  const input = panel.children[3].children.find(child => child.type === 'file');
   assert.ok(input);
   await s.button('Sistem kamerası').emit('click');
   assert.equal(s.tracks[0].stopped, true);
