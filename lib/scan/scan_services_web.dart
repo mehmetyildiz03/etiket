@@ -42,6 +42,7 @@ extension type _Observation(JSObject _) implements JSObject {
   external String get decision;
   external String? get acceptedText;
   external _SecondReading? get secondReading;
+  external _SecondReading? get thirdReading;
 }
 
 extension type _SecondReading(JSObject _) implements JSObject {
@@ -187,16 +188,21 @@ class _JsBridge
         _ => throw const BrowserScanException('recognition'),
       };
       final second = evidence.secondReading;
-      // Only the two known local methods may be marked as verified.
-      // Rejected PSM6 text remains rejected even if PSM3 finds a candidate.
-      if (second != null) {
-        final verifiedSparse = decision == OcrDecision.candidate &&
-            second.mode == 'sparseText';
-        final verifiedPage = decision != OcrDecision.candidate &&
-            second.mode == 'autoPage';
-        if (!verifiedSparse && !verifiedPage) {
-          throw const BrowserScanException('recognition');
-        }
+      final third = evidence.thirdReading;
+      // Both unverified alternatives are independent observations. PSM3 is
+      // only relevant to a rejected primary; PSM11 may follow either a weak
+      // accepted primary or a rejected PSM6. Neither changes acceptedText.
+      if (second != null &&
+          !(second.mode == 'sparseText' ||
+              (decision != OcrDecision.candidate && second.mode == 'autoPage'))) {
+        throw const BrowserScanException('recognition');
+      }
+      if (third != null &&
+          (second == null ||
+              decision == OcrDecision.candidate ||
+              second.mode != 'autoPage' ||
+              third.mode != 'sparseText')) {
+        throw const BrowserScanException('recognition');
       }
       final observation = OcrObservation(
         rawText: evidence.rawText,
@@ -211,6 +217,12 @@ class _JsBridge
           variant: second.mode == 'autoPage'
               ? OcrReadingVariant.automaticPagePsm3
               : OcrReadingVariant.sparseTextPsm11,
+        ),
+        thirdReading: third == null ? null : OcrSecondReading(
+          rawText: third.rawText,
+          confidence: third.confidence,
+          engine: OcrReadingEngine.tesseractJs,
+          variant: OcrReadingVariant.sparseTextPsm11,
         ),
       );
       if (observation.acceptedText != result.text ||

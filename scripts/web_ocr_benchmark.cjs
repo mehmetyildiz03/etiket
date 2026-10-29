@@ -195,14 +195,19 @@ async function main() {
       const output=await page.evaluate(path=>dokuOcr.recognizeSafe(path,()=>{}),target);
       const raw=await page.evaluate(()=>window.__benchmarkRaw);
       const reads=await page.evaluate(()=>window.__benchmarkReads);
-      assert.ok(reads.length>=1 && reads.length<=2,
-        'Expected one PSM6 and at most one alternative OCR pass: '+f.id);
+      assert.ok(reads.length>=1 && reads.length<=3,
+        'Expected PSM6 plus at most PSM3 and PSM11, all local: '+f.id);
       assert.equal(reads[0].psm,'6','Primary OCR must explicitly use PSM6: '+f.id);
       assert.equal(reads[0].rawText,raw.rawText,'Primary raw capture: '+f.id);
       const secondary=reads[1]||null;
       if (secondary) {
         const expected=output.observation.decision==='candidate'?'11':'3';
         assert.equal(secondary.psm,expected,'Alternative PSM routing: '+f.id);
+      }
+      const tertiary=reads[2]||null;
+      if (tertiary) {
+        assert.notEqual(output.observation.decision,'candidate');
+        assert.equal(tertiary.psm,'11','Rejected PSM6 sparse-text recovery: '+f.id);
       }
       assert.ok(output.observation, 'Diagnostics required: '+f.id);
       assert.equal(output.observation.rawText, raw.rawText, 'Unmodified engine text: '+f.id);
@@ -223,10 +228,13 @@ async function main() {
       const paired=compareAlternativeReading(f,raw?.rawText||'',
         secondary && {mode:secondary.psm==='3'?'autoPage':'sparseText',
           rawText:secondary.rawText});
-      results.push({...metrics,paired,group:f.group||'unknown',split:f.split||'synthetic',
+      const pairedSparse=compareAlternativeReading(f,raw?.rawText||'',
+        tertiary && {mode:'sparseText',rawText:tertiary.rawText});
+      results.push({...metrics,paired,pairedSparse,group:f.group||'unknown',split:f.split||'synthetic',
         groundTruth:f.groundTruth||'',rawText:raw?.rawText||'',filteredText:output.text||'',
         confidence:output.observation.confidence,decision:output.observation.decision,
-         secondReading:output.observation.secondReading||null});
+         secondReading:output.observation.secondReading||null,
+         thirdReading:output.observation.thirdReading||null});
       await page.evaluate(([source,derived])=>{
         dokuOcr.release(source);
         if(derived!==source)dokuOcr.release(derived);
@@ -240,7 +248,7 @@ async function main() {
     assert.ok(requests.every(r=>['GET','HEAD'].includes(r.method)),'No image/GT upload');
     const aggregate=summarize(results);
     const pairedByPsm=Object.fromEntries([3,11].map(psm=>{
-      const rows=results.map(r=>r.paired).filter(r=>r?.secondPsm===psm);
+      const rows=results.flatMap(r=>[r.paired,r.pairedSparse]).filter(r=>r?.secondPsm===psm);
       const sum=key=>rows.reduce((total,r)=>total+(r[key]||0),0);
       const macro=key=>rows.length
         ? rows.reduce((total,r)=>total+r[key],0)/rows.length : null;

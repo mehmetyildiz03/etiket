@@ -23,6 +23,7 @@ Future<void> _showDiagnostics(
   ));
   expect(find.byKey(const ValueKey('second-ocr-provenance')), findsNothing);
   expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsNothing);
+  expect(find.byKey(const ValueKey('third-ocr-diagnostic')), findsNothing);
   await tester.tap(find.text("OCR'nin okuduğu ham metni göster"));
   await tester.pumpAndSettle();
 }
@@ -73,6 +74,35 @@ void main() {
     await tester.tap(find.text('Ham OCR metnini gizle'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsNothing);
+  });
+
+  testWidgets('rejected PSM6 exposes independent PSM3 and PSM11 only on opt-in',
+      (tester) async {
+    final evidence = OcrObservation(
+      rawText: 'SYNTHETIC UNREADABLE FRAGMENTS',
+      confidence: 35,
+      decision: OcrDecision.lowConfidence,
+      secondReading: OcrSecondReading(
+        rawText: 'Fiber Sample',
+        confidence: 67,
+        engine: OcrReadingEngine.tesseractJs,
+        variant: OcrReadingVariant.automaticPagePsm3,
+      ),
+      thirdReading: OcrSecondReading(
+        rawText: '80% Polyester',
+        confidence: 75,
+        engine: OcrReadingEngine.tesseractJs,
+        variant: OcrReadingVariant.sparseTextPsm11,
+      ),
+    );
+    await _showDiagnostics(tester, evidence);
+    expect(find.byKey(const ValueKey('second-ocr-diagnostic')), findsOneWidget);
+    expect(find.byKey(const ValueKey('third-ocr-diagnostic')), findsOneWidget);
+    expect(find.textContaining('Üçüncü okuma kaynağı: Tesseract.js'), findsOneWidget);
+    expect(evidence.acceptedText, isNull);
+    await tester.tap(find.text('Ham OCR metnini gizle'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('third-ocr-diagnostic')), findsNothing);
   });
 
   testWidgets('unspecified secondary source is never presented as verified',

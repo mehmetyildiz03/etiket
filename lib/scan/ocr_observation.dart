@@ -33,6 +33,7 @@ class OcrObservation {
     required this.confidence,
     required this.decision,
     this.secondReading,
+    this.thirdReading,
   }) {
     if (rawText.length > 20000 ||
         (confidence != null &&
@@ -48,6 +49,8 @@ class OcrObservation {
   final double? confidence;
   final OcrDecision decision;
   final OcrSecondReading? secondReading;
+  /// Additional local OCR evidence, never accepted or selected automatically.
+  final OcrSecondReading? thirdReading;
   /// Advisory only: compare printed percent-marked digit sequences in reading
   /// order. Never infer missing ratios, match fibers or replace the first OCR.
   bool get percentageTokensDiffer {
