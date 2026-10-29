@@ -47,7 +47,7 @@
     const doc = root.document;
     return new Promise((resolve, reject) => {
       let done = false, stream = null, interval = null, capturing = false;
-      let usingSystemPicker = false, pickerTimer = null;
+      let usingSystemPicker = false;
       const panel = doc.createElement('div');
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
@@ -88,21 +88,13 @@
         try { video.pause(); } catch (_) { /* Failed startup. */ }
         video.srcObject = null;
       };
-      const onFocus = () => {
-        if (usingSystemPicker) {
-          // Allow a delayed file-input change event after native camera return.
-          pickerTimer = root.setTimeout(() => close(null), 1800);
-        }
-      };
       const close = (value, failure) => {
         if (done) return;
         done = true;
         if (interval !== null) root.clearInterval(interval);
-        if (pickerTimer !== null) root.clearTimeout(pickerTimer);
         doc.removeEventListener('visibilitychange', hidden);
         doc.removeEventListener('keydown', onKeyDown);
         root.removeEventListener('pagehide', pagehide);
-        root.removeEventListener('focus', onFocus);
         stopStream();
         canvas.width = canvas.height = 0;
         panel.remove();
@@ -144,6 +136,9 @@
         }
       });
       button('Sistem kamerası (yüksek çözünürlük)', () => {
+        // Native camera may return focus well before its file change event.
+        // Never auto-close on focus: a slow still photo must not be discarded.
+        // Use the input cancel event or the explicit İptal control instead.
         usingSystemPicker = true;
         if (interval !== null) { root.clearInterval(interval); interval = null; }
         stopStream(); // Never keep a live video stream behind native camera UI.
@@ -163,7 +158,6 @@
       doc.addEventListener('keydown', onKeyDown);
       captureButton.focus?.();
       root.addEventListener('pagehide', pagehide);
-      root.addEventListener('focus', onFocus);
       root.navigator.mediaDevices.getUserMedia({audio: false, video: {
         facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}
       }}).then(got => {
