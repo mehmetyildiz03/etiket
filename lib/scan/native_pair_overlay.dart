@@ -11,6 +11,7 @@ bool canShowNativePairOverlay({
   required bool portraitUp,
   required int? rotationDegrees,
   required Size? previewSize,
+  required Size? ocrImageSize,
   required Map<String, Rect>? normalizedBoxes,
   required int stableFrames,
 }) {
@@ -19,6 +20,11 @@ bool canShowNativePairOverlay({
       !previewSize.width.isFinite || !previewSize.height.isFinite ||
       previewSize.width <= 0 || previewSize.height <= 0 ||
       previewSize.width < previewSize.height ||
+      ocrImageSize == null ||
+      !ocrImageSize.width.isFinite || !ocrImageSize.height.isFinite ||
+      ocrImageSize.width <= 0 || ocrImageSize.height <= 0 ||
+      (ocrImageSize.width / ocrImageSize.height -
+          previewSize.height / previewSize.width).abs() > .02 ||
       normalizedBoxes == null || normalizedBoxes.isEmpty ||
       normalizedBoxes.length > 8) {
     return false;
