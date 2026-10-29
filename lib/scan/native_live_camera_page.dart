@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import 'live_frame_quality.dart';
+import 'native_camera_recovery.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_pair_geometry.dart';
@@ -87,6 +88,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         setState(() { _starting = false; _error = null; });
       }
     } catch (_) {
+      // startImageStream can fail after initialization. Clear owned handles
+      // before finally disposes them, or resumed lifecycle cannot retry.
+      if (identical(_controller, controller)) {
+        _controller = null;
+        _recognizer = null;
+      }
       if (mounted && token == _generation && !_closed) {
         setState(() {
           _starting = false;
@@ -325,19 +332,33 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final camera = _controller;
     if (camera == null || _capturing || _closed || !camera.value.isInitialized) { return; }
     setState(() => _capturing = true);
-    ++_generation; // Late preview OCR must not alter the captured photo.
-    try {
-      if (camera.value.isStreamingImages) { await camera.stopImageStream(); }
-      final still = await camera.takePicture();
-      if (!mounted || _closed) { return; }
-      Navigator.of(context).pop(still); // Full still; OCR is performed later.
-    } catch (_) {
-      if (mounted && !_closed) {
-        setState(() {
-          _capturing = false;
-          _error = 'Fotoğraf çekilemedi. Geri dönüp sistem kamerasını kullan.';
-        });
-      }
+    final captureToken = ++_generation; // Invalidate late preview OCR.
+    final outcome = await takeNativeStillWithRecovery<XFile>(
+      stopPreview: () async {
+        if (camera.value.isStreamingImages) { await camera.stopImageStream(); }
+      },
+      takeStill: camera.takePicture,
+      resumePreview: () async {
+        // Never restart a camera after pause, navigation or disposal.
+        if (!mounted || _closed || _controller != camera ||
+            _generation != captureToken || !camera.value.isInitialized) {
+          throw StateError('camera no longer active');
+        }
+        if (!camera.value.isStreamingImages) {
+          await camera.startImageStream(_onFrame);
+        }
+      },
+    );
+    if (!mounted || _closed || _generation != captureToken) { return; }
+    if (outcome.photo != null) {
+      Navigator.of(context).pop(outcome.photo); // Full still; later OCR.
+    } else {
+      setState(() {
+        _capturing = false;
+        _error = outcome.streamRecovered
+            ? 'Fotoğraf çekilemedi. Kamera yeniden hazır; tekrar dene.'
+            : 'Fotoğraf çekilemedi. Geri dönüp sistem kamerasını kullan.';
+      });
     }
   }
 
