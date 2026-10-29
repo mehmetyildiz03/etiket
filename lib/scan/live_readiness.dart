@@ -118,9 +118,8 @@ class LiveReadinessTracker {
     }
 
     final fingerprint = parsed.sections
-        .map((section) => section.name + ':' +
-            section.fibers.map((fiber) =>
-                fiber.name! + '=' + fiber.percent.toString()).join(','))
+        .map((section) =>
+            '${section.name}:${section.fibers.map((fiber) => '${fiber.name}=${fiber.percent}').join(',')}')
         .join('|');
     if (fingerprint == _lastFingerprint) {
       _stableFrames++;
