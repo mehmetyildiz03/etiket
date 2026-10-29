@@ -58,7 +58,9 @@ Size? nativeOcrImageSize({
   required bool android,
 }) {
   if (width <= 0 || height <= 0 || width * height > 48000000 ||
-      !const [0, 90, 180, 270].contains(rotationDegrees)) return null;
+      !const [0, 90, 180, 270].contains(rotationDegrees)) {
+    return null;
+  }
   final swap = android && (rotationDegrees == 90 || rotationDegrees == 270);
   return Size((swap ? height : width).toDouble(),
       (swap ? width : height).toDouble());
