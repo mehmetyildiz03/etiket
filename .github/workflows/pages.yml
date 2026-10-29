@@ -40,7 +40,7 @@ jobs:
         run: |
           npm ci --prefix tool/web_ocr --ignore-scripts --no-audit --no-fund
           node scripts/prepare_web_ocr.cjs
-          node --test scripts/web_ocr_bridge.test.cjs scripts/ocr_benchmark_metrics.test.cjs scripts/d4_capture_guidance.test.cjs scripts/d4_photo_quality.test.cjs scripts/private_benchmark_guard.test.cjs scripts/d4_skew_components.test.cjs
+          node --test scripts/web_ocr_bridge.test.cjs scripts/ocr_benchmark_metrics.test.cjs scripts/d4_capture_guidance.test.cjs scripts/d4_photo_quality.test.cjs scripts/private_benchmark_guard.test.cjs scripts/d4_skew_components.test.cjs scripts/d4_live_camera.test.cjs
       - name: Flutter regression checks
         run: |
           flutter analyze
@@ -61,6 +61,7 @@ jobs:
           # Probe Safari's image fallback before the longer multi-viewport OCR suite.
           node scripts/web_ocr_webkit_crop.cjs http://127.0.0.1:8082/etiket/
           node scripts/web_ocr_exif_crop.cjs http://127.0.0.1:8082/etiket/
+          node scripts/d4_live_camera_browser.cjs http://127.0.0.1:8082/etiket/
           node scripts/web_ocr_smoke.cjs http://127.0.0.1:8082/etiket/
           node scripts/web_ocr_benchmark.cjs http://127.0.0.1:8082/etiket/ --synthetic
           node scripts/web_ocr_roi_matrix.cjs http://127.0.0.1:8082/etiket/

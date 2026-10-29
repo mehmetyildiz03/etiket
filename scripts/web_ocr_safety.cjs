@@ -38,12 +38,18 @@ module.exports = async (browser, baseUrl, evidence) => {
     await button('Fotoğraf yükle / galeriden seç'); await chooser;
     await page.locator('input[type=file]').evaluate(input => input.dispatchEvent(new Event('cancel')));
     await seen('Fotoğraf seçimi iptal edildi.');
+    // Camera capture now uses getUserMedia, not input.click. Simulate the
+    // actual browser permission rejection; the gallery chooser remains intact.
     await page.evaluate(() => {
-      window.originalFileClick = HTMLInputElement.prototype.click;
-      HTMLInputElement.prototype.click = function() { throw new DOMException('test permission refusal', 'NotAllowedError'); };
+      Object.defineProperty(navigator.mediaDevices, 'getUserMedia', {
+        configurable: true,
+        value: () => Promise.reject(new DOMException('test permission refusal', 'NotAllowedError'))
+      });
     });
-    await button('Fotoğraf çek'); await seen('Fotoğraf erişimine izin verilmedi.');
-    await page.evaluate(() => { HTMLInputElement.prototype.click = window.originalFileClick; delete window.originalFileClick; });
+    await button('Fotoğraf çek');
+    await seen('Fotoğraf erişimine izin verilmedi.');
+    await page.getByRole('dialog', {name: 'Doku canlı kamera'}).waitFor({state: 'detached'});
+    await page.evaluate(() => { delete navigator.mediaDevices.getUserMedia; });
     await upload({name: 'broken.png', mimeType: 'image/png', buffer: Buffer.from('not an image')});
     await seen('Fotoğraf okunamadı.');
     await upload(fixture);

@@ -73,7 +73,10 @@
       old.reject(fail('canceled'));
     }
   };
-  const cancelSelection = () => picker?.finish(null);
+  const cancelSelection = () => {
+    globalThis.dokuLiveCamera?.cancel();
+    picker?.finish(null);
+  };
 
   // Check encoded dimensions before allocating a decoded image. Supported
   // camera/upload formats: JPEG, PNG and WebP (HEIC needs local conversion).
@@ -439,10 +442,38 @@
     }).catch(error => { throw error instanceof DOMException && error.name === 'DokuScanError' ? error : fail('invalidPhoto'); });
   }
 
+  // A live camera session supplies a new still Blob to the EXISTING private
+  // adopt/crop/OCR pipeline. Preview quality hints are never OCR decisions.
+  function pickLive() {
+    return new Promise((resolve, reject) => {
+      let finished = false;
+      const current = {
+        finish(result, error) {
+          if (finished) return;
+          finished = true;
+          if (picker === current) picker = null;
+          error ? reject(error) : resolve(result);
+        }
+      };
+      picker = current;
+      globalThis.dokuLiveCamera.open().then(async file => {
+        if (finished) return;
+        if (!file) { current.finish(null); return; }
+        try {
+          const photo = await adopt(file);
+          if (finished) release(photo.path);
+          else current.finish(photo);
+        } catch (error) { current.finish(null, error); }
+      }, error => current.finish(null,
+        fail(error?.message === 'permission' ? 'permission' : 'unavailableCamera')));
+    });
+  }
+
   function pick(camera) {
     if (!supported || disposed) return Promise.reject(fail('unsupported'));
     if (camera && !cameraAvailable) return Promise.reject(fail('unavailableCamera'));
     if (picker) return Promise.reject(fail('busy'));
+    if (camera && globalThis.dokuLiveCamera?.available) return pickLive();
     // input.click runs before any await, inside the user's original gesture.
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');

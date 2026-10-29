@@ -82,7 +82,10 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
         // Flutter's off-screen image semantics appear only after scrolling.
         // The enabled OCR button below the preview proves acquisition completed.
       };
-      await upload(mobile && width === 390 ? 'Fotoğraf çek' : undefined);
+      // The capture button now opens a live camera dialog, not a file chooser.
+      // This multi-viewport OCR test deliberately exercises the gallery route;
+      // the real live camera route is verified separately in d4_live_camera_browser.cjs.
+      await upload();
       assert.equal(await page.getByRole('button', {name: 'Metni incele ve düzelt', exact: true}).count(), 0);
       await button('Fotoğraftaki metni oku');
       stage = `${width}: wait for real OCR`;
@@ -126,7 +129,7 @@ let diagnosticErrors = [], diagnosticFailures = [], diagnosticResponses = [], di
       }
       assert.ok(requests.filter(r => r.url.includes('/ocr/')).every(r => r.url.startsWith(new URL('ocr/', baseUrl).href)));
       assert.deepEqual(failures, []); assert.deepEqual(errors, []);
-      report.push({width, raw, assets: responses, errors, failures, captureChooser: width === 390});
+      report.push({width, raw, assets: responses, errors, failures, galleryChooser: true});
       console.log(`PASS ${width}dp: real TR/EN OCR, local /etiket/ assets, editable raw text, separate sections, required approval, no console/network errors.`);
       await context.close();
     }

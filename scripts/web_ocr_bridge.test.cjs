@@ -615,3 +615,36 @@ test('threshold canvas write failure keeps original crop available to OCR', asyn
   assert.equal(s.blobs.size, 0);
   assert.ok(s.canvases.every(c => c.width === 0 && c.height === 0));
 });
+
+
+test('D4.2 live web camera still goes through the original private crop/OCR pipeline', async () => {
+  const s = setup({mobile: true});
+  let opened = 0;
+  s.context.dokuLiveCamera = {
+    available: true,
+    open: async () => { opened++; return png(1600, 1200); },
+    cancel() {}
+  };
+  const photo = await s.bridge.pick(true);
+  assert.equal(opened, 1);
+  assert.ok(photo.path.startsWith('blob:'));
+  assert.match(await s.bridge.recognize(photo.path, () => {}), /Pamuk/);
+  assert.equal(s.recognizedBlob, s.blobs.get(photo.path));
+  s.bridge.release(photo.path);
+  assert.equal(s.blobs.size, 0);
+});
+
+test('D4.2 cancellation of a pending live web camera returns no photo', async () => {
+  const s = setup({mobile: true});
+  let resolveCamera, stopped = 0;
+  s.context.dokuLiveCamera = {
+    available: true,
+    open: () => new Promise(resolve => { resolveCamera = resolve; }),
+    cancel() { stopped++; resolveCamera(null); }
+  };
+  const picking = s.bridge.pick(true);
+  s.bridge.cancelSelection();
+  assert.equal(await picking, null);
+  assert.equal(stopped, 1);
+  assert.equal(s.blobs.size, 0);
+});
