@@ -95,3 +95,24 @@ test('invalid OCR geometry cannot trigger framing advice', () => {
     boxes: [{x0: 0, y0: 0, x1: 50, y1: 30}]}), null);
   assert.equal(geometryHint({width: 1200, height: 675, boxes: []}), null);
 });
+
+test('pair highlight is allowed only for an actual retained text-line rectangle', () => {
+  const s = create();
+  const text = box(20);
+  const unrelated = box(450);
+  const first = s.observe({...sample(1), boxes: [text],
+    pairBoxes: [text, unrelated, {x0: -5, y0: 0, x1: 10, y1: 10}]}, 1000);
+  assert.equal(first.pairBoxes.length, 1);
+  assert.equal(first.pairBoxes[0].x0, 20);
+  assert.equal(first.level, 'yellow');
+  const stale = s.view(8000);
+  assert.equal(stale.pairBoxes.length, 0);
+  assert.equal(stale.level, 'gray');
+});
+
+test('duplicate OCR callback cannot swap a matched-line box', () => {
+  const s = create();
+  const first = s.observe({...sample(10), pairBoxes: [box(20)]}, 1000);
+  const duplicate = s.observe({...sample(10), pairBoxes: [box(30)]}, 1100);
+  assert.equal(duplicate.pairBoxes[0].x0, first.pairBoxes[0].x0);
+});
