@@ -48,3 +48,18 @@ NativePairGeometry assessNativePairGeometry({
       : NativeFramingHint.steady;
   return NativePairGeometry(center, hint);
 }
+
+/// The same immutable orientation snapshot must drive ML Kit input metadata
+/// and subsequent OCR-box geometry. No screen-space mapping is assumed.
+Size? nativeOcrImageSize({
+  required int width,
+  required int height,
+  required int rotationDegrees,
+  required bool android,
+}) {
+  if (width <= 0 || height <= 0 || width * height > 48000000 ||
+      !const [0, 90, 180, 270].contains(rotationDegrees)) return null;
+  final swap = android && (rotationDegrees == 90 || rotationDegrees == 270);
+  return Size((swap ? height : width).toDouble(),
+      (swap ? width : height).toDouble());
+}
