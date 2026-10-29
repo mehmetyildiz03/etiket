@@ -145,3 +145,16 @@ test('unsupported insecure or absent camera API fails closed', async () => {
   await assert.rejects(s.api.open(), error => error.message === 'unsupported');
   assert.equal(s.cameraCalls, 0);
 });
+
+
+test('keyboard Escape cancels the preview and closes the camera stream', async () => {
+  const s = setup();
+  const pending = s.api.open();
+  await Promise.resolve();
+  const handler = s.docEvents.get('keydown');
+  assert.equal(typeof handler, 'function');
+  handler({key: 'Escape'});
+  assert.equal(await pending, null);
+  assert.equal(s.tracks[0].stopped, true);
+  assert.equal(s.nodes.length, 0);
+});
