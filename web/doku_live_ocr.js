@@ -12,7 +12,7 @@
     root.Worker && root.document?.createElement);
   const fibers = 'pamuk|cotton|keten|linen|polyester|poliester|viskon|viskoz|viscose|elastan|elastane|spandex|yun|yün|wool|poliamid|polyamide|nylon|naylon|akrilik|acrylic|ipek|silk|modal|liyosel|lyocell';
   const number = '(?:100|[1-9]?[0-9])';
-  const before = new RegExp('(?:%\\s*(' + number + ')|(' + number + ')\\s*%)\\s*(' + fibers + ')(?![\\p{L}])', 'giu');
+  const before = new RegExp('(?:^|[^\\p{L}\\p{N}])(?:%\\s*(' + number + ')|(' + number + ')\\s*%)\\s*(' + fibers + ')(?![\\p{L}])', 'giu');
   const after = new RegExp('(?:^|[^\\p{L}])(' + fibers + ')\\s*(?:%\\s*(' + number + ')|(' + number + ')\\s*%)', 'giu');
 
   function extract(data, width, height, sequence, durationMs) {
