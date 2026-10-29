@@ -15,8 +15,9 @@
 
   function sampleQuality(video, canvas) {
     if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
-    const w = 160, h = Math.max(16, Math.round(w * video.videoHeight / video.videoWidth));
-    if (h > 240) return null;
+    const scale = 160 / Math.max(video.videoWidth, video.videoHeight);
+    const w = Math.max(16, Math.round(video.videoWidth * scale));
+    const h = Math.max(16, Math.round(video.videoHeight * scale));
     canvas.width = w; canvas.height = h;
     const ctx = canvas.getContext('2d', {willReadFrequently: true});
     if (!ctx) return null;
