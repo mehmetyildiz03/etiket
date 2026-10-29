@@ -10,6 +10,8 @@
   'use strict';
   const STALE_MS = 6000;
   const MAX_GAP_MS = 5000;
+  // A delayed OCR result describes an old video frame, not the current preview.
+  const MAX_OCR_LATENCY_MS = 6000;
   const MAX_DRIFT = 0.15;
 
   function create() {
@@ -23,15 +25,22 @@
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
         clear();
         return {cues: [], boxes: [], textPresent: false, stableFrames: 0,
-          moved: false, stale: true, level: 'gray'};
+          moved: false, stale: true, level: 'gray', sequence: -1};
       }
       return {cues: observation.cues, boxes: observation.boxes,
+        width: observation.width, height: observation.height, sequence: lastSequence,
         textPresent: observation.textPresent, stableFrames, moved,
         stale: false, level: observation.textPresent ? 'yellow' : 'gray'};
     }
     function observe(next, now) {
       if (!next || !Number.isSafeInteger(next.sequence) ||
           !Number.isFinite(now) || next.sequence <= lastSequence) return view(now);
+      if (next.durationMs !== undefined &&
+          (!Number.isFinite(next.durationMs) || next.durationMs < 0 ||
+           next.durationMs > MAX_OCR_LATENCY_MS)) {
+        clear(); // Never keep stale candidates or their boxes on screen.
+        return view(now);
+      }
       if (now < lastTime || now - lastTime > MAX_GAP_MS) {
         fingerprint = ''; center = null; stableFrames = 0;
       }
@@ -62,7 +71,8 @@
       fingerprint = nextFingerprint;
       center = bounds;
       lastTime = now;
-      observation = {cues, boxes, textPresent: next.textPresent === true || cues.length > 0};
+      observation = {cues, boxes, width: next.width, height: next.height,
+        textPresent: next.textPresent === true || cues.length > 0};
       return view(now);
     }
     return Object.freeze({observe, view, clear});

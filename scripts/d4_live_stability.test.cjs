@@ -50,3 +50,23 @@ test('empty OCR and invalid pair cannot increase stability', () => {
   assert.equal(empty.level, 'gray');
   assert.equal(empty.stableFrames, 0);
 });
+
+
+test('slow live OCR cannot present an old frame as a current label', () => {
+  const s = create();
+  assert.equal(s.observe({...sample(1), durationMs: 900}, 1000).stableFrames, 1);
+  assert.equal(s.observe({...sample(2), durationMs: 7500}, 9000).level, 'gray');
+  assert.equal(s.view(9000).boxes.length, 0);
+  assert.equal(s.observe({...sample(3), durationMs: 800}, 10000).stableFrames, 1);
+  assert.equal(s.observe({...sample(4), durationMs: NaN}, 11000).level, 'gray');
+});
+
+test('out-of-order and duplicate OCR frames cannot replace accepted geometry', () => {
+  const s = create();
+  const first = s.observe(sample(10), 1000);
+  const repeated = s.observe(sample(10, [{percent: 20, fiber: 'keten'}], 500), 1100);
+  assert.equal(repeated.sequence, 10);
+  assert.equal(repeated.cues[0].fiber, 'pamuk');
+  assert.equal(repeated.boxes[0].x0, first.boxes[0].x0);
+  assert.equal(s.observe(sample(9), 1200).sequence, 10);
+});
