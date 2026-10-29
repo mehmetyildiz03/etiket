@@ -10,6 +10,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'package:image_picker/image_picker.dart';
 
 import 'live_frame_quality.dart';
+import 'live_pair_hints.dart';
 
 /// Android/iOS camera stream. OCR is a temporary, unverified hint only.
 /// Never persists or logs video frames, raw OCR, EXIF, or recognized text.
@@ -134,39 +135,13 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     return assessLiveLuminance(Uint8List.sublistView(values, 0, count));
   }
 
-  static const _fibers =
-      'pamuk|cotton|keten|linen|polyester|poliester|viskon|viskoz|viscose|'
-      'elastan|elastane|spandex|yün|yun|wool|poliamid|polyamide|nylon|'
-      'naylon|akrilik|acrylic|ipek|silk|modal|liyosel|lyocell';
-  static final _ratioFirst = RegExp(
-    r'(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)\s*(' +
-        _fibers + r')(?![a-zA-ZğüşıöçĞÜŞİÖÇ])',
-    caseSensitive: false,
-  );
-  static final _fiberFirst = RegExp(
-    r'(' + _fibers + r')\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)',
-    caseSensitive: false,
-  );
-
   ({List<String> pairs, Offset? center}) _extract(RecognizedText recognized,
       CameraImage frame) {
     final pairs = <String>[];
     final centers = <Offset>[];
     for (final block in recognized.blocks) {
       for (final line in block.lines) {
-        final text = line.text;
-        final firstRatio = RegExp(r'(?:%\s*\d{1,3}|\d{1,3}\s*%)').firstMatch(text);
-        final firstFiber = RegExp(_fibers, caseSensitive: false).firstMatch(text);
-        if (firstRatio == null || firstFiber == null) continue;
-        final ratioFirst = firstRatio.start <= firstFiber.start;
-        final matches = (ratioFirst ? _ratioFirst : _fiberFirst).allMatches(text);
-        for (final match in matches) {
-          final percent = int.tryParse(ratioFirst
-              ? (match.group(1) ?? match.group(2) ?? '')
-              : (match.group(2) ?? match.group(3) ?? ''));
-          final fiber = match.group(ratioFirst ? 3 : 1)?.toLowerCase();
-          if (percent == null || percent <= 0 || percent > 100 || fiber == null) continue;
-          final pair = '$percent% $fiber';
+        for (final pair in livePairsFromLine(line.text)) {
           if (!pairs.contains(pair) && pairs.length < 8) pairs.add(pair);
           final box = line.boundingBox;
           if (box.width > 0 && box.height > 0) {
