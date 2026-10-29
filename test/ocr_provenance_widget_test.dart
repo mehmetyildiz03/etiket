@@ -100,7 +100,7 @@ void main() {
     expect(find.byKey(const ValueKey('third-ocr-diagnostic')), findsOneWidget);
     expect(find.textContaining('Üçüncü okuma kaynağı: Tesseract.js'), findsOneWidget);
     expect(evidence.acceptedText, isNull);
-    await tester.tap(find.text('Ham OCR metnini gizle');
+    await tester.tap(find.text('Ham OCR metnini gizle'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('third-ocr-diagnostic')), findsNothing);
   });
