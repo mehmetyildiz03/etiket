@@ -33,8 +33,17 @@
           }
           // Only literal percent-marked fiber pairs on the SAME OCR line.
           // Do not infer missing %, section, full-label coverage or correctness.
-          for (const [pattern, fiberIndex, percentIndices] of
-            [[before, 3, [1, 2]], [after, 1, [2, 3]]]) {
+          // Select a single reading order per line. Running both regexes
+          // would invent "20% PAMUK" from "80% PAMUK 20% KETEN".
+          const firstRatio = value.search(/(?:%\\s*\\d{1,3}|\\d{1,3}\\s*%)/u);
+          const firstFiber = value.search(new RegExp(
+            '(?:^|[^\\\\p{L}])(?:' + fibers + ')(?![\\\\p{L}])', 'iu'));
+          if (firstRatio < 0 || firstFiber < 0) continue;
+          const ratioFirst = firstRatio <= firstFiber;
+          const pattern = ratioFirst ? before : after;
+          const fiberIndex = ratioFirst ? 3 : 1;
+          const percentIndices = ratioFirst ? [1, 2] : [2, 3];
+          {
             pattern.lastIndex = 0;
             for (const match of value.matchAll(pattern)) {
               const percent = Number(match[percentIndices[0]] || match[percentIndices[1]]);
