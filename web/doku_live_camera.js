@@ -47,7 +47,8 @@
     const doc = root.document;
     return new Promise((resolve, reject) => {
       let done = false, stream = null, interval = null, capturing = false;
-      let liveScanner = null, lastOcr = null, lastMetrics = null;
+      let liveScanner = null, lastMetrics = null;
+      const stability = root.dokuLiveStability?.create?.() || null;
       let usingSystemPicker = false;
       const panel = doc.createElement('div');
       panel.setAttribute('role', 'dialog');
@@ -82,20 +83,27 @@
       };
       const renderStatus = () => {
         const advice = adviceFor(lastMetrics);
+        const reading = stability?.view(Date.now()) ||
+          {cues: [], textPresent: false, stableFrames: 0, stale: true};
+        if (reading.stale) overlay.replaceChildren();
         let message;
         if (!liveScanner) {
           message = 'Gri — ' + advice + ' Canlı OCR kullanılamıyor; fotoğraf sonrası doğrula.';
-        } else if (lastOcr?.cues?.length) {
-          const pairs = lastOcr.cues.map(cue => cue.percent + '% ' + cue.fiber).join(', ');
-          message = 'Sarı — doğrulanmamış OCR adayları: ' + pairs +
-            '. Etiketin tamamı henüz doğrulanmadı. ' + advice +
+        } else if (reading.cues.length) {
+          const pairs = reading.cues.map(cue => cue.percent + '% ' + cue.fiber).join(', ');
+          const repeat = reading.stableFrames >= 2
+            ? ' ' + reading.stableFrames + ' ayrı OCR karesinde tutarlı göründü; doğrulanmadı.'
+            : ' Tek kare adayı; henüz tutarlılık ölçülmedi.';
+          message = 'Sarı — doğrulanmamış OCR adayları: ' + pairs + '.' + repeat +
+            (reading.moved ? ' Kamerayı sabit tut.' : '') +
+            ' Etiketin tamamı henüz doğrulanmadı. ' + advice +
             ' Fotoğraf sonrası kontrol ve açık onay gerekir.';
-        } else if (lastOcr?.textPresent) {
+        } else if (reading.textPresent) {
           message = 'Sarı — yazı var, güvenilir yüzde–elyaf çifti yok. ' + advice;
         } else {
           message = 'Gri — yüzde ve elyaf henüz okunmadı. ' + advice;
         }
-        status.style.color = liveScanner && (lastOcr?.cues?.length || lastOcr?.textPresent)
+        status.style.color = liveScanner && (reading.cues.length || reading.textPresent)
           ? '#ffd45c' : '#c4cbd0';
         // Avoid repeating the same aria-live announcement every 700ms.
         if (status.textContent !== message) status.textContent = message;
@@ -150,6 +158,7 @@
         doc.removeEventListener('keydown', onKeyDown);
         root.removeEventListener('pagehide', pagehide);
         liveScanner?.stop(); liveScanner = null;
+        stability?.clear();
         stopStream();
         canvas.width = canvas.height = 0;
         panel.remove();
@@ -225,13 +234,14 @@
         liveScanner = root.dokuLiveOcr?.create?.(
           observation => {
             if (done || capturing || usingSystemPicker) return;
-            lastOcr = observation;
+            stability?.observe(observation, Date.now());
             showBoxes(observation);
             renderStatus();
           },
           () => {
             if (done) return;
             liveScanner?.stop(); liveScanner = null;
+            stability?.clear();
             overlay.replaceChildren();
             renderStatus();
           }
