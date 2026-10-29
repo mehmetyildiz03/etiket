@@ -9,6 +9,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 
 import 'live_frame_quality.dart';
 import 'live_pair_hints.dart';
+import 'native_yuv420_nv21.dart';
 
 /// Android/iOS camera stream. OCR is a temporary, unverified hint only.
 /// Never persists or logs video frames, raw OCR, EXIF, or recognized text.
@@ -83,11 +84,45 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   InputImage? _inputImage(CameraImage frame, CameraController camera) {
-    if (frame.planes.length != 1 || frame.width <= 0 || frame.height <= 0) { return null; }
-    final format = InputImageFormatValue.fromRawValue(frame.format.raw);
-    if (format == null ||
-        (Platform.isAndroid && format != InputImageFormat.nv21) ||
-        (Platform.isIOS && format != InputImageFormat.bgra8888)) { return null; }
+    if (frame.width <= 0 || frame.height <= 0) return null;
+
+    // CameraX may deliver three YUV_420_888 planes even if NV21 was
+    // requested. Convert locally rather than silently losing live OCR.
+    // Reject malformed strides and unsupported formats; never guess pixels.
+    Uint8List bytes;
+    InputImageFormat format;
+    int bytesPerRow;
+    if (Platform.isAndroid &&
+        frame.format.group == ImageFormatGroup.yuv420 &&
+        frame.planes.length == 3) {
+      final planes = frame.planes;
+      final converted = yuv420ToNv21(
+        width: frame.width,
+        height: frame.height,
+        y: YuvPlaneBytes(planes[0].bytes, planes[0].bytesPerRow,
+            planes[0].bytesPerPixel ?? 1),
+        u: YuvPlaneBytes(planes[1].bytes, planes[1].bytesPerRow,
+            planes[1].bytesPerPixel ?? 1),
+        v: YuvPlaneBytes(planes[2].bytes, planes[2].bytesPerRow,
+            planes[2].bytesPerPixel ?? 1),
+      );
+      if (converted == null) return null;
+      bytes = converted;
+      format = InputImageFormat.nv21;
+      bytesPerRow = frame.width;
+    } else {
+      if (frame.planes.length != 1) return null;
+      final detected = InputImageFormatValue.fromRawValue(frame.format.raw);
+      if (detected == null ||
+          (Platform.isAndroid && detected != InputImageFormat.nv21) ||
+          (Platform.isIOS && detected != InputImageFormat.bgra8888)) {
+        return null;
+      }
+      bytes = frame.planes.first.bytes;
+      format = detected;
+      bytesPerRow = frame.planes.first.bytesPerRow;
+    }
+
     const orientations = {
       DeviceOrientation.portraitUp: 0,
       DeviceOrientation.landscapeLeft: 90,
@@ -96,18 +131,17 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     };
     final sensor = camera.description.sensorOrientation;
     final device = orientations[camera.value.deviceOrientation];
-    if (device == null) { return null; }
+    if (device == null) return null;
     final degrees = Platform.isIOS ? sensor :
         camera.description.lensDirection == CameraLensDirection.front
             ? (sensor + device) % 360 : (sensor - device + 360) % 360;
     final rotation = InputImageRotationValue.fromRawValue(degrees);
-    if (rotation == null) { return null; }
-    final plane = frame.planes.first;
+    if (rotation == null) return null;
     return InputImage.fromBytes(
-      bytes: plane.bytes,
+      bytes: bytes,
       metadata: InputImageMetadata(
         size: Size(frame.width.toDouble(), frame.height.toDouble()),
-        rotation: rotation, format: format, bytesPerRow: plane.bytesPerRow,
+        rotation: rotation, format: format, bytesPerRow: bytesPerRow,
       ),
     );
   }
