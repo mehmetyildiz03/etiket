@@ -47,6 +47,7 @@
     const doc = root.document;
     return new Promise((resolve, reject) => {
       let done = false, stream = null, interval = null, capturing = false;
+      let liveScanner = null, lastOcr = null, lastMetrics = null;
       let usingSystemPicker = false;
       const panel = doc.createElement('div');
       panel.setAttribute('role', 'dialog');
@@ -59,11 +60,64 @@
       video.autoplay = true; video.muted = true; video.playsInline = true;
       video.setAttribute('playsinline', '');
       video.style.cssText = 'display:block;width:100%;max-width:560px;max-height:65vh;object-fit:contain;border:3px solid #b4c1b8;border-radius:12px;background:#000';
+      const frame = doc.createElement('div');
+      frame.style.cssText = 'position:relative;width:100%;max-width:560px;max-height:65vh';
+      video.style.maxHeight = '65vh';
+      const overlay = doc.createElement('div');
+      overlay.setAttribute('aria-hidden', 'true');
+      overlay.style.cssText = 'position:absolute;inset:0;pointer-events:none;overflow:hidden';
+      frame.appendChild(video);
+      frame.appendChild(overlay);
       const status = doc.createElement('p');
       status.setAttribute('role', 'status');
       status.setAttribute('aria-live', 'polite');
       status.style.cssText = 'margin:0;text-align:center;max-width:560px;font-size:14px';
       status.textContent = 'Kamera hazırlanıyor… Canlı OCR henüz etkin değil; çekimden sonra metni doğrula.';
+      const adviceFor = metrics => {
+        const hint = root.dokuCaptureGuidance?.evaluate?.(metrics);
+        return hint === 'veryDark' ? 'Işığı artır.'
+          : hint === 'veryBright' ? 'Parlamayı azalt.'
+          : hint === 'lowDetail' ? 'Etiketi yaklaştır ve odakla.'
+          : 'Etiketi kadraja al, kamerayı sabit tut.';
+      };
+      const renderStatus = () => {
+        const advice = adviceFor(lastMetrics);
+        let message;
+        if (!liveScanner) {
+          message = 'Gri — ' + advice + ' Canlı OCR kullanılamıyor; fotoğraf sonrası doğrula.';
+        } else if (lastOcr?.cues?.length) {
+          const pairs = lastOcr.cues.map(cue => cue.percent + '% ' + cue.fiber).join(', ');
+          message = 'Sarı — doğrulanmamış OCR adayları: ' + pairs +
+            '. Etiketin tamamı henüz doğrulanmadı. ' + advice +
+            ' Fotoğraf sonrası kontrol ve açık onay gerekir.';
+        } else if (lastOcr?.textPresent) {
+          message = 'Sarı — yazı var, güvenilir yüzde–elyaf çifti yok. ' + advice;
+        } else {
+          message = 'Gri — yüzde ve elyaf henüz okunmadı. ' + advice;
+        }
+        status.style.color = liveScanner && (lastOcr?.cues?.length || lastOcr?.textPresent)
+          ? '#ffd45c' : '#c4cbd0';
+        // Avoid repeating the same aria-live announcement every 700ms.
+        if (status.textContent !== message) status.textContent = message;
+      };
+      const showBoxes = observation => {
+        overlay.replaceChildren();
+        if (!video.clientWidth || !video.clientHeight) return;
+        const scale = Math.min(video.clientWidth / video.videoWidth,
+          video.clientHeight / video.videoHeight);
+        const drawnW = video.videoWidth * scale, drawnH = video.videoHeight * scale;
+        const offsetX = (video.clientWidth - drawnW) / 2;
+        const offsetY = (video.clientHeight - drawnH) / 2;
+        for (const bb of observation.boxes) {
+          const mark = doc.createElement('div');
+          mark.style.cssText = 'position:absolute;box-sizing:border-box;border:2px solid #ffd45c;border-radius:3px';
+          mark.style.left = (offsetX + bb.x0 / observation.width * drawnW) + 'px';
+          mark.style.top = (offsetY + bb.y0 / observation.height * drawnH) + 'px';
+          mark.style.width = ((bb.x1 - bb.x0) / observation.width * drawnW) + 'px';
+          mark.style.height = ((bb.y1 - bb.y0) / observation.height * drawnH) + 'px';
+          overlay.appendChild(mark);
+        }
+      };
       const actions = doc.createElement('div');
       actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:center';
       const button = (label, action) => {
@@ -95,6 +149,7 @@
         doc.removeEventListener('visibilitychange', hidden);
         doc.removeEventListener('keydown', onKeyDown);
         root.removeEventListener('pagehide', pagehide);
+        liveScanner?.stop(); liveScanner = null;
         stopStream();
         canvas.width = canvas.height = 0;
         panel.remove();
@@ -109,6 +164,7 @@
       const captureButton = button('Fotoğrafı çek', async () => {
         if (capturing || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
+        liveScanner?.stop(); liveScanner = null;
         status.textContent = 'Fotoğraf hazırlanıyor…';
         try {
           let blob = null;
@@ -141,6 +197,7 @@
         // Use the input cancel event or the explicit İptal control instead.
         usingSystemPicker = true;
         if (interval !== null) { root.clearInterval(interval); interval = null; }
+        liveScanner?.stop(); liveScanner = null;
         stopStream(); // Never keep a live video stream behind native camera UI.
         status.textContent = 'Sistem kamerası açılıyor…';
         try { input.click(); } catch (_) { close(null, error('unavailableCamera')); }
@@ -150,7 +207,7 @@
       input.addEventListener('cancel', () => close(null));
       actions.appendChild(input);
       panel.appendChild(heading);
-      panel.appendChild(video);
+      panel.appendChild(frame);
       panel.appendChild(status);
       panel.appendChild(actions);
       doc.body.appendChild(panel);
@@ -165,19 +222,31 @@
         stream = got;
         video.srcObject = stream;
         Promise.resolve(video.play()).catch(() => {});
-        status.textContent = 'Kamerayı sabit tut. Canlı OCR henüz etkin değil; çekimden sonra doğrula.';
+        liveScanner = root.dokuLiveOcr?.create?.(
+          observation => {
+            if (done || capturing || usingSystemPicker) return;
+            lastOcr = observation;
+            showBoxes(observation);
+            renderStatus();
+          },
+          () => {
+            if (done) return;
+            liveScanner?.stop(); liveScanner = null;
+            overlay.replaceChildren();
+            renderStatus();
+          }
+        ) || null;
+        renderStatus();
         interval = root.setInterval(() => {
           if (done || capturing) return;
           try {
-            const metrics = sampleQuality(video, canvas);
-            const hint = root.dokuCaptureGuidance?.evaluate?.(metrics);
-            const advice = hint === 'veryDark' ? 'Işığı artır.'
-              : hint === 'veryBright' ? 'Parlamayı azalt.'
-              : hint === 'lowDetail' ? 'Etiketi yaklaştır ve odakla.'
-              : 'Etiketi çerçeveye al, kamerayı sabit tut.';
-            status.textContent = advice + ' Canlı OCR henüz etkin değil; çekimden sonra doğrula.';
+            lastMetrics = sampleQuality(video, canvas);
+            renderStatus();
+            // At most one local OCR pass in flight; the scanner drops stale
+            // timer ticks and uses a separate bounded 1200px frame.
+            if (!doc.hidden) void liveScanner?.sample(video);
           } catch (_) {
-            status.textContent = 'Kamerayı sabit tut. Canlı OCR henüz etkin değil; çekimden sonra doğrula.';
+            status.textContent = 'Gri — kamera kalitesi ölçülemedi. Fotoğraf sonrası doğrula.';
           }
         }, 700);
       }, e => {

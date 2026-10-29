@@ -42,7 +42,15 @@ const baseUrl = process.argv[2] || 'http://127.0.0.1:8082/etiket/';
       return {width: video.videoWidth, height: video.videoHeight};
     });
     assert.ok(details.width > 0 && details.height > 0, 'fake camera delivered live frames');
-    assert.equal(await dialog.getByText('Canlı OCR henüz etkin değil', {exact: false}).count() > 0, true);
+    // The live stream must not claim that OCR output is verified. Fake camera
+    // frames may contain no textile label, so only gray/yellow are permitted.
+    await page.waitForFunction(() => {
+      const status = document.querySelector('[role="dialog"] [role="status"]');
+      return status && /Gri|Sarı/.test(status.textContent);
+    }, null, {timeout: 25000});
+    const liveStatus = await dialog.locator('[role="status"]').textContent();
+    assert.match(liveStatus, /Gri|Sarı/);
+    assert.doesNotMatch(liveStatus, /Yeşil|kesin doğru|onaylandı/i);
     await dialog.getByRole('button', {name: 'Fotoğrafı çek', exact: true}).click();
     await dialog.waitFor({state: 'detached', timeout: 25000});
     await page.getByRole('button', {name: 'Fotoğraftaki metni oku', exact: true})
