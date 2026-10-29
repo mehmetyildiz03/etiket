@@ -51,6 +51,7 @@ function setup({permission = true, delayed = false} = {}) {
     removeEventListener: name => pageEvents.delete(name),
     setInterval: fn => { timer = fn; return 1; },
     clearInterval: () => { timer = null; },
+    setTimeout, clearTimeout,
     dokuCaptureGuidance: {evaluate: () => null}
   });
   vm.runInContext(source, context);
@@ -107,6 +108,11 @@ test('system camera fallback can supply a higher-resolution original file', asyn
   const panel = s.nodes[0];
   const input = panel.children[3].children.find(child => child.type === 'input');
   assert.ok(input);
+  await s.button('Sistem kamerası').emit('click');
+  assert.equal(s.tracks[0].stopped, true);
+  s.context.document.hidden = true;
+  s.docEvents.get('visibilitychange')();
+  assert.equal(s.nodes.length, 1, 'native camera must not be canceled on iOS backgrounding');
   const original = new Blob(['camera-original'], {type: 'image/jpeg'});
   input.files = [original];
   await input.emit('change');
