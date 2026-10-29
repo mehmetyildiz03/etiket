@@ -14,6 +14,28 @@
   const MAX_OCR_LATENCY_MS = 6000;
   const MAX_DRIFT = 0.15;
 
+  // Advisory only: visible OCR line geometry is NOT full-label coverage.
+  // Detect text touching the camera frame or text too small to inspect.
+  function geometryHint(reading) {
+    if (!reading || reading.stale || !Array.isArray(reading.boxes) ||
+        !Number.isFinite(reading.width) || reading.width <= 0 ||
+        !Number.isFinite(reading.height) || reading.height <= 0) return null;
+    const boxes = reading.boxes.filter(b => b &&
+      [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) &&
+      b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
+      b.x1 <= reading.width && b.y1 <= reading.height);
+    if (!boxes.length) return null;
+    const marginX = reading.width * 0.018;
+    const marginY = reading.height * 0.018;
+    if (boxes.some(b => b.x0 <= marginX || b.y0 <= marginY ||
+        b.x1 >= reading.width - marginX ||
+        b.y1 >= reading.height - marginY)) return 'edgeText';
+    const heights = boxes.map(b => (b.y1 - b.y0) / reading.height)
+      .sort((a, b) => a - b);
+    if (heights[Math.floor(heights.length / 2)] < 0.02) return 'smallText';
+    return null;
+  }
+
   function create() {
     let lastSequence = -1, lastTime = -Infinity, fingerprint = '',
       center = null, stableFrames = 0, observation = null, moved = false;
@@ -77,5 +99,5 @@
     }
     return Object.freeze({observe, view, clear});
   }
-  return Object.freeze({create});
+  return Object.freeze({create, geometryHint});
 });
