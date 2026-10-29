@@ -36,6 +36,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   String _fingerprint = '';
   Offset? _lastCenter;
   Map<String, Rect>? _lastPairBoxes;
+  Size? _lastOcrImageSize;
   int? _lastPairRotation;
   String _advice = 'Etiketi kameraya getir.';
   String? _error;
@@ -55,6 +56,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           _fingerprint = '';
           _lastCenter = null;
           _lastPairBoxes = null;
+          _lastOcrImageSize = null;
           _lastPairRotation = null;
           _stableFrames = 0;
           _advice = 'Önceki okuma eskidi. Etiketi sabitle ve tekrar odakla.';
@@ -195,7 +197,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   ({List<String> pairs, Offset? center, NativeFramingHint framing,
-      Map<String, Rect>? trackedBoxes})
+      Map<String, Rect>? trackedBoxes, Size? imageSize})
       _extract(RecognizedText recognized, CameraImage frame,
           int rotationDegrees) {
     final pairs = <String>[];
@@ -232,7 +234,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         duplicatePair: duplicatePair);
     return (pairs: pairs, center: geometry.center,
         framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown,
-        trackedBoxes: trackedBoxes);
+        trackedBoxes: trackedBoxes, imageSize: dimensions);
   }
 
   void _onFrame(CameraImage frame) {
@@ -264,6 +266,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             _fingerprint = '';
             _lastCenter = null;
             _lastPairBoxes = null;
+            _lastOcrImageSize = null;
             _lastPairRotation = null;
             _stableFrames = 0;
           });
@@ -308,6 +311,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         _fingerprint = goodObservation ? key : '';
         _lastCenter = goodObservation ? result.center : null;
         _lastPairBoxes = goodObservation ? result.trackedBoxes : null;
+        _lastOcrImageSize = goodObservation ? result.imageSize : null;
         _lastPairRotation = goodObservation ? rotationDegrees : null;
         _lastResult = DateTime.now();
       });
@@ -319,6 +323,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           _fingerprint = '';
           _lastCenter = null;
           _lastPairBoxes = null;
+          _lastOcrImageSize = null;
           _lastPairRotation = null;
           _stableFrames = 0;
           _advice = 'Canlı okuma yapılamadı. Sistem kamerasıyla çekmeyi dene.';
@@ -370,6 +375,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     _fingerprint = '';
     _lastCenter = null;
     _lastPairBoxes = null;
+    _lastOcrImageSize = null;
     _lastPairRotation = null;
     _stableFrames = 0;
     final camera = _controller;
@@ -413,6 +419,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       portraitUp: camera.value.deviceOrientation == DeviceOrientation.portraitUp,
       rotationDegrees: _lastPairRotation,
       previewSize: camera.value.previewSize,
+      ocrImageSize: _lastOcrImageSize,
       normalizedBoxes: _lastPairBoxes,
       stableFrames: _stableFrames,
     );
