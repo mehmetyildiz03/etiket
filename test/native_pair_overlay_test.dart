@@ -11,6 +11,7 @@ void main() {
     bool portraitUp = true,
     int? rotationDegrees = 90,
     Size? previewSize = preview,
+    Size? ocrImageSize = const Size(1080, 1920),
     Map<String, Rect>? normalizedBoxes = valid,
     int stableFrames = 2,
   }) => canShowNativePairOverlay(
@@ -19,6 +20,7 @@ void main() {
     portraitUp: portraitUp,
     rotationDegrees: rotationDegrees,
     previewSize: previewSize,
+    ocrImageSize: ocrImageSize,
     normalizedBoxes: normalizedBoxes,
     stableFrames: stableFrames,
   );
@@ -33,6 +35,9 @@ void main() {
     expect(ready(rotationDegrees: 0), isFalse);
     expect(ready(previewSize: const Size(1080, 1920)), isFalse);
     expect(ready(previewSize: null), isFalse);
+    expect(ready(ocrImageSize: null), isFalse);
+    expect(ready(ocrImageSize: const Size(1080, 1440)), isFalse);
+    expect(ready(ocrImageSize: const Size(0, 1920)), isFalse);
   });
 
   test('missing, duplicate-unsafe and out-of-frame OCR geometry hides overlay', () {
