@@ -53,6 +53,7 @@ void main() {
 
   testWidgets('provisional overlay has accessibility label and no gestures',
       (tester) async {
+    final semantics = tester.ensureSemantics();
     await tester.pumpWidget(const MaterialApp(
       home: Scaffold(body: SizedBox(
         width: 300, height: 400,
@@ -64,5 +65,6 @@ void main() {
     expect(find.bySemanticsLabel(
       'Sarı: tahmini yüzde ve elyaf satırları. Doğrulanmadı.'),
       findsOneWidget);
+    semantics.dispose();
   });
 }
