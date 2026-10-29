@@ -47,6 +47,7 @@
     const doc = root.document;
     return new Promise((resolve, reject) => {
       let done = false, stream = null, interval = null, capturing = false;
+      let usingSystemPicker = false, pickerTimer = null;
       const panel = doc.createElement('div');
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
@@ -79,21 +80,35 @@
       input.setAttribute('aria-label', 'Sistem kamerasıyla etiket çek');
       input.style.cssText = 'position:absolute;left:-10000px';
       const canvas = doc.createElement('canvas');
+      const stopStream = () => {
+        if (stream) {
+          for (const track of stream.getTracks()) track.stop();
+          stream = null;
+        }
+        try { video.pause(); } catch (_) { /* Failed startup. */ }
+        video.srcObject = null;
+      };
+      const onFocus = () => {
+        if (usingSystemPicker) {
+          // Allow a delayed file-input change event after native camera return.
+          pickerTimer = root.setTimeout(() => close(null), 1800);
+        }
+      };
       const close = (value, failure) => {
         if (done) return;
         done = true;
         if (interval !== null) root.clearInterval(interval);
+        if (pickerTimer !== null) root.clearTimeout(pickerTimer);
         doc.removeEventListener('visibilitychange', hidden);
         root.removeEventListener('pagehide', pagehide);
-        if (stream) for (const track of stream.getTracks()) track.stop();
-        try { video.pause(); } catch (_) { /* Safari can lack pause on failed startup. */ }
-        video.srcObject = null;
+        root.removeEventListener('focus', onFocus);
+        stopStream();
         canvas.width = canvas.height = 0;
         panel.remove();
         if (active === session) active = null;
         failure ? reject(failure) : resolve(value);
       };
-      const hidden = () => { if (doc.hidden) close(null); };
+      const hidden = () => { if (doc.hidden && !usingSystemPicker) close(null); };
       const pagehide = () => close(null);
       const session = {cancel: () => close(null)};
       active = session;
@@ -126,12 +141,16 @@
           if (!done) { capturing = false; status.textContent = 'Çekim başarısız. Tekrar dene veya sistem kamerasını kullan.'; }
         }
       });
-      button('Sistem kamerası (yüksek çözünürlük)', () => input.click());
-      button('İptal', () => close(null));
-      input.addEventListener('change', () => {
-        const file = input.files?.[0];
-        if (file) close(file);
+      button('Sistem kamerası (yüksek çözünürlük)', () => {
+        usingSystemPicker = true;
+        if (interval !== null) { root.clearInterval(interval); interval = null; }
+        stopStream(); // Never keep a live video stream behind native camera UI.
+        status.textContent = 'Sistem kamerası açılıyor…';
+        try { input.click(); } catch (_) { close(null, error('unavailableCamera')); }
       });
+      button('İptal', () => close(null));
+      input.addEventListener('change', () => close(input.files?.[0] || null));
+      input.addEventListener('cancel', () => close(null));
       actions.appendChild(input);
       panel.appendChild(heading);
       panel.appendChild(video);
@@ -140,10 +159,11 @@
       doc.body.appendChild(panel);
       doc.addEventListener('visibilitychange', hidden);
       root.addEventListener('pagehide', pagehide);
+      root.addEventListener('focus', onFocus);
       root.navigator.mediaDevices.getUserMedia({audio: false, video: {
         facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}
       }}).then(got => {
-        if (done) { got.getTracks().forEach(track => track.stop()); return; }
+        if (done || usingSystemPicker) { got.getTracks().forEach(track => track.stop()); return; }
         stream = got;
         video.srcObject = stream;
         Promise.resolve(video.play()).catch(() => {});
