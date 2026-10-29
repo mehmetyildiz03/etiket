@@ -110,6 +110,8 @@ test('system camera fallback can supply a higher-resolution original file', asyn
   assert.ok(input);
   await s.button('Sistem kamerası').emit('click');
   assert.equal(s.tracks[0].stopped, true);
+  assert.equal(s.pageEvents.has('focus'), false,
+    'returning from a slow native camera must not schedule premature cancellation');
   s.context.document.hidden = true;
   s.docEvents.get('visibilitychange')();
   assert.equal(s.nodes.length, 1, 'native camera must not be canceled on iOS backgrounding');
@@ -154,6 +156,18 @@ test('keyboard Escape cancels the preview and closes the camera stream', async (
   const handler = s.docEvents.get('keydown');
   assert.equal(typeof handler, 'function');
   handler({key: 'Escape'});
+  assert.equal(await pending, null);
+  assert.equal(s.tracks[0].stopped, true);
+  assert.equal(s.nodes.length, 0);
+});
+
+test('native picker cancellation releases the session without a fake photo', async () => {
+  const s = setup();
+  const pending = s.api.open();
+  await Promise.resolve();
+  const input = s.nodes[0].children[3].children.find(child => child.type === 'file');
+  await s.button('Sistem kamerası').emit('click');
+  await input.emit('cancel');
   assert.equal(await pending, null);
   assert.equal(s.tracks[0].stopped, true);
   assert.equal(s.nodes.length, 0);
