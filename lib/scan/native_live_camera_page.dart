@@ -114,7 +114,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             ? (sensor + device) % 360 : (sensor - device + 360) % 360;
   }
 
-  InputImage? _inputImage(CameraImage frame, CameraController camera) {
+  InputImage? _inputImage(CameraImage frame, int rotationDegrees) {
     if (frame.width <= 0 || frame.height <= 0) return null;
 
     // CameraX may deliver three YUV_420_888 planes even if NV21 was
@@ -154,9 +154,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       bytesPerRow = frame.planes.first.bytesPerRow;
     }
 
-    final degrees = _rotationDegrees(camera);
-    if (degrees == null) return null;
-    final rotation = InputImageRotationValue.fromRawValue(degrees);
+    final rotation = InputImageRotationValue.fromRawValue(rotationDegrees);
     if (rotation == null) return null;
     return InputImage.fromBytes(
       bytes: bytes,
@@ -186,7 +184,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   ({List<String> pairs, Offset? center, NativeFramingHint framing})
       _extract(RecognizedText recognized, CameraImage frame,
-          CameraController camera) {
+          int rotationDegrees) {
     final pairs = <String>[];
     final boxes = <Rect>[];
     for (final block in recognized.blocks) {
@@ -199,18 +197,16 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         boxes.add(line.boundingBox);
       }
     }
-    final rotation = _rotationDegrees(camera);
-    // Android ML Kit boxes are in rotated OCR space. Do not assume the
-    // camera's raw landscape dimensions for portrait OCR line positions.
-    // iOS orientation/preview alignment needs a physical device gate:
-    // retain hints but do not issue unverified framing directions there.
-    final rotated = Platform.isAndroid && (rotation == 90 || rotation == 270);
-    final dimensions = Size(
-      (rotated ? frame.height : frame.width).toDouble(),
-      (rotated ? frame.width : frame.height).toDouble(),
-    );
-    final geometry = assessNativePairGeometry(
-      imageSize: dimensions, pairLineBoxes: boxes);
+    // Use the SAME orientation captured for the ML Kit input. The camera
+    // orientation can change while asynchronous OCR is processing.
+    // iOS stays on generic guidance until physical preview calibration.
+    final dimensions = nativeOcrImageSize(
+      width: frame.width, height: frame.height,
+      rotationDegrees: rotationDegrees, android: Platform.isAndroid);
+    final geometry = dimensions == null
+        ? const NativePairGeometry(null, NativeFramingHint.unknown)
+        : assessNativePairGeometry(
+            imageSize: dimensions, pairLineBoxes: boxes);
     return (pairs: pairs, center: geometry.center,
         framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown);
   }
@@ -233,7 +229,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       final recognizer = _recognizer;
       if (camera == null || recognizer == null) { return; }
       final quality = _quality(frame);
-      final input = _inputImage(frame, camera);
+      final rotationDegrees = _rotationDegrees(camera);
+      final input = rotationDegrees == null ? null : _inputImage(frame, rotationDegrees);
       if (input == null) {
         if (mounted && token == _generation) {
           setState(() {
@@ -248,7 +245,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         return;
       }
       final recognized = await recognizer.processImage(input);
-      final result = _extract(recognized, frame, camera);
+      // A rotated phone makes old bounding boxes unsafe for framing hints.
+      // Discard the entire stale result; the next sampled frame will retry.
+      if (_rotationDegrees(camera) != rotationDegrees) return;
+      final result = _extract(recognized, frame, rotationDegrees!);
       final elapsed = DateTime.now().difference(started);
       if (!mounted || _closed || _capturing || token != _generation ||
           elapsed.inMilliseconds > 6000 || sequence != _sequence) { return; }
