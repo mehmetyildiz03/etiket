@@ -52,7 +52,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       final rear = cameras.where((c) => c.lensDirection == CameraLensDirection.back);
       final description = rear.isNotEmpty ? rear.first : cameras.first;
       controller = CameraController(
-        description, ResolutionPreset.high, enableAudio: false,
+        description, ResolutionPreset.ultraHigh, enableAudio: false,
         imageFormatGroup: Platform.isAndroid
             ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
       );
