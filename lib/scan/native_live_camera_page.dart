@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import 'live_frame_quality.dart';
+import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_yuv420_nv21.dart';
 
@@ -24,6 +24,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     with WidgetsBindingObserver {
   CameraController? _controller;
   TextRecognizer? _recognizer;
+  Timer? _staleTimer;
   bool _starting = true, _reading = false, _capturing = false, _closed = false;
   int _generation = 0, _sequence = 0, _stableFrames = 0;
   DateTime _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
@@ -39,6 +40,20 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _staleTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || _closed || _capturing) return;
+      if ((_pairs.isNotEmpty || _textPresent) &&
+          DateTime.now().difference(_lastResult).inMilliseconds > 6000) {
+        setState(() {
+          _pairs = const [];
+          _textPresent = false;
+          _fingerprint = '';
+          _lastCenter = null;
+          _stableFrames = 0;
+          _advice = 'Önceki okuma eskidi. Etiketi sabitle ve tekrar odakla.';
+        });
+      }
+    });
     unawaited(_start());
   }
 
@@ -147,24 +162,20 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   LiveFrameQuality _quality(CameraImage frame) {
-    if (frame.planes.isEmpty) { return LiveFrameQuality.unknown; }
-    final bytes = frame.planes.first.bytes;
-    final pixelCount = frame.width * frame.height;
-    if (pixelCount <= 0) { return LiveFrameQuality.unknown; }
+    if (frame.planes.isEmpty) return LiveFrameQuality.unknown;
+    final plane = frame.planes.first;
     final isBgra = Platform.isIOS;
-    final step = math.max(1, pixelCount ~/ 512);
-    final values = Uint8List((pixelCount / step).ceil());
-    var count = 0;
-    for (var pixel = 0; pixel < pixelCount; pixel += step) {
-      final offset = pixel * (isBgra ? 4 : 1);
-      if (offset + (isBgra ? 2 : 0) >= bytes.length) { break; }
-      values[count++] = isBgra
-          ? ((bytes[offset] * 0.114) +
-              (bytes[offset + 1] * 0.587) +
-              (bytes[offset + 2] * 0.299)).round()
-          : bytes[offset];
-    }
-    return assessLiveLuminance(Uint8List.sublistView(values, 0, count));
+    final samples = sampleNativeLuminance(
+      bytes: plane.bytes,
+      width: frame.width,
+      height: frame.height,
+      rowStride: plane.bytesPerRow,
+      pixelStride: plane.bytesPerPixel ?? (isBgra ? 4 : 1),
+      bgra: isBgra,
+    );
+    return samples == null
+        ? LiveFrameQuality.unknown
+        : assessLiveLuminance(samples);
   }
 
   ({List<String> pairs, Offset? center}) _extract(RecognizedText recognized,
@@ -214,6 +225,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           setState(() {
             _advice = 'Bu kameranın kare biçimi desteklenmiyor. Sistem kamerasını kullan.';
             _pairs = const [];
+            _textPresent = false;
+            _fingerprint = '';
+            _lastCenter = null;
             _stableFrames = 0;
           });
         }
@@ -243,6 +257,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       if (mounted && token == _generation && !_closed) {
         setState(() {
           _pairs = const [];
+          _textPresent = false;
+          _fingerprint = '';
+          _lastCenter = null;
           _stableFrames = 0;
           _advice = 'Canlı okuma yapılamadı. Sistem kamerasıyla çekmeyi dene.';
         });
@@ -274,6 +291,11 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   Future<void> _shutdown() async {
     ++_generation;
+    _pairs = const [];
+    _textPresent = false;
+    _fingerprint = '';
+    _lastCenter = null;
+    _stableFrames = 0;
     final camera = _controller;
     final recognizer = _recognizer;
     _controller = null;
@@ -298,6 +320,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   @override
   void dispose() {
     _closed = true;
+    _staleTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     unawaited(_shutdown());
     super.dispose();
