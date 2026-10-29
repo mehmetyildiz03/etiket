@@ -18,7 +18,7 @@ NativePairGeometry assessNativePairGeometry({
 }) {
   final width = imageSize.width, height = imageSize.height;
   if (!width.isFinite || !height.isFinite || width <= 0 || height <= 0 ||
-      width * height > 12000000 || pairLineBoxes.isEmpty) {
+      width * height > 48000000 || pairLineBoxes.isEmpty) {
     return const NativePairGeometry(null, NativeFramingHint.unknown);
   }
   for (final box in pairLineBoxes) {
