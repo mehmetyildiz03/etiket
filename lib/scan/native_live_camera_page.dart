@@ -1,13 +1,11 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
-import 'package:image_picker/image_picker.dart';
 
 import 'live_frame_quality.dart';
 import 'live_pair_hints.dart';
@@ -47,10 +45,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final token = ++_generation;
     CameraController? controller;
     TextRecognizer? recognizer;
-    if (mounted) setState(() { _starting = true; _error = null; });
+    if (mounted) { setState(() { _starting = true; _error = null; }); }
     try {
       final cameras = await availableCameras();
-      if (cameras.isEmpty) throw StateError('no camera');
+      if (cameras.isEmpty) { throw StateError('no camera'); }
       final rear = cameras.where((c) => c.lensDirection == CameraLensDirection.back);
       final description = rear.isNotEmpty ? rear.first : cameras.first;
       controller = CameraController(
@@ -59,7 +57,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
       );
       await controller.initialize();
-      if (!mounted || token != _generation || _closed) return;
+      if (!mounted || token != _generation || _closed) { return; }
       recognizer = TextRecognizer(script: TextRecognitionScript.latin);
       _controller = controller;
       _recognizer = recognizer;
@@ -85,7 +83,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   InputImage? _inputImage(CameraImage frame, CameraController camera) {
-    if (frame.planes.length != 1 || frame.width <= 0 || frame.height <= 0) return null;
+    if (frame.planes.length != 1 || frame.width <= 0 || frame.height <= 0) { return null; }
     final format = InputImageFormatValue.fromRawValue(frame.format.raw);
     if (format == null ||
         (Platform.isAndroid && format != InputImageFormat.nv21) ||
@@ -98,12 +96,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     };
     final sensor = camera.description.sensorOrientation;
     final device = orientations[camera.value.deviceOrientation];
-    if (device == null) return null;
+    if (device == null) { return null; }
     final degrees = Platform.isIOS ? sensor :
         camera.description.lensDirection == CameraLensDirection.front
             ? (sensor + device) % 360 : (sensor - device + 360) % 360;
     final rotation = InputImageRotationValue.fromRawValue(degrees);
-    if (rotation == null) return null;
+    if (rotation == null) { return null; }
     final plane = frame.planes.first;
     return InputImage.fromBytes(
       bytes: plane.bytes,
@@ -115,17 +113,17 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   LiveFrameQuality _quality(CameraImage frame) {
-    if (frame.planes.isEmpty) return LiveFrameQuality.unknown;
+    if (frame.planes.isEmpty) { return LiveFrameQuality.unknown; }
     final bytes = frame.planes.first.bytes;
     final pixelCount = frame.width * frame.height;
-    if (pixelCount <= 0) return LiveFrameQuality.unknown;
+    if (pixelCount <= 0) { return LiveFrameQuality.unknown; }
     final isBgra = Platform.isIOS;
     final step = math.max(1, pixelCount ~/ 512);
     final values = Uint8List((pixelCount / step).ceil());
     var count = 0;
     for (var pixel = 0; pixel < pixelCount; pixel += step) {
       final offset = pixel * (isBgra ? 4 : 1);
-      if (offset + (isBgra ? 2 : 0) >= bytes.length) break;
+      if (offset + (isBgra ? 2 : 0) >= bytes.length) { break; }
       values[count++] = isBgra
           ? ((bytes[offset] * 0.114) +
               (bytes[offset + 1] * 0.587) +
@@ -142,7 +140,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     for (final block in recognized.blocks) {
       for (final line in block.lines) {
         for (final pair in livePairsFromLine(line.text)) {
-          if (!pairs.contains(pair) && pairs.length < 8) pairs.add(pair);
+          if (!pairs.contains(pair) && pairs.length < 8) { pairs.add(pair); }
           final box = line.boundingBox;
           if (box.width > 0 && box.height > 0) {
             centers.add(Offset(box.center.dx / frame.width,
@@ -160,9 +158,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   void _onFrame(CameraImage frame) {
     if (_closed || _reading || _capturing || _controller == null ||
-        _recognizer == null) return;
+        _recognizer == null) { return; }
     final now = DateTime.now();
-    if (now.difference(_lastSample).inMilliseconds < 1800) return;
+    if (now.difference(_lastSample).inMilliseconds < 1800) { return; }
     _lastSample = now;
     _reading = true;
     final token = _generation, sequence = ++_sequence;
@@ -174,7 +172,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     try {
       final camera = _controller;
       final recognizer = _recognizer;
-      if (camera == null || recognizer == null) return;
+      if (camera == null || recognizer == null) { return; }
       final quality = _quality(frame);
       final input = _inputImage(frame, camera);
       if (input == null) {
@@ -191,7 +189,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       final result = _extract(recognized, frame);
       final elapsed = DateTime.now().difference(started);
       if (!mounted || _closed || _capturing || token != _generation ||
-          elapsed.inMilliseconds > 6000 || sequence != _sequence) return;
+          elapsed.inMilliseconds > 6000 || sequence != _sequence) { return; }
       final fingerprint = [...result.pairs]..sort();
       final key = fingerprint.join('|');
       final drift = _lastCenter != null && result.center != null &&
@@ -222,13 +220,13 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   Future<void> _takePicture() async {
     final camera = _controller;
-    if (camera == null || _capturing || _closed || !camera.value.isInitialized) return;
+    if (camera == null || _capturing || _closed || !camera.value.isInitialized) { return; }
     setState(() => _capturing = true);
     ++_generation; // Late preview OCR must not alter the captured photo.
     try {
-      if (camera.value.isStreamingImages) await camera.stopImageStream();
+      if (camera.value.isStreamingImages) { await camera.stopImageStream(); }
       final still = await camera.takePicture();
-      if (!mounted || _closed) return;
+      if (!mounted || _closed) { return; }
       Navigator.of(context).pop(still); // Full still; OCR is performed later.
     } catch (_) {
       if (mounted && !_closed) {
@@ -247,7 +245,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     _controller = null;
     _recognizer = null;
     try {
-      if (camera?.value.isStreamingImages ?? false) await camera!.stopImageStream();
+      if (camera?.value.isStreamingImages ?? false) { await camera!.stopImageStream(); }
     } catch (_) { /* Camera may have already stopped. */ }
     await camera?.dispose();
     await recognizer?.close();
