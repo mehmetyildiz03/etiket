@@ -9,6 +9,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 import 'live_frame_quality.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
+import 'native_pair_geometry.dart';
 import 'native_yuv420_nv21.dart';
 
 /// Android/iOS camera stream. OCR is a temporary, unverified hint only.
@@ -98,6 +99,21 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     }
   }
 
+  int? _rotationDegrees(CameraController camera) {
+    const orientations = {
+      DeviceOrientation.portraitUp: 0,
+      DeviceOrientation.landscapeLeft: 90,
+      DeviceOrientation.portraitDown: 180,
+      DeviceOrientation.landscapeRight: 270,
+    };
+    final device = orientations[camera.value.deviceOrientation];
+    if (device == null) return null;
+    final sensor = camera.description.sensorOrientation;
+    return Platform.isIOS ? sensor :
+        camera.description.lensDirection == CameraLensDirection.front
+            ? (sensor + device) % 360 : (sensor - device + 360) % 360;
+  }
+
   InputImage? _inputImage(CameraImage frame, CameraController camera) {
     if (frame.width <= 0 || frame.height <= 0) return null;
 
@@ -138,18 +154,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       bytesPerRow = frame.planes.first.bytesPerRow;
     }
 
-    const orientations = {
-      DeviceOrientation.portraitUp: 0,
-      DeviceOrientation.landscapeLeft: 90,
-      DeviceOrientation.portraitDown: 180,
-      DeviceOrientation.landscapeRight: 270,
-    };
-    final sensor = camera.description.sensorOrientation;
-    final device = orientations[camera.value.deviceOrientation];
-    if (device == null) return null;
-    final degrees = Platform.isIOS ? sensor :
-        camera.description.lensDirection == CameraLensDirection.front
-            ? (sensor + device) % 360 : (sensor - device + 360) % 360;
+    final degrees = _rotationDegrees(camera);
+    if (degrees == null) return null;
     final rotation = InputImageRotationValue.fromRawValue(degrees);
     if (rotation == null) return null;
     return InputImage.fromBytes(
@@ -178,27 +184,35 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         : assessLiveLuminance(samples);
   }
 
-  ({List<String> pairs, Offset? center}) _extract(RecognizedText recognized,
-      CameraImage frame) {
+  ({List<String> pairs, Offset? center, NativeFramingHint framing})
+      _extract(RecognizedText recognized, CameraImage frame,
+          CameraController camera) {
     final pairs = <String>[];
-    final centers = <Offset>[];
+    final boxes = <Rect>[];
     for (final block in recognized.blocks) {
       for (final line in block.lines) {
-        for (final pair in livePairsFromLine(line.text)) {
-          if (!pairs.contains(pair) && pairs.length < 8) { pairs.add(pair); }
-          final box = line.boundingBox;
-          if (box.width > 0 && box.height > 0) {
-            centers.add(Offset(box.center.dx / frame.width,
-                box.center.dy / frame.height));
-          }
+        final matches = livePairsFromLine(line.text);
+        if (matches.isEmpty) continue;
+        for (final pair in matches) {
+          if (!pairs.contains(pair) && pairs.length < 8) pairs.add(pair);
         }
+        boxes.add(line.boundingBox);
       }
     }
-    final center = centers.isEmpty ? null : Offset(
-      centers.map((p) => p.dx).reduce((a, b) => a + b) / centers.length,
-      centers.map((p) => p.dy).reduce((a, b) => a + b) / centers.length,
+    final rotation = _rotationDegrees(camera);
+    // Android ML Kit boxes are in rotated OCR space. Do not assume the
+    // camera's raw landscape dimensions for portrait OCR line positions.
+    // iOS orientation/preview alignment needs a physical device gate:
+    // retain hints but do not issue unverified framing directions there.
+    final rotated = Platform.isAndroid && (rotation == 90 || rotation == 270);
+    final dimensions = Size(
+      (rotated ? frame.height : frame.width).toDouble(),
+      (rotated ? frame.width : frame.height).toDouble(),
     );
-    return (pairs: pairs, center: center);
+    final geometry = assessNativePairGeometry(
+      imageSize: dimensions, pairLineBoxes: boxes);
+    return (pairs: pairs, center: geometry.center,
+        framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown);
   }
 
   void _onFrame(CameraImage frame) {
@@ -234,7 +248,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         return;
       }
       final recognized = await recognizer.processImage(input);
-      final result = _extract(recognized, frame);
+      final result = _extract(recognized, frame, camera);
       final elapsed = DateTime.now().difference(started);
       if (!mounted || _closed || _capturing || token != _generation ||
           elapsed.inMilliseconds > 6000 || sequence != _sequence) { return; }
@@ -247,7 +261,17 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       setState(() {
         _pairs = result.pairs;
         _textPresent = recognized.text.trim().isNotEmpty;
-        _advice = liveQualityAdvice(quality);
+        _advice = quality != LiveFrameQuality.usable
+            ? liveQualityAdvice(quality)
+            : switch (result.framing) {
+                NativeFramingHint.moveBack =>
+                  'Yüzde–elyaf satırı kenara yakın. Biraz uzaklaş ve etiketi ortala.',
+                NativeFramingHint.moveCloser =>
+                  'Yüzde–elyaf satırı küçük. Biraz yakınlaş ve odakla.',
+                NativeFramingHint.steady =>
+                  'Eşleşen satır görünüyor. Tüm etiketi kadraja al ve sabitle.',
+                NativeFramingHint.unknown => liveQualityAdvice(quality),
+              };
         _stableFrames = key.isEmpty ? 0 : stable ? _stableFrames + 1 : 1;
         _fingerprint = key;
         _lastCenter = result.center;
