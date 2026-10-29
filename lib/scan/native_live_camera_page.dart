@@ -11,6 +11,7 @@ import 'native_camera_recovery.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_pair_geometry.dart';
+import 'native_pair_overlay.dart';
 import 'native_yuv420_nv21.dart';
 
 /// Android/iOS camera stream. OCR is a temporary, unverified hint only.
@@ -406,6 +407,15 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final camera = _controller;
     final available = camera != null && camera.value.isInitialized;
     final hasPairs = _pairs.isNotEmpty;
+    final showBoxes = available && canShowNativePairOverlay(
+      android: Platform.isAndroid,
+      rearCamera: camera.description.lensDirection == CameraLensDirection.back,
+      portraitUp: camera.value.deviceOrientation == DeviceOrientation.portraitUp,
+      rotationDegrees: _lastPairRotation,
+      previewSize: camera.value.previewSize,
+      normalizedBoxes: _lastPairBoxes,
+      stableFrames: _stableFrames,
+    );
     final label = hasPairs ? 'Sarı — doğrulanmamış yüzde ve elyaf adayları'
         : _textPresent ? 'Sarı — yazı algılandı, eşleşme belirsiz'
         : 'Gri — yüzde ve elyaf okunmadı';
@@ -413,7 +423,14 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       appBar: AppBar(title: const Text('Canlı etiket tarama')),
       body: SafeArea(child: Column(children: [
         Expanded(child: Center(child: available
-            ? CameraPreview(camera)
+            ? AspectRatio(
+                aspectRatio: 1 / camera.value.aspectRatio,
+                child: Stack(fit: StackFit.expand, children: [
+                  CameraPreview(camera),
+                  if (showBoxes)
+                    NativePairOverlay(normalizedBoxes: _lastPairBoxes!),
+                ]),
+              )
             : const Icon(Icons.camera_alt_outlined, size: 64))),
         Padding(padding: const EdgeInsets.all(16), child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -426,6 +443,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                 key: const ValueKey('native-live-pairs')),
             if (_stableFrames >= 2)
               Text('$_stableFrames ayrı karede benzer adaylar görüldü; doğrulanmadı.'),
+            if (showBoxes)
+              const Text('Sarı çerçeveler tahmini OCR satır yeridir; kesin doğruluk değildir.',
+                  style: TextStyle(fontSize: 12)),
             Text(_advice),
             const Text('Yeşil hazır değil: tüm etiket görünürlüğü doğrulanmadı. '
                 'Fotoğraf sonrası gerçek OCR, metin düzeltmesi ve açık onay gerekir.',
