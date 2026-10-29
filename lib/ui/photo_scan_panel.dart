@@ -11,12 +11,14 @@ class PhotoScanPanel extends StatelessWidget {
     required this.onManual,
     required this.onPaste,
     this.onEdit,
+    this.onLiveCapture,
   });
   final PhotoScanController scan;
   final VoidCallback onReview;
   final VoidCallback onManual;
   final VoidCallback onPaste;
   final VoidCallback? onEdit;
+  final VoidCallback? onLiveCapture;
 
   @override
   Widget build(BuildContext context) {
@@ -31,13 +33,21 @@ class PhotoScanPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (scan.photos.supported) ...[
+          if (onLiveCapture != null) ...[
+            FilledButton.icon(
+              onPressed: scan.canPick ? onLiveCapture : null,
+              icon: const Icon(Icons.center_focus_strong),
+              label: const Text('Canlı akıllı tarama (deneysel)'),
+            ),
+            const SizedBox(height: 10),
+          ],
           if (presentation?.cameraAvailable ?? true)
             FilledButton.icon(
               onPressed: scan.canPick
                   ? () => scan.pick(PhotoSource.camera)
                   : null,
               icon: const Icon(Icons.camera_alt_outlined),
-              label: const Text('Fotoğraf çek'),
+              label: Text(onLiveCapture == null ? 'Fotoğraf çek' : 'Sistem kamerasıyla çek'),
             ),
           const SizedBox(height: 10),
           OutlinedButton.icon(

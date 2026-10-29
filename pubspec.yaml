@@ -9,6 +9,7 @@ dependencies:
   flutter:
     sdk: flutter
   image_picker: 1.2.4
+  camera: 0.12.1
   google_mlkit_text_recognition: 0.17.1
   web: 1.1.1
   shared_preferences: 2.5.6
