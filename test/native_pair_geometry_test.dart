@@ -6,6 +6,57 @@ import 'package:etiket/scan/native_pair_geometry.dart';
 void main() {
   const portrait = Size(1080, 1920);
 
+  test('spatially stable percentage-fiber boxes agree despite small jitter', () {
+    final a = normalizeNativePairBoxes(imageSize: portrait, pairBoxes: {
+      '80% pamuk': const Rect.fromLTWH(200, 500, 400, 60),
+      '20% polyester': const Rect.fromLTWH(200, 600, 400, 60),
+    });
+    final b = normalizeNativePairBoxes(imageSize: portrait, pairBoxes: {
+      '80% pamuk': const Rect.fromLTWH(205, 506, 398, 60),
+      '20% polyester': const Rect.fromLTWH(205, 606, 398, 60),
+    });
+    expect(nativePairBoxesAgree(a, b), isTrue);
+  });
+
+  test('same words and same centroid do not hide swapped line positions', () {
+    final before = normalizeNativePairBoxes(imageSize: portrait, pairBoxes: {
+      '80% pamuk': const Rect.fromLTWH(200, 400, 400, 60),
+      '20% polyester': const Rect.fromLTWH(200, 1000, 400, 60),
+    });
+    final after = normalizeNativePairBoxes(imageSize: portrait, pairBoxes: {
+      '80% pamuk': const Rect.fromLTWH(200, 1000, 400, 60),
+      '20% polyester': const Rect.fromLTWH(200, 400, 400, 60),
+    });
+    expect(nativePairBoxesAgree(before, after), isFalse);
+  });
+
+  test('pair set, zoom changes and missing boxes never count as stable', () {
+    final first = normalizeNativePairBoxes(imageSize: portrait, pairBoxes: {
+      '80% pamuk': const Rect.fromLTWH(200, 500, 400, 60),
+    });
+    final different = normalizeNativePairBoxes(imageSize: portrait, pairBoxes: {
+      '80% keten': const Rect.fromLTWH(200, 500, 400, 60),
+    });
+    final zoomed = normalizeNativePairBoxes(imageSize: portrait, pairBoxes: {
+      '80% pamuk': const Rect.fromLTWH(100, 450, 800, 120),
+    });
+    expect(nativePairBoxesAgree(first, different), isFalse);
+    expect(nativePairBoxesAgree(first, zoomed), isFalse);
+    expect(nativePairBoxesAgree(first, null), isFalse);
+  });
+
+  test('ambiguous duplicate or out-of-frame OCR boxes fail closed', () {
+    expect(normalizeNativePairBoxes(imageSize: portrait,
+      pairBoxes: {'80% pamuk': const Rect.fromLTWH(200, 500, 400, 60)},
+      duplicatePair: true), isNull);
+    expect(normalizeNativePairBoxes(imageSize: portrait,
+      pairBoxes: {'80% pamuk': const Rect.fromLTWH(-1, 500, 400, 60)}), isNull);
+    expect(normalizeNativePairBoxes(imageSize: portrait,
+      pairBoxes: {'80% pamuk': const Rect.fromLTWH(200, 500, 400, 60)}),
+      isNotNull);
+  });
+
+
   test('Android OCR box dimensions follow the exact input rotation', () {
     for (final angle in [90, 270]) {
       expect(nativeOcrImageSize(width: 1920, height: 1080,
