@@ -15,12 +15,82 @@
   const before = new RegExp('(?:^|[^\\p{L}\\p{N}])(?:%\\s*(' + number + ')|(' + number + ')\\s*%)\\s*(' + fibers + ')(?![\\p{L}])', 'giu');
   const after = new RegExp('(?:^|[^\\p{L}])(' + fibers + ')\\s*(?:%\\s*(' + number + ')|(' + number + ')\\s*%)', 'giu');
 
+  // Tesseract sometimes separates a printed "80% PAMUK" row into two OCR
+  // lines. Recover only literal, isolated tokens in ONE OCR block and ONE
+  // horizontal row. This is an unverified yellow hint, not an accepted value.
+  function spatialCandidates(lines, width, height) {
+    if (!Number.isFinite(width) || !Number.isFinite(height) ||
+        width <= 0 || height <= 0 || width * height > 48000000 ||
+        lines.length < 2 || lines.length > 64) return [];
+    const ratios = [], names = [];
+    const isolatedPercent = /^(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)$/u;
+    const isolatedName = new RegExp('^(?:' + fibers + ')$', 'iu');
+    for (let i = 0; i < lines.length; i++) {
+      const {text, box} = lines[i];
+      if (!box || ![box.x0, box.y0, box.x1, box.y1].every(Number.isFinite) ||
+          box.x0 < 0 || box.y0 < 0 || box.x1 <= box.x0 || box.y1 <= box.y0 ||
+          box.x1 > width || box.y1 > height) return [];
+      const value = text.trim();
+      const match = isolatedPercent.exec(value);
+      if (match) {
+        const percent = Number(match[1] || match[2]);
+        if (percent > 0 && percent <= 100) ratios.push({i, percent});
+      } else if (isolatedName.test(value)) {
+        names.push({i, fiber: value.toLocaleLowerCase('tr')});
+      }
+    }
+    if (!ratios.length || !names.length || ratios.length > 8 ||
+        names.length > 8) return [];
+    function adjacent(ai, bi) {
+      const a = lines[ai].box, b = lines[bi].box;
+      const left = a.x0 <= b.x0 ? a : b;
+      const right = left === a ? b : a;
+      if (left.x1 >= right.x0) return false;
+      const ah = a.y1 - a.y0, bh = b.y1 - b.y0;
+      const overlap = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      if (overlap < .65 * Math.min(ah, bh) ||
+          Math.abs((a.y0 + a.y1 - b.y0 - b.y1) / 2) >
+            .35 * Math.max(ah, bh) ||
+          right.x0 - left.x1 > Math.min(width * .10, Math.max(ah, bh) * 3)) {
+        return false;
+      }
+      // Intervening or overlapping OCR tokens make the association ambiguous.
+      for (let i = 0; i < lines.length; i++) {
+        if (i === ai || i === bi) continue;
+        const other = lines[i].box;
+        const intersects = (p, q) => p.x0 < q.x1 && p.x1 > q.x0 &&
+          p.y0 < q.y1 && p.y1 > q.y0;
+        if (intersects(other, a) || intersects(other, b)) return false;
+        const sameRow = Math.min(other.y1, a.y1, b.y1) -
+          Math.max(other.y0, a.y0, b.y0) > 0;
+        if (sameRow && other.x0 < right.x0 && other.x1 > left.x1) return false;
+      }
+      return true;
+    }
+    const found = [], keys = new Set();
+    for (const ratio of ratios) {
+      const matches = names.filter(name => adjacent(ratio.i, name.i));
+      if (matches.length !== 1) continue;
+      const name = matches[0];
+      if (ratios.filter(other => adjacent(other.i, name.i)).length !== 1) continue;
+      const key = ratio.percent + ':' + name.fiber;
+      if (keys.has(key)) return []; // Repeated values cannot be tracked uniquely.
+      keys.add(key);
+      const a = lines[ratio.i].box, b = lines[name.i].box;
+      found.push({percent: ratio.percent, fiber: name.fiber,
+        box: {x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0),
+          x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1)}});
+    }
+    return found;
+  }
+
   function extract(data, width, height, sequence, durationMs) {
     const boxes = [], pairBoxes = [], cues = [], pairObservations = [];
     const unique = new Set(), duplicateKeys = new Set();
     let textPresent = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
     for (const block of blocks) {
+      const blockLines = [];
       for (const paragraph of (block.paragraphs || []).slice(0, 30)) {
         for (const line of (paragraph.lines || []).slice(0, 30)) {
           const value = typeof line.text === 'string' ? line.text : '';
@@ -33,6 +103,7 @@
           // Only a visible, retained OCR line can receive a matched-pair box.
           const lineBox = validBox ?
             {x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1} : null;
+          blockLines.push({text: value, box: lineBox});
           // Only literal percent-marked fiber pairs on the SAME OCR line.
           // Do not infer missing %, section, full-label coverage or correctness.
           // Select a single reading order per line. Running both regexes
@@ -100,6 +171,36 @@
               }
             }
           }
+        }
+      }
+      // Spatially split tokens are only advisory; never fill in a missing
+      // percentage or fiber. The union box comes from two real OCR boxes.
+      for (const candidate of spatialCandidates(blockLines, width, height)) {
+        const key = candidate.percent + ':' + candidate.fiber;
+        if (unique.has(key)) {
+          duplicateKeys.add(key);
+          continue;
+        }
+        if (cues.length >= 8) continue;
+        unique.add(key);
+        cues.push({percent: candidate.percent, fiber: candidate.fiber});
+        let retained = boxes.length < 24;
+        if (!retained) {
+          for (let i = boxes.length - 1; i >= 0; i--) {
+            const previous = boxes[i];
+            if (!pairBoxes.some(p => p.x0 === previous.x0 &&
+                p.y0 === previous.y0 && p.x1 === previous.x1 &&
+                p.y1 === previous.y1)) {
+              boxes.splice(i, 1);
+              retained = true;
+              break;
+            }
+          }
+        }
+        if (retained) {
+          boxes.push(candidate.box);
+          pairBoxes.push(candidate.box);
+          pairObservations.push(candidate);
         }
       }
     }

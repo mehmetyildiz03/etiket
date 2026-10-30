@@ -211,3 +211,71 @@ test('web live OCR never treats repeated or unboxed pair text as stable geometry
   assert.equal(invalid.pairObservations.length, 0);
   assert.equal('rawText' in repeated, false);
 });
+
+
+test('web live OCR recovers printed percentage and fiber split into adjacent row tokens', () => {
+  const s = setup();
+  const data = result(
+    line('80%', {x0: 100, y0: 300, x1: 165, y1: 335}),
+    line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337}),
+    line('%20', {x0: 100, y0: 400, x1: 165, y1: 435}),
+    line('KETEN', {x0: 185, y0: 402, x1: 300, y1: 437}));
+  const out = s.api.extract(data.data, 1200, 675, 7, 120);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
+    [[100, 300, 300, 337], [100, 400, 300, 437]]);
+  assert.equal(out.pairObservations.length, 2);
+  assert.ok(out.pairBoxes.every(b => out.boxes.some(x =>
+    x.x0 === b.x0 && x.y0 === b.y0 && x.x1 === b.x1 && x.y1 === b.y1)));
+  assert.equal('acceptedText' in out, false);
+  assert.equal('verified' in out, false);
+});
+
+test('split token OCR never pairs stacked, distant, competing or intervened text', () => {
+  const s = setup();
+  const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
+  const fiber = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
+  const cases = [
+    [ratio, line('PAMUK', {x0: 100, y0: 350, x1: 220, y1: 385})],
+    [ratio, line('PAMUK', {x0: 500, y0: 302, x1: 620, y1: 337})],
+    [ratio, fiber, line('KETEN', {x0: 190, y0: 302, x1: 300, y1: 337})],
+    [ratio, fiber, line('OTHER', {x0: 167, y0: 300, x1: 182, y1: 337})],
+    [ratio, fiber, line('20%', {x0: 105, y0: 302, x1: 165, y1: 337})],
+    [line('120%', ratio.bbox), fiber],
+    [line('80', ratio.bbox), fiber],
+    [line('80% 20%', ratio.bbox), fiber]
+  ];
+  for (const lines of cases) {
+    const out = s.api.extract(result(...lines).data, 1200, 675, 1, 90);
+    assert.equal(out.cues.length, 0, lines.map(x => x.text).join(' | '));
+    assert.equal(out.pairObservations.length, 0);
+  }
+});
+
+test('split tokens cannot be joined across OCR blocks or invalid coordinates', () => {
+  const s = setup();
+  const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
+  const fiber = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
+  const across = {blocks: [
+    {paragraphs: [{lines: [ratio]}]},
+    {paragraphs: [{lines: [fiber]}]}
+  ]};
+  assert.equal(s.api.extract(across, 1200, 675, 1, 100).cues.length, 0);
+  const invalid = result(ratio,
+    line('PAMUK', {x0: -1, y0: 302, x1: 300, y1: 337}));
+  assert.equal(s.api.extract(invalid.data, 1200, 675, 2, 100).cues.length, 0);
+});
+
+test('dense split-pair rows displace unrelated care boxes without exceeding budget', () => {
+  const s = setup();
+  const lines = Array.from({length: 24}, (_, i) =>
+    line('WASH ' + i, {x0: 10, y0: i * 10, x1: 80, y1: i * 10 + 8}));
+  lines.push(line('80%', {x0: 100, y0: 380, x1: 165, y1: 415}));
+  lines.push(line('PAMUK', {x0: 185, y0: 382, x1: 300, y1: 417}));
+  const out = s.api.extract(result(...lines).data, 1200, 675, 1, 80);
+  assert.equal(out.boxes.length, 24);
+  assert.equal(out.pairBoxes.length, 1);
+  assert.equal(out.pairBoxes[0].y0, 380);
+  assert.equal(out.pairObservations.length, 1);
+});
