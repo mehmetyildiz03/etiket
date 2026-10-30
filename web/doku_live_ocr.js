@@ -283,6 +283,9 @@
         resetFrameTracking(); // A new camera element has an independent clock.
         trackedVideo = video;
       }
+      // OCR sequence numbers prove processing order, NOT independent video frames.
+      // Only a strictly advancing browser frame clock can support a stability claim.
+      let freshFrame = false;
       let decodedFrame = null;
       try {
         const count = video.getVideoPlaybackQuality?.()?.totalVideoFrames;
@@ -292,12 +295,17 @@
         // A camera track renegotiation may reset its counter; equality alone
         // proves that no additional decoded frame has arrived.
         if (lastDecodedFrame !== null && decodedFrame === lastDecodedFrame) return false;
+        freshFrame = lastDecodedFrame !== null && decodedFrame > lastDecodedFrame;
+        // Counter rollback (track renegotiation) allows OCR, but cannot prove
+        // an independent frame until the counter advances again.
         lastDecodedFrame = decodedFrame;
       } else if (watchNextPresentedFrame(video)) {
         // The first observation is advisory. Every later one needs a new
         // presented frame, not just an elapsed throttle interval.
         if (lastSampledPresentedFrames !== null &&
             lastSampledPresentedFrames === presentedFrames) return false;
+        freshFrame = lastSampledPresentedFrames !== null &&
+          presentedFrames > lastSampledPresentedFrames;
         lastSampledPresentedFrames = presentedFrames;
       } else {
         // Older WebKit and unsupported camera mocks keep the existing local
@@ -332,6 +340,7 @@
         const output = await current.recognize(canvas, {}, {text: true, blocks: true});
         if (!closed) {
           const reading = extract(output?.data, width, height, id, Date.now() - started);
+          reading.freshFrame = freshFrame; // No raw frame/time metadata leaves the worker.
           inconclusivePasses = reading.pairObservations.length
             ? 0 : Math.min(3, inconclusivePasses + 1);
           onResult(reading); // Still only unverified yellow/gray camera hints.
