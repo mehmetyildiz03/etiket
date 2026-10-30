@@ -501,7 +501,12 @@ test('web OCR boxes align to the bordered video content and reset after viewport
   s.pageEvents.get('resize')();
   assert.equal(overlay.children.length, 0, 'resize cannot retain misplaced OCR boxes');
   assert.match(status.textContent, /Gri/);
-  s.emitOcr(observation(2));
+  s.emitOcr({...observation(2), durationMs: 500});
+  assert.equal(overlay.children.length, 0,
+    'a delayed result sampled before resize cannot revive old boxes');
+  assert.match(status.textContent, /Gri/);
+  s.advance(2000);
+  s.emitOcr({...observation(3), durationMs: 100});
   assert.match(status.textContent, /Tek kare adayı/,
     'a new viewport requires new independent OCR evidence');
   assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
