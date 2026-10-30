@@ -372,3 +372,61 @@ test('unavailable decoded-frame statistics preserve safe local OCR fallback', as
   assert.equal(s.calls, 2, 'older WebKit can still read local frames');
   scanner.stop();
 });
+
+
+test('WebKit presented-frame callback prevents repeated OCR of a stalled frame', async () => {
+  let now = 10000, callback = null, nextId = 0;
+  const cancelled = [];
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock});
+  const readings = [];
+  const scanner = s.api.create(reading => readings.push(reading));
+  const stream = {...video,
+    getVideoPlaybackQuality: () => { throw Error('unavailable'); },
+    requestVideoFrameCallback: cb => { callback = cb; return ++nextId; },
+    cancelVideoFrameCallback: id => cancelled.push(id)};
+  assert.equal(await scanner.sample(stream), true);
+  assert.equal(s.calls, 1);
+  assert.equal(nextId, 1, 'one frame callback, not a 30fps polling loop');
+  now += 2100;
+  assert.equal(await scanner.sample(stream), false, 'stalled frame is not independent');
+  assert.equal(readings.length, 1);
+  callback(); // A newly presented frame is reported by the browser.
+  assert.equal(await scanner.sample(stream), true);
+  assert.equal(s.calls, 2);
+  assert.equal(nextId, 2, 'arm a single callback for the next sample');
+  now += 2100;
+  assert.equal(await scanner.sample(stream), false);
+  scanner.stop();
+  assert.deepEqual(cancelled, [2], 'cancel pending callback on camera stop');
+  assert.equal(await scanner.sample(stream), false);
+});
+
+test('switching camera video elements resets both independent-frame clocks', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock});
+  const scanner = s.api.create(() => {});
+  const first = {...video, getVideoPlaybackQuality: () => ({totalVideoFrames: 42})};
+  const second = {...video, getVideoPlaybackQuality: () => ({totalVideoFrames: 42})};
+  assert.equal(await scanner.sample(first), true);
+  now += 2100;
+  assert.equal(await scanner.sample(second), true,
+    'the same counter on a new video element is a new camera session');
+  assert.equal(s.calls, 2);
+  scanner.stop();
+});
+
+test('broken presented-frame callback fails open to unverified OCR fallback', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock});
+  const scanner = s.api.create(() => {});
+  const stream = {...video,
+    requestVideoFrameCallback: () => { throw Error('not supported'); }};
+  assert.equal(await scanner.sample(stream), true);
+  now += 2100;
+  assert.equal(await scanner.sample(stream), true);
+  assert.equal(s.calls, 2);
+  scanner.stop();
+});
