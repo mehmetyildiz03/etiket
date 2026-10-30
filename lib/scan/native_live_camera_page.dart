@@ -11,6 +11,7 @@ import 'native_camera_recovery.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_pair_geometry.dart';
+import 'native_pair_overlay.dart';
 import 'native_yuv420_nv21.dart';
 
 /// Android/iOS camera stream. OCR is a temporary, unverified hint only.
@@ -35,6 +36,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   String _fingerprint = '';
   Offset? _lastCenter;
   Map<String, Rect>? _lastPairBoxes;
+  Size? _lastOcrImageSize;
   int? _lastPairRotation;
   String _advice = 'Etiketi kameraya getir.';
   String? _error;
@@ -54,6 +56,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           _fingerprint = '';
           _lastCenter = null;
           _lastPairBoxes = null;
+          _lastOcrImageSize = null;
           _lastPairRotation = null;
           _stableFrames = 0;
           _advice = 'Önceki okuma eskidi. Etiketi sabitle ve tekrar odakla.';
@@ -194,7 +197,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   ({List<String> pairs, Offset? center, NativeFramingHint framing,
-      Map<String, Rect>? trackedBoxes})
+      Map<String, Rect>? trackedBoxes, Size? imageSize})
       _extract(RecognizedText recognized, CameraImage frame,
           int rotationDegrees) {
     final pairs = <String>[];
@@ -231,7 +234,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         duplicatePair: duplicatePair);
     return (pairs: pairs, center: geometry.center,
         framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown,
-        trackedBoxes: trackedBoxes);
+        trackedBoxes: trackedBoxes, imageSize: dimensions);
   }
 
   void _onFrame(CameraImage frame) {
@@ -263,6 +266,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             _fingerprint = '';
             _lastCenter = null;
             _lastPairBoxes = null;
+            _lastOcrImageSize = null;
             _lastPairRotation = null;
             _stableFrames = 0;
           });
@@ -307,6 +311,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         _fingerprint = goodObservation ? key : '';
         _lastCenter = goodObservation ? result.center : null;
         _lastPairBoxes = goodObservation ? result.trackedBoxes : null;
+        _lastOcrImageSize = goodObservation ? result.imageSize : null;
         _lastPairRotation = goodObservation ? rotationDegrees : null;
         _lastResult = DateTime.now();
       });
@@ -318,6 +323,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           _fingerprint = '';
           _lastCenter = null;
           _lastPairBoxes = null;
+          _lastOcrImageSize = null;
           _lastPairRotation = null;
           _stableFrames = 0;
           _advice = 'Canlı okuma yapılamadı. Sistem kamerasıyla çekmeyi dene.';
@@ -369,6 +375,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     _fingerprint = '';
     _lastCenter = null;
     _lastPairBoxes = null;
+    _lastOcrImageSize = null;
     _lastPairRotation = null;
     _stableFrames = 0;
     final camera = _controller;
@@ -406,6 +413,16 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final camera = _controller;
     final available = camera != null && camera.value.isInitialized;
     final hasPairs = _pairs.isNotEmpty;
+    final showBoxes = available && canShowNativePairOverlay(
+      android: Platform.isAndroid,
+      rearCamera: camera.description.lensDirection == CameraLensDirection.back,
+      portraitUp: camera.value.deviceOrientation == DeviceOrientation.portraitUp,
+      rotationDegrees: _lastPairRotation,
+      previewSize: camera.value.previewSize,
+      ocrImageSize: _lastOcrImageSize,
+      normalizedBoxes: _lastPairBoxes,
+      stableFrames: _stableFrames,
+    );
     final label = hasPairs ? 'Sarı — doğrulanmamış yüzde ve elyaf adayları'
         : _textPresent ? 'Sarı — yazı algılandı, eşleşme belirsiz'
         : 'Gri — yüzde ve elyaf okunmadı';
@@ -413,7 +430,14 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       appBar: AppBar(title: const Text('Canlı etiket tarama')),
       body: SafeArea(child: Column(children: [
         Expanded(child: Center(child: available
-            ? CameraPreview(camera)
+            ? AspectRatio(
+                aspectRatio: 1 / camera.value.aspectRatio,
+                child: Stack(fit: StackFit.expand, children: [
+                  CameraPreview(camera),
+                  if (showBoxes)
+                    NativePairOverlay(normalizedBoxes: _lastPairBoxes!),
+                ]),
+              )
             : const Icon(Icons.camera_alt_outlined, size: 64))),
         Padding(padding: const EdgeInsets.all(16), child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -426,6 +450,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                 key: const ValueKey('native-live-pairs')),
             if (_stableFrames >= 2)
               Text('$_stableFrames ayrı karede benzer adaylar görüldü; doğrulanmadı.'),
+            if (showBoxes)
+              const Text('Sarı çerçeveler tahmini OCR satır yeridir; kesin doğruluk değildir.',
+                  style: TextStyle(fontSize: 12)),
             Text(_advice),
             const Text('Yeşil hazır değil: tüm etiket görünürlüğü doğrulanmadı. '
                 'Fotoğraf sonrası gerçek OCR, metin düzeltmesi ve açık onay gerekir.',
