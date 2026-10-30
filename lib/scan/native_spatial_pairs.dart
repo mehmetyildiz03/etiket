@@ -50,7 +50,9 @@ List<NativeSpatialPair> nativeSpatialPairs({
     if (fiber != null) fibers.add((i, fiber));
   }
   if (ratios.isEmpty || fibers.isEmpty || ratios.length > 8 ||
-      fibers.length > 8) return const [];
+      fibers.length > 8) {
+    return const [];
+  }
 
   bool adjacent(int ratioIndex, int fiberIndex) {
     final a = lines[ratioIndex].box, b = lines[fiberIndex].box;
