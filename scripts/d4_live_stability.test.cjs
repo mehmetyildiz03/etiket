@@ -7,7 +7,7 @@ const sample = (sequence, cues = [{percent: 80, fiber: 'pamuk'}], x = 20) => {
   const bounds = box(x);
   return {sequence, cues, boxes: [bounds], pairBoxes: [bounds],
     pairObservations: cues.map(c => ({...c, box: bounds})),
-    textPresent: true, width: 1000, height: 500};
+    textPresent: true, width: 1000, height: 500, freshFrame: true};
 };
 
 test('requires separate ordered OCR frames and stable position, never green', () => {
@@ -127,7 +127,7 @@ test('swapped percent–fiber lines cannot gain stability from unchanged overall
   const left = box(20), right = box(500);
   const cues = [{percent: 80, fiber: 'pamuk'}, {percent: 20, fiber: 'keten'}];
   const two = (sequence, swapped = false) => ({
-    sequence, cues, boxes: [left, right], pairBoxes: [left, right],
+    sequence, cues, boxes: [left, right], pairBoxes: [left, right], freshFrame: true,
     pairObservations: [
       {...cues[0], box: swapped ? right : left},
       {...cues[1], box: swapped ? left : right}
@@ -191,4 +191,29 @@ test('orientation change resets stability even with identical normalized pair bo
   assert.equal(s.observe(rotated, 5000).stableFrames, 1,
     'rotated camera must start a new independent sequence');
   assert.equal(s.view(5000).level, 'yellow');
+});
+
+// A successful OCR pass is NOT evidence that a distinct camera frame arrived.
+// Browsers without decoded/presented-frame clocks may repeatedly read a freeze.
+test('unproven camera frames never accumulate temporal agreement', () => {
+  const s = create();
+  for (let i = 1; i <= 4; i++) {
+    const reading = s.observe({...sample(i), freshFrame: false}, i * 2000);
+    assert.equal(reading.stableFrames, 0);
+    assert.equal(reading.freshFrame, false);
+    assert.equal(reading.level, 'yellow', 'literal OCR candidate remains advisory');
+  }
+  const {freshFrame, ...withoutProof} = sample(5);
+  assert.equal(s.observe(withoutProof, 9000).stableFrames, 0,
+    'missing provenance must fail closed');
+});
+
+test('only two independently evidenced frames can report pair stability', () => {
+  const s = create();
+  assert.equal(s.observe({...sample(1), freshFrame: false}, 1000).stableFrames, 0);
+  assert.equal(s.observe(sample(2), 3000).stableFrames, 1);
+  assert.equal(s.observe(sample(3), 5000).stableFrames, 2);
+  assert.equal(s.observe({...sample(4), freshFrame: false}, 7000).stableFrames, 0);
+  assert.equal(s.observe(sample(5), 9000).stableFrames, 1,
+    'unsupported frame evidence cannot bridge a stability streak');
 });
