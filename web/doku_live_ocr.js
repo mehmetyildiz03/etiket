@@ -40,7 +40,12 @@
           const firstRatio = value.search(/(?:%\s*\d{1,3}|\d{1,3}\s*%)/u);
           const firstFiber = value.search(new RegExp(
             '(?:^|[^\\p{L}])(?:' + fibers + ')(?![\\p{L}])', 'iu'));
-          if (firstRatio < 0 || firstFiber < 0) continue;
+          if (firstRatio < 0 || firstFiber < 0) {
+            // Keep ordinary OCR text visible in gray. Only matched pairs
+            // may displace an unrelated line when the overlay budget fills.
+            if (lineBox && boxes.length < 24) boxes.push(lineBox);
+            continue;
+          }
           const ratioFirst = firstRatio <= firstFiber;
           const pattern = ratioFirst ? before : after;
           const fiberIndex = ratioFirst ? 3 : 1;
