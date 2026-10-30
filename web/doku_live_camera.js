@@ -25,26 +25,46 @@
     return Number.isFinite(ratio) && Math.abs(ratio - 1) <= .025;
   }
 
-  // A full-resolution ImageCapture still must fit the SAME private limits as
-  // doku_ocr.adopt(). Otherwise a 48MP/large camera photo would appear to
-  // capture successfully but fail only after leaving the camera. Validate
-  // decoded dimensions locally, release the bitmap, and use the bounded video
-  // frame fallback when the camera returns an unsupported still format.
-  async function acceptableStill(blob) {
-    if (!blob || !blob.size || blob.size > 20 * 1024 * 1024 ||
+  // Keep the REAL camera still whenever it fits the private OCR limits.
+  // A 48MP still used to be discarded in favor of a 1080p video frame. When
+  // decoding succeeds, downsample its oriented pixels locally to <=12MP
+  // instead: more label detail survives without exceeding the 24MP/20MiB
+  // downstream limits. createImageBitmap applies EXIF image orientation;
+  // the encoded JPEG is already oriented and contains no original EXIF.
+  // Older WebKit/unsupported formats fail closed to the video/system camera.
+  async function prepareStill(blob, canvas) {
+    if (!blob || !blob.size || blob.size > 32 * 1024 * 1024 ||
         !['image/jpeg', 'image/png', 'image/webp'].includes(blob.type) ||
-        typeof root.createImageBitmap !== 'function') return false;
+        typeof root.createImageBitmap !== 'function') return null;
     let bitmap;
     try {
-      bitmap = await root.createImageBitmap(blob);
-      return Number.isFinite(bitmap.width) && Number.isFinite(bitmap.height) &&
-        bitmap.width >= 32 && bitmap.height >= 32 &&
-        bitmap.width * bitmap.height <= 24000000 &&
-        Math.max(bitmap.width, bitmap.height) <= 32768;
+      bitmap = await root.createImageBitmap(blob, {imageOrientation: 'from-image'});
+      const width = bitmap?.width, height = bitmap?.height;
+      if (![width, height].every(Number.isSafeInteger) ||
+          width < 32 || height < 32 || width * height > 100000000 ||
+          Math.max(width, height) > 32768) return null;
+      if (width * height <= 24000000 && blob.size <= 20 * 1024 * 1024) {
+        return blob; // Keep original bytes and full still detail.
+      }
+      const scale = Math.min(1, 4800 / Math.max(width, height),
+        Math.sqrt(12000000 / (width * height)));
+      const w = Math.max(1, Math.floor(width * scale));
+      const h = Math.max(1, Math.floor(height * scale));
+      if (w < 32 || h < 32) return null;
+      canvas.width = w; canvas.height = h;
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+      context.drawImage(bitmap, 0, 0, w, h);
+      const normalized = await new Promise(resolve =>
+        canvas.toBlob(resolve, 'image/jpeg', .92));
+      return normalized && normalized.size > 0 &&
+        normalized.size <= 20 * 1024 * 1024 &&
+        normalized.type === 'image/jpeg' ? normalized : null;
     } catch (_) {
-      return false;
+      return null;
     } finally {
       bitmap?.close?.();
+      canvas.width = canvas.height = 0;
     }
   }
 
@@ -317,7 +337,7 @@
           if (track && typeof root.ImageCapture === 'function') {
             try {
               const candidate = await new root.ImageCapture(track).takePhoto();
-              if (await acceptableStill(candidate)) blob = candidate;
+              blob = await prepareStill(candidate, canvas);
             } catch (_) { /* Camera still unavailable; use bounded frame. */ }
           }
           if (!blob) {
