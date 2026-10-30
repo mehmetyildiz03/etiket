@@ -147,6 +147,7 @@
       let torchTrack = null, torchEnabled = false, torchBusy = false;
       const stability = root.dokuLiveStability?.create?.() || null;
       let usingSystemPicker = false;
+      let layoutInvalidatedAt = -Infinity;
       const panel = doc.createElement('div');
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
@@ -312,6 +313,7 @@
       // new OCR evidence rather than leaving stale boxes over different text.
       const invalidateLayout = () => {
         if (done || usingSystemPicker) return;
+        layoutInvalidatedAt = Date.now();
         stability?.clear();
         overlay.replaceChildren();
         renderStatus();
@@ -327,6 +329,12 @@
         liveScanner = root.dokuLiveOcr?.create?.(
           observation => {
             if (generation !== scannerGeneration || done || capturing || usingSystemPicker) return;
+            // A pre-resize in-flight OCR result may arrive after the old boxes
+            // were cleared. Its duration reveals that sampling started before
+            // the resize. Reject it instead of reviving stale coordinates.
+            if (layoutInvalidatedAt > -Infinity &&
+                (!Number.isFinite(observation?.durationMs) ||
+                 Date.now() - observation.durationMs < layoutInvalidatedAt)) return;
             const reading = stability?.observe(observation, Date.now());
             // Ignore late/duplicate observations; render only validated geometry.
             if (reading && !reading.stale && reading.sequence === observation.sequence) {
