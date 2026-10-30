@@ -72,6 +72,8 @@ List<NativeSpatialPair> nativeSpatialPairs({
     for (var i = 0; i < lines.length; i++) {
       if (i == ratioIndex || i == fiberIndex) continue;
       final other = lines[i].box;
+      // Overlapping alternative OCR tokens make the row association ambiguous.
+      if (other.overlaps(a) || other.overlaps(b)) return false;
       final verticalOverlap = math.min(other.bottom, math.min(a.bottom, b.bottom)) -
           math.max(other.top, math.max(a.top, b.top));
       if (verticalOverlap > 0 &&
