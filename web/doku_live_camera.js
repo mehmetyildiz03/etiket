@@ -326,7 +326,27 @@
           }
         ) || null;
       };
-      const captureButton = button('Fotoğrafı çek', async () => {
+      // Older Safari/WebKit and other browsers may lack ImageCapture.takePhoto().
+      // A video canvas frame can be only 1080p even when the native camera
+      // can provide a full-resolution still. On unsupported browsers, make
+      // the PRIMARY capture action open the system camera instead of silently
+      // passing a lower-resolution preview to OCR.
+      const openSystemPicker = () => {
+        if (done || usingSystemPicker) return;
+        usingSystemPicker = true;
+        if (interval !== null) { root.clearInterval(interval); interval = null; }
+        liveScanner?.stop(); liveScanner = null;
+        stopStream(); // No live camera remains behind the native picker.
+        status.textContent = 'Sistem kamerası açılıyor…';
+        try { input.click(); } catch (_) { close(null, error('unavailableCamera')); }
+      };
+      const captureButton = button(
+        typeof root.ImageCapture === 'function' ? 'Fotoğrafı çek' : 'Sistem kamerasıyla çek',
+        async () => {
+        if (typeof root.ImageCapture !== 'function') {
+          openSystemPicker();
+          return;
+        }
         if (capturing || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
         liveScanner?.stop(); liveScanner = null;
@@ -396,17 +416,9 @@
       });
       torchButton.style.display = 'none';
       torchButton.setAttribute('aria-pressed', 'false');
-      button('Sistem kamerası (yüksek çözünürlük)', () => {
-        // Native camera may return focus well before its file change event.
-        // Never auto-close on focus: a slow still photo must not be discarded.
-        // Use the input cancel event or the explicit İptal control instead.
-        usingSystemPicker = true;
-        if (interval !== null) { root.clearInterval(interval); interval = null; }
-        liveScanner?.stop(); liveScanner = null;
-        stopStream(); // Never keep a live video stream behind native camera UI.
-        status.textContent = 'Sistem kamerası açılıyor…';
-        try { input.click(); } catch (_) { close(null, error('unavailableCamera')); }
-      });
+      // Never auto-close on focus: native camera can take time to return a
+      // file change event. The picker cancel event and İptal close the dialog.
+      button('Sistem kamerası (yüksek çözünürlük)', openSystemPicker);
       button('İptal', () => close(null));
       input.addEventListener('change', () => close(input.files?.[0] || null));
       input.addEventListener('cancel', () => close(null));
