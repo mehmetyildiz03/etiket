@@ -436,7 +436,37 @@ test('live quality uses observed OCR text pixels instead of dark surroundings', 
   assert.equal(s.api.sampleQuality(video, canvas, {...reading, stale: true}).textMetrics,
     null, 'stale OCR geometry cannot drive image-quality advice');
   assert.equal(s.api.sampleQuality(video, canvas, {...reading,
+    width: 675, height: 1200}).textMetrics, null,
+  'rotated OCR coordinates must not sample the wrong camera pixels');
+  assert.equal(s.api.sampleQuality(video, canvas, {...reading,
     pairBoxes: [{x0: -10, y0: 0, x1: 20, y1: 30}],
     boxes: [{x0: -10, y0: 0, x1: 20, y1: 30}]}).textMetrics, null,
   'invalid geometry cannot drive image-quality advice');
+});
+
+
+test('rotated WebKit preview rejects stale OCR boxes and restores portrait hints', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const panel = s.nodes[0], video = panel.children[1].children[0];
+  const overlay = panel.children[1].children[1], status = panel.children[2];
+  const pair = {x0: 50, y0: 70, x1: 250, y1: 120};
+  video.videoWidth = 1080; video.videoHeight = 1920;
+  const observation = (sequence, width, height) => ({
+    sequence, width, height, textPresent: true,
+    boxes: [pair], pairBoxes: [pair],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box: pair}],
+    cues: [{percent: 80, fiber: 'pamuk'}]
+  });
+  s.emitOcr(observation(1, 1200, 675));
+  assert.equal(overlay.children.length, 0, 'landscape OCR must not paint on portrait preview');
+  assert.match(status.textContent, /Gri/);
+  s.advance(2000);
+  s.emitOcr(observation(2, 675, 1200));
+  assert.equal(overlay.children.length, 1, 'matching portrait OCR may paint advisory box');
+  assert.match(status.textContent, /Tek kare adayı/);
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.api.cancel();
+  assert.equal(await pending, null);
 });
