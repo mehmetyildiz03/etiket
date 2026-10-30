@@ -177,3 +177,18 @@ test('small per-pair jitter is tolerated but scale changes reset stability', () 
   assert.equal(result.stableFrames, 1);
   assert.equal(result.moved, true);
 });
+
+
+test('orientation change resets stability even with identical normalized pair boxes', () => {
+  const s = create();
+  assert.equal(s.observe(sample(1), 1000).stableFrames, 1);
+  assert.equal(s.observe(sample(2), 3000).stableFrames, 2);
+  const rotated = {...sample(3), width: 500, height: 1000,
+    boxes: [{x0: 10, y0: 80, x1: 125, y1: 140}],
+    pairBoxes: [{x0: 10, y0: 80, x1: 125, y1: 140}],
+    pairObservations: [{percent: 80, fiber: 'pamuk',
+      box: {x0: 10, y0: 80, x1: 125, y1: 140}}]};
+  assert.equal(s.observe(rotated, 5000).stableFrames, 1,
+    'rotated camera must start a new independent sequence');
+  assert.equal(s.view(5000).level, 'yellow');
+});
