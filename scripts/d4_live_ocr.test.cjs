@@ -159,16 +159,39 @@ test('matched-line boxes identify real same-line pairs, not unrelated OCR lines'
   assert.equal('verified' in out, false);
 });
 
-test('invalid or overflowed OCR line boxes cannot be highlighted as pairs', () => {
+test('dense labels prioritize a real composition line but never an invalid box', () => {
   const s = setup();
   const lines = Array.from({length: 24}, (_, i) =>
     line('CARE ' + i, {x0: 10, y0: i * 15, x1: 150, y1: i * 15 + 12}));
   lines.push(line('80% PAMUK', {x0: 10, y0: 380, x1: 150, y1: 400}));
   lines.push(line('20% KETEN', {x0: -10, y0: 400, x1: 150, y1: 430}));
   const out = s.api.extract(result(...lines).data, 1200, 675, 1, 80);
-  assert.equal(out.cues.length, 2, 'candidates may be shown without a valid box');
+  assert.equal(out.cues.length, 2, 'invalid geometry may still be an unverified text cue');
+  assert.equal(out.boxes.length, 24, 'bounded overlay budget');
+  assert.equal(out.pairBoxes.length, 1, 'retain real composition over unrelated care text');
+  assert.equal(out.pairBoxes[0].y0, 380);
+  assert.equal(out.pairObservations.length, 1, 'invalid second pair cannot gain stability');
+  assert.equal(out.pairObservations[0].fiber, 'pamuk');
+  assert.equal('verified' in out, false);
+});
+
+test('multiple composition lines after long care text retain their actual coordinates', () => {
+  const s = setup();
+  const lines = Array.from({length: 24}, (_, i) =>
+    line('WASH INSTRUCTION ' + i,
+      {x0: 10, y0: i * 14, x1: 170, y1: i * 14 + 10}));
+  lines.push(line('80% PAMUK', {x0: 12, y0: 380, x1: 200, y1: 404}));
+  lines.push(line('20% KETEN', {x0: 12, y0: 415, x1: 200, y1: 439}));
+  const out = s.api.extract(result(...lines).data, 1200, 675, 1, 80);
   assert.equal(out.boxes.length, 24);
-  assert.equal(out.pairBoxes.length, 0, 'never highlight a box not retained as visible text');
+  assert.deepEqual(Array.from(out.pairBoxes, b => b.y0), [380, 415]);
+  assert.deepEqual(Array.from(out.pairObservations, p =>
+    p.percent + ':' + p.fiber + ':' + p.box.y0),
+  ['80:pamuk:380', '20:keten:415']);
+  assert.ok(out.pairBoxes.every(b => out.boxes.some(lineBox =>
+    lineBox.x0 === b.x0 && lineBox.y0 === b.y0 &&
+    lineBox.x1 === b.x1 && lineBox.y1 === b.y1)));
+  assert.equal('rawText' in out, false);
 });
 
 
