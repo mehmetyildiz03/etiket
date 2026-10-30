@@ -475,7 +475,22 @@
       // file change event. The picker cancel event and İptal close the dialog.
       button('Sistem kamerası (yüksek çözünürlük)', openSystemPicker);
       button('İptal', () => close(null));
-      input.addEventListener('change', () => close(input.files?.[0] || null));
+      input.addEventListener('change', async () => {
+        const original = input.files?.[0] || null;
+        if (!original) { close(null); return; }
+        // The native system camera can return a 48MP still even on browsers
+        // without ImageCapture. The downstream private OCR bridge rejects
+        // >24MP or >20MiB inputs; do not lose real label pixels by falling
+        // back to the 1080p preview. Normalize the ACTUAL selected still,
+        // applying EXIF orientation and bounded local JPEG encoding.
+        // If this browser cannot decode it, preserve the original and let
+        // the existing OCR bridge report its normal unsupported/size error.
+        status.textContent = 'Yüksek çözünürlüklü fotoğraf hazırlanıyor…';
+        let prepared = null;
+        try { prepared = await prepareStill(original, canvas); }
+        catch (_) { /* Keep original if local normalization is unavailable. */ }
+        if (!done) close(prepared || original);
+      });
       input.addEventListener('cancel', () => close(null));
       actions.appendChild(input);
       panel.appendChild(heading);
