@@ -163,6 +163,45 @@ test('Safari without ImageCapture uses the native full-resolution still from the
   assert.equal(s.lastDraw, null, 'do not use the preview canvas');
 });
 
+test('Safari system camera 48MP still is normalized from original EXIF-oriented pixels', async () => {
+  const original = new Blob(['synthetic-system-48mp'], {type: 'image/jpeg'});
+  const s = setup({noImageCapture: true, still: original,
+    stillWidth: 8064, stillHeight: 6048});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const input = s.nodes[0].children[3].children.find(child => child.type === 'file');
+  await s.button('Sistem kamerasıyla çek').emit('click');
+  assert.equal(s.tracks[0].stopped, true, 'release live video before native picker');
+  input.files = [original];
+  await input.emit('change');
+  const result = await pending;
+  assert.notEqual(result, original, 'oversized native still must fit private OCR bounds');
+  assert.equal(result.type, 'image/jpeg');
+  assert.ok(result.size > 0 && result.size <= 20 * 1024 * 1024);
+  assert.equal(s.lastDraw[0].isStillBitmap, true,
+    'resample original camera still, never lower-resolution preview video');
+  assert.ok(s.lastDraw[3] * s.lastDraw[4] <= 12000000);
+  assert.ok(s.lastDraw[3] * s.lastDraw[4] > 1920 * 1080);
+  assert.equal(s.imageOrientationOption.imageOrientation, 'from-image');
+  assert.equal(s.bitmapCloses, 1, 'release oriented bitmap after conversion');
+});
+
+test('system picker preserves original 12MP photo within private OCR limits', async () => {
+  const original = new Blob(['synthetic-system-12mp'], {type: 'image/jpeg'});
+  const s = setup({noImageCapture: true, still: original,
+    stillWidth: 4032, stillHeight: 3024});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const input = s.nodes[0].children[3].children.find(child => child.type === 'file');
+  await s.button('Sistem kamerasıyla çek').emit('click');
+  input.files = [original];
+  await input.emit('change');
+  assert.equal(await pending, original,
+    'do not re-encode a supported original or replace it with video pixels');
+  assert.equal(s.lastDraw, null);
+  assert.equal(s.bitmapCloses, 1);
+});
+
 test('Safari native camera cancellation never returns a fake OCR photo', async () => {
   const s = setup({noImageCapture: true});
   const pending = s.api.open();
