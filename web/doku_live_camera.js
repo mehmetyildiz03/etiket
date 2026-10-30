@@ -148,6 +148,7 @@
       const stability = root.dokuLiveStability?.create?.() || null;
       let usingSystemPicker = false;
       let layoutInvalidatedAt = -Infinity;
+      let layoutObserver = null;
       const panel = doc.createElement('div');
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
@@ -298,6 +299,9 @@
         root.removeEventListener('pagehide', pagehide);
         root.removeEventListener('resize', invalidateLayout);
         root.visualViewport?.removeEventListener?.('resize', invalidateLayout);
+        video.removeEventListener('resize', invalidateLayout);
+        video.removeEventListener('loadedmetadata', invalidateLayout);
+        layoutObserver?.disconnect();
         liveScanner?.stop(); liveScanner = null;
         stability?.clear();
         stopStream();
@@ -314,6 +318,7 @@
       const invalidateLayout = () => {
         if (done || usingSystemPicker) return;
         layoutInvalidatedAt = Date.now();
+        lastMetrics = null;
         stability?.clear();
         overlay.replaceChildren();
         renderStatus();
@@ -459,6 +464,16 @@
       root.addEventListener('pagehide', pagehide);
       root.addEventListener('resize', invalidateLayout);
       root.visualViewport?.addEventListener?.('resize', invalidateLayout);
+      // A camera can renegotiate its intrinsic frame dimensions without a
+      // window resize (notably after device rotation or track changes).
+      // Likewise a responsive parent can change the displayed video size.
+      // Invalidate OCR geometry on either event before drawing more boxes.
+      video.addEventListener('resize', invalidateLayout);
+      video.addEventListener('loadedmetadata', invalidateLayout);
+      if (typeof root.ResizeObserver === 'function') {
+        layoutObserver = new root.ResizeObserver(invalidateLayout);
+        layoutObserver.observe(video);
+      }
       root.navigator.mediaDevices.getUserMedia({audio: false, video: {
         facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}
       }}).then(got => {
