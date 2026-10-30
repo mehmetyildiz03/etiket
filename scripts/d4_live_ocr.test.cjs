@@ -352,6 +352,10 @@ test('frozen decoded camera frames cannot be counted as independent OCR observat
     'a genuinely newer decoded frame can be sampled');
   assert.equal(s.calls, 2);
   assert.equal(seen.length, 2);
+  now += 2100;
+  decoded = 1; // A renegotiated camera track may reset its frame counter.
+  assert.equal(await scanner.sample(stream), true);
+  assert.equal(s.calls, 3, 'a counter reset must not freeze OCR indefinitely');
   scanner.stop();
 });
 
