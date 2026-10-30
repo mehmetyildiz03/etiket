@@ -235,7 +235,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       rotationDegrees: rotationDegrees, android: Platform.isAndroid);
     // Only literal, one-to-one tokens on the same horizontal OCR-block row.
     // These are transient yellow candidates, never automatically accepted.
-    if (dimensions != null) {
+    // iOS OCR-space orientation still awaits physical device calibration.
+    if (Platform.isAndroid && dimensions != null) {
       for (final blockLines in spatialBlocks) {
         for (final candidate in nativeSpatialPairs(
           imageSize: dimensions, lines: blockLines)) {
