@@ -9,6 +9,7 @@ const stability = require('../web/doku_live_stability.js');
 
 function setup({permission = true, delayed = false, withOcr = false,
   torch = false, torchReject = false, still = null,
+  noImageCapture = false,
   stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false,
   previewBlobFailures = 0} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
@@ -74,7 +75,12 @@ function setup({permission = true, delayed = false, withOcr = false,
     setInterval: fn => { timer = fn; return 1; },
     clearInterval: () => { timer = null; },
     setTimeout, clearTimeout,
-    ImageCapture: still ? class { async takePhoto() { return still; } } : undefined,
+    ImageCapture: noImageCapture ? undefined : class {
+      async takePhoto() {
+        if (!still) throw new Error('native still not available');
+        return still;
+      }
+    },
     createImageBitmap: still ? async (_blob, options) => {
       imageOrientationOption = options;
       if (stillDecodeReject) throw new Error('image decoder rejected still');
@@ -123,6 +129,38 @@ test('mobile web camera opens a private rear-camera preview and captures a still
   assert.equal(s.timer, null);
   assert.equal(s.docEvents.size, 0);
   assert.equal(s.pageEvents.size, 0);
+});
+
+test('Safari without ImageCapture uses the native full-resolution still from the primary capture button', async () => {
+  const s = setup({noImageCapture: true, withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const panel = s.nodes[0];
+  const input = panel.children[3].children.find(child => child.type === 'file');
+  assert.ok(input);
+  assert.equal(s.buttons.some(b => b.textContent === 'Fotoğrafı çek'), false,
+    'do not label a low-resolution video frame as a still photo');
+  await s.button('Sistem kamerasıyla çek').emit('click');
+  assert.equal(s.tracks[0].stopped, true, 'native picker releases the live stream');
+  assert.equal(s.timer, null);
+  assert.equal(s.ocrStops, 1, 'live OCR must stop before native camera opens');
+  const fullResolution = new Blob(['synthetic-native-original'], {type: 'image/jpeg'});
+  input.files = [fullResolution];
+  await input.emit('change');
+  assert.equal(await pending, fullResolution,
+    'pass the actual native still to downstream OCR without video substitution');
+  assert.equal(s.lastDraw, null, 'do not use the preview canvas');
+});
+
+test('Safari native camera cancellation never returns a fake OCR photo', async () => {
+  const s = setup({noImageCapture: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const input = s.nodes[0].children[3].children.find(child => child.type === 'file');
+  await s.button('Sistem kamerasıyla çek').emit('click');
+  await input.emit('cancel');
+  assert.equal(await pending, null);
+  assert.equal(s.tracks[0].stopped, true);
 });
 
 test('full-resolution still is retained when decoded pixels fit the private OCR bounds', async () => {
