@@ -13,6 +13,18 @@
   const available = () => !!(root.isSecureContext && root.navigator?.mediaDevices?.getUserMedia
     && root.document?.createElement);
 
+  // OCR coordinates describe the sampled video frame. If a device rotates
+  // between sampling and rendering, never draw or sample a misleading region.
+  // Allow minor canvas rounding only; an axis swap must fail closed.
+  function matchesVideoGeometry(video, reading) {
+    if (!video || !reading ||
+        ![video.videoWidth, video.videoHeight, reading.width, reading.height]
+          .every(n => Number.isFinite(n) && n > 0)) return false;
+    const ratio = (reading.width / reading.height) /
+      (video.videoWidth / video.videoHeight);
+    return Number.isFinite(ratio) && Math.abs(ratio - 1) <= .025;
+  }
+
   // A full-resolution ImageCapture still must fit the SAME private limits as
   // doku_ocr.adopt(). Otherwise a 48MP/large camera photo would appear to
   // capture successfully but fail only after leaving the camera. Validate
@@ -66,8 +78,7 @@
     // Stale, invalid and tiny regions are ignored; no pixels are persisted.
     let textMetrics = null;
     if (reading && reading.stale === false &&
-        Number.isFinite(reading.width) && reading.width > 0 &&
-        Number.isFinite(reading.height) && reading.height > 0) {
+        matchesVideoGeometry(video, reading)) {
       const source = Array.isArray(reading.pairBoxes) && reading.pairBoxes.length
         ? reading.pairBoxes : reading.boxes;
       const valid = Array.isArray(source) ? source.filter(b => b &&
@@ -157,8 +168,16 @@
         return 'Etiketi kadraja al, kamerayı sabit tut.';
       };
       const renderStatus = () => {
-        const reading = stability?.view(Date.now()) ||
+        let reading = stability?.view(Date.now()) ||
           {cues: [], textPresent: false, stableFrames: 0, stale: true};
+        if (!reading.stale && !matchesVideoGeometry(video, reading)) {
+          // A rotated camera invalidates the previous frame's OCR locations
+          // and stability; retain still capture and manual verification.
+          stability?.clear();
+          overlay.replaceChildren();
+          reading = stability?.view(Date.now()) ||
+            {cues: [], textPresent: false, stableFrames: 0, stale: true};
+        }
         const advice = adviceFor(lastMetrics, reading);
         if (reading.stale) overlay.replaceChildren();
         let message;
@@ -186,7 +205,8 @@
       };
       const showBoxes = observation => {
         overlay.replaceChildren();
-        if (!video.clientWidth || !video.clientHeight) return;
+        if (!matchesVideoGeometry(video, observation) ||
+            !video.clientWidth || !video.clientHeight) return;
         const scale = Math.min(video.clientWidth / video.videoWidth,
           video.clientHeight / video.videoHeight);
         const drawnW = video.videoWidth * scale, drawnH = video.videoHeight * scale;
