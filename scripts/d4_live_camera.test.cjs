@@ -9,7 +9,8 @@ const stability = require('../web/doku_live_stability.js');
 
 function setup({permission = true, delayed = false, withOcr = false,
   torch = false, torchReject = false, still = null,
-  stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false} = {}) {
+  stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false,
+  previewBlobFailures = 0} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
   const tracks = [{stopped: false, torchEnabled: false, torchCalls: [],
     stop() { this.stopped = true; this.torchEnabled = false; },
@@ -22,6 +23,8 @@ function setup({permission = true, delayed = false, withOcr = false,
   }];
   const stream = {getTracks: () => tracks, getVideoTracks: () => tracks};
   let requested, requestResolve, requestReject, timer, cameraCalls = 0, ocrResult;
+  let remainingBlobFailures = previewBlobFailures, ocrCreates = 0, ocrStops = 0;
+  const ocrCallbacks = [];
   const clock = {now: 1000};
   let bitmapCloses = 0;
   const pending = new Promise((resolve, reject) => { requestResolve = resolve; requestReject = reject; });
@@ -45,7 +48,10 @@ function setup({permission = true, delayed = false, withOcr = false,
         drawImage() {},
         getImageData: (_x, _y, w, h) => ({data: new Uint8ClampedArray(w * h * 4).fill(240)})
       }; },
-      toBlob(fn) { fn(new Blob(['local-image'], {type: 'image/jpeg'})); }
+      toBlob(fn) {
+        if (remainingBlobFailures > 0) { remainingBlobFailures--; fn(null); }
+        else fn(new Blob(['local-image'], {type: 'image/jpeg'}));
+      }
     };
     if (type === 'button') buttons.push(el);
     return el;
@@ -77,13 +83,16 @@ function setup({permission = true, delayed = false, withOcr = false,
     dokuCaptureGuidance: {evaluate: () => null},
     dokuLiveStability: stability,
     dokuLiveOcr: withOcr ? {create: onResult => {
-      ocrResult = onResult;
-      return {sample() {}, stop() {}};
+      ocrCreates++; ocrResult = onResult; ocrCallbacks.push(onResult);
+      return {sample() {}, stop() { ocrStops++; }};
     }} : undefined
   });
   vm.runInContext(source, context);
   return {api: context.dokuLiveCamera, context, nodes, buttons, tracks, stream,
     get bitmapCloses() { return bitmapCloses; },
+    get ocrCreates() { return ocrCreates; },
+    get ocrStops() { return ocrStops; },
+    emitRetiredOcr(observation) { assert.ok(ocrCallbacks.length > 1); ocrCallbacks[0](observation); },
     get requested() { return requested; }, get cameraCalls() { return cameraCalls; },
     get timer() { return timer; }, docEvents, pageEvents, requestResolve, requestReject,
     advance(ms) { clock.now += ms; },
@@ -469,4 +478,36 @@ test('rotated WebKit preview rejects stale OCR boxes and restores portrait hints
   assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
   s.api.cancel();
   assert.equal(await pending, null);
+});
+
+
+test('failed still capture restarts local OCR, discards retired results and permits retry', async () => {
+  const s = setup({withOcr: true, previewBlobFailures: 1});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const status = s.nodes[0].children[2];
+  const overlay = s.nodes[0].children[1].children[1];
+  assert.equal(s.ocrCreates, 1);
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.equal(s.ocrStops, 1, 'old worker stopped before capture');
+  assert.equal(s.ocrCreates, 2, 'new worker starts after failed capture');
+  assert.equal(s.tracks[0].stopped, false, 'camera remains available for retry');
+  assert.match(status.textContent, /Çekim başarısız/);
+  const box = {x0: 50, y0: 70, x1: 250, y1: 120};
+  const observation = {sequence: 1, width: 1200, height: 675,
+    textPresent: true, boxes: [box], pairBoxes: [box],
+    cues: [{percent: 80, fiber: 'pamuk'}],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box}]};
+  s.emitRetiredOcr(observation);
+  assert.equal(overlay.children.length, 0, 'retired worker cannot paint stale boxes');
+  assert.match(status.textContent, /Çekim başarısız/);
+  s.emitOcr(observation);
+  assert.match(status.textContent, /Sarı/);
+  assert.equal(overlay.children.length, 1);
+  await s.button('Fotoğrafı çek').emit('click');
+  const result = await pending;
+  assert.equal(result.type, 'image/jpeg');
+  assert.ok(result.size > 0);
+  assert.equal(s.tracks[0].stopped, true);
+  assert.equal(s.nodes.length, 0);
 });
