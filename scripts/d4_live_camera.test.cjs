@@ -36,6 +36,7 @@ function setup({permission = true, delayed = false, withOcr = false,
     const el = {
       type, style: {}, children: [], attributes: {}, textContent: '', files: [],
       clientWidth: 390, clientHeight: 220,
+      offsetLeft: 0, offsetTop: 0, clientLeft: 0, clientTop: 0,
       setAttribute(k, v) { this.attributes[k] = v; },
       appendChild(child) { this.children.push(child); },
       replaceChildren(...children) { this.children = children; },
@@ -471,6 +472,43 @@ test('live camera distinguishes ordinary text from exact pair lines without gree
   assert.equal(await pending, null);
 });
 
+
+test('web OCR boxes align to the bordered video content and reset after viewport resize', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const panel = s.nodes[0], video = panel.children[1].children[0];
+  const overlay = panel.children[1].children[1], status = panel.children[2];
+  // The video is offset within the overlay frame, with a 3px CSS border.
+  video.offsetLeft = 7; video.offsetTop = 11;
+  video.clientLeft = 3; video.clientTop = 3;
+  const box = {x0: 50, y0: 70, x1: 250, y1: 120};
+  const observation = sequence => ({sequence, width: 1200, height: 675,
+    textPresent: true, boxes: [box], pairBoxes: [box],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box}],
+    cues: [{percent: 80, fiber: 'pamuk'}]});
+  s.emitOcr(observation(1));
+  assert.equal(overlay.children.length, 1);
+  const scale = Math.min(video.clientWidth / video.videoWidth,
+    video.clientHeight / video.videoHeight);
+  const expectedX = 10 + (video.clientWidth - video.videoWidth * scale) / 2 +
+    box.x0 / 1200 * video.videoWidth * scale;
+  const expectedY = 14 + (video.clientHeight - video.videoHeight * scale) / 2 +
+    box.y0 / 675 * video.videoHeight * scale;
+  assert.ok(Math.abs(parseFloat(overlay.children[0].style.left) - expectedX) < .01);
+  assert.ok(Math.abs(parseFloat(overlay.children[0].style.top) - expectedY) < .01);
+  assert.equal(typeof s.pageEvents.get('resize'), 'function');
+  s.pageEvents.get('resize')();
+  assert.equal(overlay.children.length, 0, 'resize cannot retain misplaced OCR boxes');
+  assert.match(status.textContent, /Gri/);
+  s.emitOcr(observation(2));
+  assert.match(status.textContent, /Tek kare adayı/,
+    'a new viewport requires new independent OCR evidence');
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+  assert.equal(s.pageEvents.has('resize'), false, 'resize listener is cleaned up');
+});
 
 test('live quality uses observed OCR text pixels instead of dark surroundings', () => {
   const s = setup();
