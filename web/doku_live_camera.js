@@ -287,24 +287,24 @@
       const startLiveScanner = () => {
         if (done || capturing || usingSystemPicker || !stream || liveScanner) return;
         const generation = ++scannerGeneration;
-          liveScanner = root.dokuLiveOcr?.create?.(
-            observation => {
-              if (generation !== scannerGeneration || done || capturing || usingSystemPicker) return;
-              const reading = stability?.observe(observation, Date.now());
-              // Ignore late/duplicate observations; render only validated geometry.
-              if (reading && !reading.stale && reading.sequence === observation.sequence) {
-                showBoxes(reading);
-              }
-              renderStatus();
-            },
-            () => {
-              if (generation !== scannerGeneration || done) return;
-              liveScanner?.stop(); liveScanner = null;
-              stability?.clear();
-              overlay.replaceChildren();
-              renderStatus();
+        liveScanner = root.dokuLiveOcr?.create?.(
+          observation => {
+            if (generation !== scannerGeneration || done || capturing || usingSystemPicker) return;
+            const reading = stability?.observe(observation, Date.now());
+            // Ignore late/duplicate observations; render only validated geometry.
+            if (reading && !reading.stale && reading.sequence === observation.sequence) {
+              showBoxes(reading);
             }
-          ) || null;
+            renderStatus();
+          },
+          () => {
+            if (generation !== scannerGeneration || done) return;
+            liveScanner?.stop(); liveScanner = null;
+            stability?.clear();
+            overlay.replaceChildren();
+            renderStatus();
+          }
+        ) || null;
       };
       const captureButton = button('Fotoğrafı çek', async () => {
         if (capturing || !stream || !video.videoWidth || !video.videoHeight) return;
@@ -416,6 +416,7 @@
         } catch (_) { /* Safari or device does not expose torch capability. */ }
         Promise.resolve(video.play()).catch(() => {});
         startLiveScanner();
+        renderStatus();
         interval = root.setInterval(() => {
           if (done || capturing) return;
           try {
