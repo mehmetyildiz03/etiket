@@ -26,7 +26,7 @@ function setup({permission = true, delayed = false, withOcr = false,
   let remainingBlobFailures = previewBlobFailures, ocrCreates = 0, ocrStops = 0;
   const ocrCallbacks = [];
   const clock = {now: 1000};
-  let bitmapCloses = 0;
+  let bitmapCloses = 0, lastDraw = null, imageOrientationOption = null;
   const pending = new Promise((resolve, reject) => { requestResolve = resolve; requestReject = reject; });
   if (!delayed) queueMicrotask(() => permission ? requestResolve(stream) :
     requestReject(new DOMException('denied', 'NotAllowedError')));
@@ -45,7 +45,7 @@ function setup({permission = true, delayed = false, withOcr = false,
       play: async () => {}, pause() {},
       videoWidth: 1920, videoHeight: 1080, readyState: 4,
       getContext() { return {
-        drawImage() {},
+        drawImage(...args) { lastDraw = args; },
         getImageData: (_x, _y, w, h) => ({data: new Uint8ClampedArray(w * h * 4).fill(240)})
       }; },
       toBlob(fn) {
@@ -75,9 +75,10 @@ function setup({permission = true, delayed = false, withOcr = false,
     clearInterval: () => { timer = null; },
     setTimeout, clearTimeout,
     ImageCapture: still ? class { async takePhoto() { return still; } } : undefined,
-    createImageBitmap: still ? async () => {
+    createImageBitmap: still ? async (_blob, options) => {
+      imageOrientationOption = options;
       if (stillDecodeReject) throw new Error('image decoder rejected still');
-      return {width: stillWidth, height: stillHeight,
+      return {width: stillWidth, height: stillHeight, isStillBitmap: true,
         close() { bitmapCloses++; }};
     } : undefined,
     dokuCaptureGuidance: {evaluate: () => null},
@@ -90,6 +91,8 @@ function setup({permission = true, delayed = false, withOcr = false,
   vm.runInContext(source, context);
   return {api: context.dokuLiveCamera, context, nodes, buttons, tracks, stream,
     get bitmapCloses() { return bitmapCloses; },
+    get lastDraw() { return lastDraw; },
+    get imageOrientationOption() { return imageOrientationOption; },
     get ocrCreates() { return ocrCreates; },
     get ocrStops() { return ocrStops; },
     emitRetiredOcr(observation) { assert.ok(ocrCallbacks.length > 1); ocrCallbacks[0](observation); },
@@ -133,7 +136,7 @@ test('full-resolution still is retained when decoded pixels fit the private OCR 
   assert.equal(s.tracks[0].stopped, true);
 });
 
-test('oversized 48MP still falls back to bounded preview before the OCR handoff', async () => {
+test('48MP still is downsampled from oriented still pixels, not a 1080p video frame', async () => {
   const original = new Blob(['synthetic-48mp'], {type: 'image/jpeg'});
   const s = setup({still: original, stillWidth: 8064, stillHeight: 6048});
   const pending = s.api.open();
@@ -143,13 +146,31 @@ test('oversized 48MP still falls back to bounded preview before the OCR handoff'
   assert.notEqual(result, original);
   assert.equal(result.type, 'image/jpeg');
   assert.ok(result.size > 0);
+  assert.equal(s.lastDraw[0].isStillBitmap, true,
+    'must draw from the actual camera still, not the video element');
+  assert.ok(s.lastDraw[3] * s.lastDraw[4] <= 12000000);
+  assert.ok(s.lastDraw[3] * s.lastDraw[4] > 1920 * 1080,
+    'preserve more source detail than the video fallback');
+  assert.equal(s.imageOrientationOption.imageOrientation, 'from-image');
   assert.equal(s.bitmapCloses, 1);
   assert.equal(s.tracks[0].stopped, true);
 });
 
-test('over-20MiB or unsupported camera still uses the safe local fallback', async () => {
+test('20-32MiB still is encoded to a bounded JPEG instead of silently using video', async () => {
+  const s = setup({still: {type: 'image/jpeg', size: 20 * 1024 * 1024 + 1}});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  await s.button('Fotoğrafı çek').emit('click');
+  const result = await pending;
+  assert.equal(result.type, 'image/jpeg');
+  assert.ok(result.size <= 20 * 1024 * 1024);
+  assert.equal(s.lastDraw[0].isStillBitmap, true);
+  assert.equal(s.bitmapCloses, 1);
+});
+
+test('unsupported or over-32MiB still uses the safe local video fallback', async () => {
   for (const still of [
-    {type: 'image/jpeg', size: 20 * 1024 * 1024 + 1},
+    {type: 'image/jpeg', size: 32 * 1024 * 1024 + 1},
     new Blob(['unsupported'], {type: 'image/heic'})
   ]) {
     const s = setup({still});
@@ -159,6 +180,7 @@ test('over-20MiB or unsupported camera still uses the safe local fallback', asyn
     const result = await pending;
     assert.equal(result.type, 'image/jpeg');
     assert.ok(result.size > 0);
+    assert.equal(s.lastDraw[0].type, 'video');
     assert.equal(s.bitmapCloses, 0, 'reject unsupported payload before decode');
   }
 });
