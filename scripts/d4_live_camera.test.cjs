@@ -680,3 +680,40 @@ test('failed still capture restarts local OCR, discards retired results and perm
   assert.equal(s.tracks[0].stopped, true);
   assert.equal(s.nodes.length, 0);
 });
+
+
+test('separated OCR lines use their own pixels for light advice, not dark garment between', () => {
+  const s = setup();
+  const canvas = {
+    width: 0, height: 0,
+    getContext() {
+      return {drawImage() {}, getImageData: (_x, _y, w, h) => {
+        const data = new Uint8ClampedArray(w * h * 4);
+        for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+          // Two bright label lines with a dark garment between them.
+          const v = (x < 55 || x >= 105) && y >= 20 && y < 70 ? 245 : 8;
+          const p = (y * w + x) * 4;
+          data[p] = data[p + 1] = data[p + 2] = v;
+          data[p + 3] = 255;
+        }
+        return {data};
+      }};
+    }
+  };
+  const line1 = {x0: 150, y0: 263, x1: 300, y1: 413};
+  const line2 = {x0: 900, y0: 263, x1: 1050, y1: 413};
+  const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
+  const reading = {stale: false, width: 1200, height: 675,
+    boxes: [line1, line2], pairBoxes: [line1, line2]};
+  const metrics = s.api.sampleQuality(video, canvas, reading);
+  assert.ok(metrics.meanLuminance < 150, 'garment makes full-frame mean misleading');
+  assert.ok(metrics.textMetrics.meanLuminance >= 232,
+    'both visible OCR lines are bright despite dark space between them');
+  assert.ok(metrics.textMetrics.dynamicRange <= 16);
+  assert.equal(require('../web/doku_capture_guidance.js').evaluate(metrics.textMetrics),
+    'veryBright', 'advice must reflect measured line pixels');
+  assert.equal('rawText' in metrics, false);
+  assert.equal('image' in metrics, false);
+  assert.equal(s.api.sampleQuality(video, canvas, {...reading, stale: true}).textMetrics,
+    null, 'stale OCR coordinates cannot drive light advice');
+});
