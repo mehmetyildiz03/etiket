@@ -158,6 +158,9 @@
     const doc = root.document;
     return new Promise((resolve, reject) => {
       let done = false, stream = null, interval = null, capturing = false;
+      // Never silently substitute a lower-detail video frame for a failed
+      // full-resolution still. The user must explicitly select that option.
+      let previewFallbackApproved = false;
       let liveScanner = null, lastMetrics = null, scannerGeneration = 0;
       let torchTrack = null, torchEnabled = false, torchBusy = false;
       const stability = root.dokuLiveStability?.create?.() || null;
@@ -399,15 +402,16 @@
         try {
           let blob = null;
           const track = stream.getVideoTracks()[0];
-          if (track && typeof root.ImageCapture === 'function') {
+          if (!previewFallbackApproved && track && typeof root.ImageCapture === 'function') {
             try {
               const candidate = await new root.ImageCapture(track).takePhoto();
               blob = await prepareStill(candidate, canvas);
-            } catch (_) { /* Camera still unavailable; use bounded frame. */ }
+            } catch (_) { /* Native still unavailable: require an explicit choice. */ }
           }
-          if (!blob) {
-            // Video capture has less detail than a native still photo. Offer
-            // the system-camera path above for a higher-resolution alternative.
+          if (!blob && !previewFallbackApproved) throw error('stillUnavailable');
+          if (!blob && previewFallbackApproved) {
+            // A video frame can be much lower resolution than a native still.
+            // Only an explicit second press permits this local fallback.
             const width = video.videoWidth, height = video.videoHeight;
             const scale = Math.min(1, 4800 / Math.max(width, height),
               Math.sqrt(24000000 / (width * height)));
@@ -419,14 +423,20 @@
           if (!blob || !blob.size) throw error('invalidPhoto');
           if (done) return;
           close(blob);
-        } catch (_) {
+        } catch (failure) {
           if (!done) {
             capturing = false;
             stability?.clear();
             overlay.replaceChildren();
             canvas.width = canvas.height = 0;
             startLiveScanner();
-            status.textContent = 'Çekim başarısız. Tekrar dene veya sistem kamerasını kullan.';
+            if (failure?.message === 'stillUnavailable') {
+              previewFallbackApproved = true;
+              captureButton.textContent = 'Video karesini kullan (düşük çözünürlük)';
+              status.textContent = 'Yüksek çözünürlüklü fotoğraf alınamadı. Sistem kamerasını kullan veya düşük çözünürlüklü video karesini seç.';
+            } else {
+              status.textContent = 'Çekim başarısız. Tekrar dene veya sistem kamerasını kullan.';
+            }
           }
         }
       });
