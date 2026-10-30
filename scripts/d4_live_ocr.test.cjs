@@ -72,6 +72,29 @@ test('multi-fiber line never pairs a percentage with the neighboring fiber', () 
     ['80:pamuk', '20:keten']);
 });
 
+test('mixed printed ratio–fiber order keeps both literal live pairs without cross-pairing', () => {
+  const s = setup();
+  const mixed = [
+    ['80% PAMUK KETEN 20%', ['80:pamuk', '20:keten']],
+    ['PAMUK 80% 20% KETEN', ['80:pamuk', '20:keten']],
+    ['80% PAMUK KETEN 20% 10% POLYESTER',
+      ['80:pamuk', '20:keten', '10:polyester']],
+    // A tempting reverse match "PAMUK 20%" overlaps the real first
+    // "80% PAMUK"; it must not create a second percentage for that fiber.
+    ['80% PAMUK 20% KETEN', ['80:pamuk', '20:keten']],
+    ['80% PAMUK 20%', ['80:pamuk']]
+  ];
+  for (const [printed, expected] of mixed) {
+    const out = s.api.extract(result(line(printed)).data, 1200, 675, 1, 50);
+    assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+      expected, printed);
+    assert.equal(out.pairBoxes.length, 1, 'one real OCR line box, not invented geometry');
+    assert.equal(out.pairObservations.length, expected.length);
+    assert.equal('verified' in out, false, 'mixed order remains an unverified hint');
+    assert.equal('acceptedText' in out, false);
+  }
+});
+
 test('malformed three/four digit ratios never yield a truncated percentage', () => {
   const s = setup();
   const out = s.api.extract(result(line('120% PAMUK'),
