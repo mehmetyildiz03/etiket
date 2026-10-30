@@ -157,7 +157,7 @@
       const video = doc.createElement('video');
       video.autoplay = true; video.muted = true; video.playsInline = true;
       video.setAttribute('playsinline', '');
-      video.style.cssText = 'display:block;width:100%;max-width:560px;max-height:65vh;object-fit:contain;border:3px solid #b4c1b8;border-radius:12px;background:#000';
+      video.style.cssText = 'display:block;width:100%;max-width:560px;max-height:65vh;object-fit:contain;box-sizing:border-box;border:3px solid #b4c1b8;border-radius:12px;background:#000';
       const frame = doc.createElement('div');
       frame.style.cssText = 'position:relative;width:100%;max-width:560px;max-height:65vh';
       video.style.maxHeight = '65vh';
@@ -230,8 +230,15 @@
         const scale = Math.min(video.clientWidth / video.videoWidth,
           video.clientHeight / video.videoHeight);
         const drawnW = video.videoWidth * scale, drawnH = video.videoHeight * scale;
-        const offsetX = (video.clientWidth - drawnW) / 2;
-        const offsetY = (video.clientHeight - drawnH) / 2;
+        // The overlay is positioned in the FRAME, while object-fit uses the
+        // VIDEO CONTENT box. Account for video layout offsets and borders;
+        // otherwise a percentage glyph can be highlighted several pixels
+        // away from its actual OCR location on narrow/mobile viewports.
+        const contentX = video.offsetLeft + video.clientLeft;
+        const contentY = video.offsetTop + video.clientTop;
+        if (![contentX, contentY, drawnW, drawnH].every(Number.isFinite)) return;
+        const offsetX = contentX + (video.clientWidth - drawnW) / 2;
+        const offsetY = contentY + (video.clientHeight - drawnH) / 2;
         const paint = (boxes, border) => {
           for (const bb of boxes) {
             const mark = doc.createElement('div');
@@ -288,6 +295,8 @@
         doc.removeEventListener('visibilitychange', hidden);
         doc.removeEventListener('keydown', onKeyDown);
         root.removeEventListener('pagehide', pagehide);
+        root.removeEventListener('resize', invalidateLayout);
+        root.visualViewport?.removeEventListener?.('resize', invalidateLayout);
         liveScanner?.stop(); liveScanner = null;
         stability?.clear();
         stopStream();
@@ -299,6 +308,14 @@
       const hidden = () => { if (doc.hidden && !usingSystemPicker) close(null); };
       const onKeyDown = event => { if (event.key === 'Escape') close(null); };
       const pagehide = () => close(null);
+      // A viewport change invalidates old overlay pixel positions. Wait for
+      // new OCR evidence rather than leaving stale boxes over different text.
+      const invalidateLayout = () => {
+        if (done || usingSystemPicker) return;
+        stability?.clear();
+        overlay.replaceChildren();
+        renderStatus();
+      };
       const session = {cancel: () => close(null)};
       active = session;
       // A failed still capture must not permanently disable local live OCR.
@@ -432,6 +449,8 @@
       doc.addEventListener('keydown', onKeyDown);
       captureButton.focus?.();
       root.addEventListener('pagehide', pagehide);
+      root.addEventListener('resize', invalidateLayout);
+      root.visualViewport?.addEventListener?.('resize', invalidateLayout);
       root.navigator.mediaDevices.getUserMedia({audio: false, video: {
         facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}
       }}).then(got => {
