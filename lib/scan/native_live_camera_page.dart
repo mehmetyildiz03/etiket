@@ -185,7 +185,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     if (frame.planes.isEmpty) return LiveFrameQuality.unknown;
     final plane = frame.planes.first;
     final isBgra = Platform.isIOS;
-    final samples = sampleNativeLuminance(
+    final samples = sampleNativeCenterLuminance(
       bytes: plane.bytes,
       width: frame.width,
       height: frame.height,
