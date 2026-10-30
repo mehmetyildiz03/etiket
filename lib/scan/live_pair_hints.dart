@@ -19,42 +19,8 @@ final _fiberFirst = RegExp(
 
 
 final _isolatedRatio = RegExp(
-    r'^\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)\s*(String text) {
-  final firstPercent = _percent.firstMatch(text);
-  final firstFiber = _fiber.firstMatch(text);
-  if (firstPercent == null || firstFiber == null) return const [];
-  final ratioFirst = firstPercent.start <= firstFiber.start;
-  final result = <String>[];
-  for (final match in (ratioFirst ? _ratioFirst : _fiberFirst).allMatches(text)) {
-    final percent = int.tryParse(ratioFirst
-        ? (match.group(1) ?? match.group(2) ?? '')
-        : (match.group(2) ?? match.group(3) ?? ''));
-    final fiber = match.group(ratioFirst ? 3 : 1)?.toLowerCase();
-    if (percent == null || percent <= 0 || percent > 100 || fiber == null) continue;
-    final value = '$percent% $fiber';
-    if (!result.contains(value) && result.length < 8) result.add(value);
-  }
-  return List.unmodifiable(result);
-}
-);
-final _isolatedFiber = RegExp('^\\s*($_fibers)\\s*(String text) {
-  final firstPercent = _percent.firstMatch(text);
-  final firstFiber = _fiber.firstMatch(text);
-  if (firstPercent == null || firstFiber == null) return const [];
-  final ratioFirst = firstPercent.start <= firstFiber.start;
-  final result = <String>[];
-  for (final match in (ratioFirst ? _ratioFirst : _fiberFirst).allMatches(text)) {
-    final percent = int.tryParse(ratioFirst
-        ? (match.group(1) ?? match.group(2) ?? '')
-        : (match.group(2) ?? match.group(3) ?? ''));
-    final fiber = match.group(ratioFirst ? 3 : 1)?.toLowerCase();
-    if (percent == null || percent <= 0 || percent > 100 || fiber == null) continue;
-    final value = '$percent% $fiber';
-    if (!result.contains(value) && result.length < 8) result.add(value);
-  }
-  return List.unmodifiable(result);
-}
-, caseSensitive: false);
+    r'^\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)\s*$');
+final _isolatedFiber = RegExp('^\\s*($_fibers)\\s*$', caseSensitive: false);
 
 /// Standalone printed tokens only; no OCR repair or percentage completion.
 String? liveIsolatedPercent(String text) {
