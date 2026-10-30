@@ -31,8 +31,8 @@
             bb.x0 >= 0 && bb.y0 >= 0 && bb.x1 > bb.x0 && bb.y1 > bb.y0 &&
             bb.x1 <= width && bb.y1 <= height;
           // Only a visible, retained OCR line can receive a matched-pair box.
-          const retainedBox = validBox && boxes.length < 24;
-          if (retainedBox) boxes.push({x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1});
+          const lineBox = validBox ?
+            {x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1} : null;
           // Only literal percent-marked fiber pairs on the SAME OCR line.
           // Do not infer missing %, section, full-label coverage or correctness.
           // Select a single reading order per line. Running both regexes
@@ -47,6 +47,7 @@
           const percentIndices = ratioFirst ? [1, 2] : [2, 3];
           {
             let lineHasPair = false;
+            const linePairs = [];
             pattern.lastIndex = 0;
             for (const match of value.matchAll(pattern)) {
               const percent = Number(match[percentIndices[0]] || match[percentIndices[1]]);
@@ -60,16 +61,38 @@
               } else if (cues.length < 8) {
                 unique.add(key);
                 cues.push({percent, fiber});
-                if (retainedBox) {
-                  pairObservations.push({percent, fiber,
-                    box: {x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1}});
-                }
+                linePairs.push({percent, fiber});
               }
             }
             // Distinguish actual same-line ratio+fiber matches from unrelated
             // OCR text. This geometry is advisory and never verifies a pair.
-            if (lineHasPair && retainedBox) {
-              pairBoxes.push({x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1});
+            if (lineBox) {
+              let retained = boxes.length < 24;
+              if (!retained && lineHasPair) {
+                // Dense care labels can put composition after 24 instruction
+                // lines. Prefer a REAL matched line over an unrelated text
+                // rectangle, without exceeding the fixed overlay budget.
+                // Never evict a previously retained matched-pair line.
+                for (let i = boxes.length - 1; i >= 0; i--) {
+                  const previous = boxes[i];
+                  if (!pairBoxes.some(p => p.x0 === previous.x0 &&
+                      p.y0 === previous.y0 && p.x1 === previous.x1 &&
+                      p.y1 === previous.y1)) {
+                    boxes.splice(i, 1);
+                    retained = true;
+                    break;
+                  }
+                }
+              }
+              if (retained) {
+                boxes.push(lineBox);
+                if (lineHasPair) {
+                  pairBoxes.push(lineBox);
+                  for (const pair of linePairs) {
+                    pairObservations.push({...pair, box: lineBox});
+                  }
+                }
+              }
             }
           }
         }
