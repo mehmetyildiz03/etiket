@@ -257,8 +257,10 @@
         const count = video.getVideoPlaybackQuality?.()?.totalVideoFrames;
         if (Number.isSafeInteger(count) && count > 0) decodedFrame = count;
       } catch (_) { /* Browser does not expose decoded-frame statistics. */ }
+      // A camera track renegotiation may reset this counter to a smaller
+      // value; only an unchanged count proves no newer decoded frame exists.
       if (decodedFrame !== null && lastDecodedFrame !== null &&
-          decodedFrame <= lastDecodedFrame) return false;
+          decodedFrame === lastDecodedFrame) return false;
       lastDecodedFrame = decodedFrame;
       busy = true;
       lastStarted = Date.now();
