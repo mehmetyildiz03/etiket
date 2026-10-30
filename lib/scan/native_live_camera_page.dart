@@ -11,6 +11,7 @@ import 'native_camera_recovery.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_pair_geometry.dart';
+import 'native_visible_text_edges.dart';
 import 'native_pair_overlay.dart';
 import 'native_yuv420_nv21.dart';
 
@@ -197,15 +198,17 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   ({List<String> pairs, Offset? center, NativeFramingHint framing,
-      Map<String, Rect>? trackedBoxes, Size? imageSize})
+      Map<String, Rect>? trackedBoxes, Size? imageSize, bool textNearEdge})
       _extract(RecognizedText recognized, CameraImage frame,
           int rotationDegrees) {
     final pairs = <String>[];
     final boxes = <Rect>[];
+    final visibleTextBoxes = <Rect>[];
     final pairBoxes = <String, Rect>{};
     var duplicatePair = false;
     for (final block in recognized.blocks) {
       for (final line in block.lines) {
+        if (line.text.trim().isNotEmpty) visibleTextBoxes.add(line.boundingBox);
         final matches = livePairsFromLine(line.text);
         if (matches.isEmpty) continue;
         for (final pair in matches) {
@@ -232,9 +235,14 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final trackedBoxes = dimensions == null ? null : normalizeNativePairBoxes(
         imageSize: dimensions, pairBoxes: pairBoxes,
         duplicatePair: duplicatePair);
+    final textNearEdge = Platform.isAndroid && dimensions != null &&
+        visibleTextTouchesFrameEdge(
+          imageSize: dimensions, textLineBoxes: visibleTextBoxes,
+          matchedPairCount: pairs.length);
     return (pairs: pairs, center: geometry.center,
         framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown,
-        trackedBoxes: trackedBoxes, imageSize: dimensions);
+        trackedBoxes: trackedBoxes, imageSize: dimensions,
+        textNearEdge: textNearEdge);
   }
 
   void _onFrame(CameraImage frame) {
@@ -292,12 +300,16 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           key == _fingerprint && !drift && withinGap &&
           _lastPairRotation == rotationDegrees &&
           nativePairBoxesAgree(_lastPairBoxes, result.trackedBoxes);
+      final nextStableFrames = !goodObservation || key.isEmpty
+          ? 0 : stable ? _stableFrames + 1 : 1;
       setState(() {
         _pairs = result.pairs;
         _textPresent = recognized.text.trim().isNotEmpty;
         _advice = quality != LiveFrameQuality.usable
             ? liveQualityAdvice(quality)
-            : switch (result.framing) {
+            : nextStableFrames >= 2 && result.textNearEdge
+                ? 'Görünen yazı kadrajın kenarında. Biraz uzaklaş ve etiketi ortala.'
+                : switch (result.framing) {
                 NativeFramingHint.moveBack =>
                   'Yüzde–elyaf satırı kenara yakın. Biraz uzaklaş ve etiketi ortala.',
                 NativeFramingHint.moveCloser =>
@@ -306,8 +318,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                   'Eşleşen satır görünüyor. Tüm etiketi kadraja al ve sabitle.',
                 NativeFramingHint.unknown => liveQualityAdvice(quality),
               };
-        _stableFrames = !goodObservation || key.isEmpty
-            ? 0 : stable ? _stableFrames + 1 : 1;
+        _stableFrames = nextStableFrames;
         _fingerprint = goodObservation ? key : '';
         _lastCenter = goodObservation ? result.center : null;
         _lastPairBoxes = goodObservation ? result.trackedBoxes : null;
