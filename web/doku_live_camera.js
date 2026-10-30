@@ -123,7 +123,7 @@
     const doc = root.document;
     return new Promise((resolve, reject) => {
       let done = false, stream = null, interval = null, capturing = false;
-      let liveScanner = null, lastMetrics = null;
+      let liveScanner = null, lastMetrics = null, scannerGeneration = 0;
       let torchTrack = null, torchEnabled = false, torchBusy = false;
       const stability = root.dokuLiveStability?.create?.() || null;
       let usingSystemPicker = false;
@@ -286,9 +286,10 @@
       // never deliver an accepted result or overwrite manual corrections.
       const startLiveScanner = () => {
         if (done || capturing || usingSystemPicker || !stream || liveScanner) return;
+        const generation = ++scannerGeneration;
           liveScanner = root.dokuLiveOcr?.create?.(
             observation => {
-              if (done || capturing || usingSystemPicker) return;
+              if (generation !== scannerGeneration || done || capturing || usingSystemPicker) return;
               const reading = stability?.observe(observation, Date.now());
               // Ignore late/duplicate observations; render only validated geometry.
               if (reading && !reading.stale && reading.sequence === observation.sequence) {
@@ -297,7 +298,7 @@
               renderStatus();
             },
             () => {
-              if (done) return;
+              if (generation !== scannerGeneration || done) return;
               liveScanner?.stop(); liveScanner = null;
               stability?.clear();
               overlay.replaceChildren();
