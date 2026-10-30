@@ -281,6 +281,30 @@
       const pagehide = () => close(null);
       const session = {cancel: () => close(null)};
       active = session;
+      // A failed still capture must not permanently disable local live OCR.
+      // Create a fresh worker after a failed attempt; the stopped worker can
+      // never deliver an accepted result or overwrite manual corrections.
+      const startLiveScanner = () => {
+        if (done || capturing || usingSystemPicker || !stream || liveScanner) return;
+          liveScanner = root.dokuLiveOcr?.create?.(
+            observation => {
+              if (done || capturing || usingSystemPicker) return;
+              const reading = stability?.observe(observation, Date.now());
+              // Ignore late/duplicate observations; render only validated geometry.
+              if (reading && !reading.stale && reading.sequence === observation.sequence) {
+                showBoxes(reading);
+              }
+              renderStatus();
+            },
+            () => {
+              if (done) return;
+              liveScanner?.stop(); liveScanner = null;
+              stability?.clear();
+              overlay.replaceChildren();
+              renderStatus();
+            }
+          ) || null;
+      };
       const captureButton = button('Fotoğrafı çek', async () => {
         if (capturing || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
@@ -310,7 +334,14 @@
           if (done) return;
           close(blob);
         } catch (_) {
-          if (!done) { capturing = false; status.textContent = 'Çekim başarısız. Tekrar dene veya sistem kamerasını kullan.'; }
+          if (!done) {
+            capturing = false;
+            stability?.clear();
+            overlay.replaceChildren();
+            canvas.width = canvas.height = 0;
+            startLiveScanner();
+            status.textContent = 'Çekim başarısız. Tekrar dene veya sistem kamerasını kullan.';
+          }
         }
       });
       // Hardware torch is an optional local camera capability (often absent
@@ -383,25 +414,7 @@
           }
         } catch (_) { /* Safari or device does not expose torch capability. */ }
         Promise.resolve(video.play()).catch(() => {});
-        liveScanner = root.dokuLiveOcr?.create?.(
-          observation => {
-            if (done || capturing || usingSystemPicker) return;
-            const reading = stability?.observe(observation, Date.now());
-            // Ignore late/duplicate observations; render only validated geometry.
-            if (reading && !reading.stale && reading.sequence === observation.sequence) {
-              showBoxes(reading);
-            }
-            renderStatus();
-          },
-          () => {
-            if (done) return;
-            liveScanner?.stop(); liveScanner = null;
-            stability?.clear();
-            overlay.replaceChildren();
-            renderStatus();
-          }
-        ) || null;
-        renderStatus();
+        startLiveScanner();
         interval = root.setInterval(() => {
           if (done || capturing) return;
           try {
