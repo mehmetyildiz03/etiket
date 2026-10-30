@@ -9,10 +9,11 @@ const stability = require('../web/doku_live_stability.js');
 
 function setup({permission = true, delayed = false, withOcr = false,
   torch = false, torchReject = false, still = null,
-  noImageCapture = false,
+  noImageCapture = false, withResizeObserver = false,
   stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false,
   previewBlobFailures = 0} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
+  const resizeObservers = [];
   const tracks = [{stopped: false, torchEnabled: false, torchCalls: [],
     stop() { this.stopped = true; this.torchEnabled = false; },
     getCapabilities() { return {torch}; },
@@ -41,6 +42,8 @@ function setup({permission = true, delayed = false, withOcr = false,
       appendChild(child) { this.children.push(child); },
       replaceChildren(...children) { this.children = children; },
       addEventListener(k, fn) { events.set(k, fn); },
+      removeEventListener(k) { events.delete(k); },
+      hasListener(k) { return events.has(k); },
       async emit(k) { await events.get(k)?.(); },
       remove() { const index = nodes.indexOf(this); if (index >= 0) nodes.splice(index, 1); },
       click() { return this.emit('click'); },
@@ -76,6 +79,12 @@ function setup({permission = true, delayed = false, withOcr = false,
     setInterval: fn => { timer = fn; return 1; },
     clearInterval: () => { timer = null; },
     setTimeout, clearTimeout,
+    ResizeObserver: withResizeObserver ? class {
+      constructor(callback) { this.callback = callback; this.disconnected = false;
+        resizeObservers.push(this); }
+      observe(target) { this.target = target; }
+      disconnect() { this.disconnected = true; }
+    } : undefined,
     ImageCapture: noImageCapture ? undefined : class {
       async takePhoto() {
         if (!still) throw new Error('native still not available');
@@ -104,7 +113,8 @@ function setup({permission = true, delayed = false, withOcr = false,
     get ocrStops() { return ocrStops; },
     emitRetiredOcr(observation) { assert.ok(ocrCallbacks.length > 1); ocrCallbacks[0](observation); },
     get requested() { return requested; }, get cameraCalls() { return cameraCalls; },
-    get timer() { return timer; }, docEvents, pageEvents, requestResolve, requestReject,
+    get timer() { return timer; }, docEvents, pageEvents, resizeObservers,
+    requestResolve, requestReject,
     advance(ms) { clock.now += ms; },
     emitOcr(observation) { assert.equal(typeof ocrResult, 'function'); ocrResult(observation); },
     button(label) { const b = buttons.find(b => b.textContent.startsWith(label));
@@ -513,6 +523,62 @@ test('web OCR boxes align to the bordered video content and reset after viewport
   s.api.cancel();
   assert.equal(await pending, null);
   assert.equal(s.pageEvents.has('resize'), false, 'resize listener is cleaned up');
+});
+
+test('intrinsic video resize invalidates OCR boxes without a window resize', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const panel = s.nodes[0], video = panel.children[1].children[0];
+  const overlay = panel.children[1].children[1], status = panel.children[2];
+  const box = {x0: 50, y0: 70, x1: 250, y1: 120};
+  const obs = (sequence, durationMs) => ({
+    sequence, durationMs, width: 1200, height: 675, textPresent: true,
+    boxes: [box], pairBoxes: [box],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box}],
+    cues: [{percent: 80, fiber: 'pamuk'}]
+  });
+  assert.equal(video.hasListener('resize'), true);
+  assert.equal(video.hasListener('loadedmetadata'), true);
+  s.emitOcr(obs(1, 100));
+  assert.equal(overlay.children.length, 1);
+  await video.emit('resize'); // Camera track renegotiated; viewport unchanged.
+  assert.equal(overlay.children.length, 0);
+  assert.match(status.textContent, /Gri/);
+  s.emitOcr(obs(2, 500)); // Sample began before the camera size change.
+  assert.equal(overlay.children.length, 0);
+  s.advance(2000);
+  s.emitOcr(obs(3, 100));
+  assert.equal(overlay.children.length, 1);
+  assert.match(status.textContent, /Tek kare adayı/);
+  await video.emit('loadedmetadata');
+  assert.equal(overlay.children.length, 0);
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+  assert.equal(video.hasListener('resize'), false);
+  assert.equal(video.hasListener('loadedmetadata'), false);
+});
+
+test('responsive video resize observer clears stale OCR boxes and disconnects', async () => {
+  const s = setup({withOcr: true, withResizeObserver: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const panel = s.nodes[0], video = panel.children[1].children[0];
+  const overlay = panel.children[1].children[1], status = panel.children[2];
+  assert.equal(s.resizeObservers.length, 1);
+  assert.equal(s.resizeObservers[0].target, video);
+  const box = {x0: 50, y0: 70, x1: 250, y1: 120};
+  s.emitOcr({sequence: 1, width: 1200, height: 675,
+    textPresent: true, boxes: [box], pairBoxes: [box],
+    cues: [{percent: 80, fiber: 'pamuk'}]});
+  assert.equal(overlay.children.length, 1);
+  s.resizeObservers[0].callback();
+  assert.equal(overlay.children.length, 0);
+  assert.match(status.textContent, /Gri/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+  assert.equal(s.resizeObservers[0].disconnected, true);
 });
 
 test('live quality uses observed OCR text pixels instead of dark surroundings', () => {
