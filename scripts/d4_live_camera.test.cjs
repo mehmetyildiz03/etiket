@@ -465,7 +465,7 @@ test('live OCR status counts independent frames, resets motion and expires stale
   const observation = sequence => ({sequence, width: 1200, height: 675,
     boxes: [matched], pairBoxes: [matched],
     pairObservations: [{percent: 80, fiber: 'pamuk', box: matched}],
-    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true});
+    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true, freshFrame: true});
   s.emitOcr(observation(1));
   assert.match(status.textContent, /Tek kare adayı/);
   assert.equal(overlay.children.length, 1);
@@ -473,6 +473,9 @@ test('live OCR status counts independent frames, resets motion and expires stale
   s.emitOcr(observation(2));
   assert.match(status.textContent, /2 ayrı OCR karesinde/);
   assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.emitOcr({...observation(3), freshFrame: false});
+  assert.match(status.textContent, /bağımsız yeni kamera karesi doğrulanamadı/);
+  assert.doesNotMatch(status.textContent, /3 ayrı OCR karesinde/);
   s.advance(7000);
   s.timer();
   assert.match(status.textContent, /Gri/);
