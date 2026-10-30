@@ -153,6 +153,9 @@ test('matched-line boxes identify real same-line pairs, not unrelated OCR lines'
   assert.equal(out.pairBoxes.length, 1, 'one matched OCR line, not one box per cue');
   assert.equal(out.pairBoxes[0].y0, paired.y0);
   assert.equal(out.pairBoxes[0].y1, paired.y1);
+  assert.deepEqual(Array.from(out.pairObservations, p => p.percent + ':' + p.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.ok(out.pairObservations.every(p => p.box.y0 === paired.y0));
   assert.equal('verified' in out, false);
 });
 
@@ -166,4 +169,22 @@ test('invalid or overflowed OCR line boxes cannot be highlighted as pairs', () =
   assert.equal(out.cues.length, 2, 'candidates may be shown without a valid box');
   assert.equal(out.boxes.length, 24);
   assert.equal(out.pairBoxes.length, 0, 'never highlight a box not retained as visible text');
+});
+
+
+test('web live OCR never treats repeated or unboxed pair text as stable geometry', () => {
+  const s = setup();
+  const same = {x0: 20, y0: 40, x1: 250, y1: 70};
+  const other = {x0: 20, y0: 100, x1: 250, y1: 130};
+  const repeated = s.api.extract(result(
+    line('80% PAMUK', same), line('80% PAMUK', other)).data,
+  1200, 675, 1, 50);
+  assert.equal(repeated.cues.length, 1);
+  assert.equal(repeated.pairObservations.length, 0, 'duplicate pair ambiguous');
+  const invalid = s.api.extract(result(
+    line('80% PAMUK', {x0: -1, y0: 0, x1: 40, y1: 30})).data,
+  1200, 675, 2, 50);
+  assert.equal(invalid.cues.length, 1, 'text remains an unverified candidate');
+  assert.equal(invalid.pairObservations.length, 0);
+  assert.equal('rawText' in repeated, false);
 });

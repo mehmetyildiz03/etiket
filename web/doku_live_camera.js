@@ -206,8 +206,14 @@
         };
         // Gray dashed = any detected text; yellow solid = same-line
         // percentage+fiber candidate. Neither is a verification signal.
-        paint(observation.boxes, '2px dashed #c4cbd0');
-        paint(observation.pairBoxes || [], '3px solid #ffd45c');
+        // A matched pair is yellow, not a duplicate gray+yellow outline.
+        // Keep other observed text gray so incomplete labels remain visible.
+        const pairBoxes = Array.isArray(observation.pairBoxes) ? observation.pairBoxes : [];
+        const otherText = (Array.isArray(observation.boxes) ? observation.boxes : [])
+          .filter(b => !pairBoxes.some(p => p.x0 === b.x0 && p.y0 === b.y0 &&
+            p.x1 === b.x1 && p.y1 === b.y1));
+        paint(otherText, '2px dashed #c4cbd0');
+        paint(pairBoxes, '3px solid #ffd45c');
       };
       const actions = doc.createElement('div');
       actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;justify-content:center';

@@ -36,12 +36,37 @@
     return null;
   }
 
+  // Compare EACH literal percent+fiber pair in OCR-image coordinates.
+  // A stable overall center can hide swapped or wandering individual lines.
+  // This is advisory-only; it cannot authorize green or an accepted value.
+  function pairGeometryAgrees(previous, current) {
+    if (!previous || !current || !previous.size ||
+        previous.size !== current.size) return false;
+    for (const [key, b] of current) {
+      const a = previous.get(key);
+      if (!a) return false;
+      const aw = a.x1 - a.x0, ah = a.y1 - a.y0;
+      const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+      if (!(aw > 0 && ah > 0 && bw > 0 && bh > 0) ||
+          bw / aw < .67 || bw / aw > 1.5 ||
+          bh / ah < .67 || bh / ah > 1.5 ||
+          Math.hypot((a.x0 + a.x1 - b.x0 - b.x1) / 2,
+            (a.y0 + a.y1 - b.y0 - b.y1) / 2) > .06) return false;
+      const overlapW = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
+      const overlapH = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+      const intersection = overlapW * overlapH;
+      const union = aw * ah + bw * bh - intersection;
+      if (!(union > 0 && intersection / union >= .35)) return false;
+    }
+    return true;
+  }
+
   function create() {
     let lastSequence = -1, lastTime = -Infinity, fingerprint = '',
-      center = null, stableFrames = 0, observation = null, moved = false;
+      center = null, pairGeometry = null, stableFrames = 0, observation = null, moved = false;
     function clear() {
       lastSequence = -1; lastTime = -Infinity; fingerprint = '';
-      center = null; stableFrames = 0; observation = null; moved = false;
+      center = null; pairGeometry = null; stableFrames = 0; observation = null; moved = false;
     }
     function view(now) {
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
@@ -65,7 +90,7 @@
         return view(now);
       }
       if (now < lastTime || now - lastTime > MAX_GAP_MS) {
-        fingerprint = ''; center = null; stableFrames = 0;
+        fingerprint = ''; center = null; pairGeometry = null; stableFrames = 0;
       }
       lastSequence = next.sequence;
       const cues = Array.isArray(next.cues) ? next.cues.filter(c =>
@@ -80,6 +105,26 @@
       const pairBoxes = Array.isArray(next.pairBoxes) ? next.pairBoxes.filter(b =>
         b && boxes.some(line => line.x0 === b.x0 && line.y0 === b.y0 &&
           line.x1 === b.x1 && line.y1 === b.y1)).slice(0, 24) : [];
+      const observations = Array.isArray(next.pairObservations)
+        ? next.pairObservations.slice(0, 16) : [];
+      const currentGeometry = new Map();
+      for (const item of observations) {
+        const b = item?.box;
+        const key = item?.percent + ':' + item?.fiber;
+        if (!b || !cues.some(c => c.percent === item.percent &&
+            c.fiber === item.fiber) ||
+            !pairBoxes.some(p => p.x0 === b.x0 && p.y0 === b.y0 &&
+              p.x1 === b.x1 && p.y1 === b.y1) ||
+            currentGeometry.has(key) ||
+            !(Number.isFinite(next.width) && next.width > 0 &&
+              Number.isFinite(next.height) && next.height > 0)) {
+          currentGeometry.clear(); break;
+        }
+        currentGeometry.set(key, {x0: b.x0 / next.width, y0: b.y0 / next.height,
+          x1: b.x1 / next.width, y1: b.y1 / next.height});
+      }
+      // All candidates need unique, retained, real OCR-line geometry.
+      const completePairs = cues.length > 0 && currentGeometry.size === cues.length;
       const hasGeometry = Number.isFinite(next.width) && next.width > 0 &&
         Number.isFinite(next.height) && next.height > 0 && boxes.length > 0;
       const bounds = hasGeometry ? {
@@ -88,16 +133,20 @@
         y: (Math.min(...boxes.map(b => b.y0)) + Math.max(...boxes.map(b => b.y1))) /
           (2 * next.height)
       } : null;
-      const nextFingerprint = cues.length && bounds ?
+      const nextFingerprint = completePairs && bounds ?
         cues.map(c => `${c.percent}:${c.fiber.toLocaleLowerCase('tr')}`)
           .sort().join('|') : '';
-      moved = !!(center && bounds &&
-        Math.hypot(center.x - bounds.x, center.y - bounds.y) > MAX_DRIFT);
+      const samePairGeometry = pairGeometryAgrees(pairGeometry, currentGeometry);
+      moved = !!((center && bounds &&
+        Math.hypot(center.x - bounds.x, center.y - bounds.y) > MAX_DRIFT) ||
+        (fingerprint && nextFingerprint === fingerprint && pairGeometry &&
+          !samePairGeometry));
       if (nextFingerprint && nextFingerprint === fingerprint && !moved &&
-          now - lastTime <= MAX_GAP_MS) stableFrames++;
+          samePairGeometry && now - lastTime <= MAX_GAP_MS) stableFrames++;
       else stableFrames = nextFingerprint ? 1 : 0;
       fingerprint = nextFingerprint;
       center = bounds;
+      pairGeometry = completePairs ? currentGeometry : null;
       lastTime = now;
       observation = {cues, boxes, pairBoxes, width: next.width, height: next.height,
         textPresent: next.textPresent === true || cues.length > 0};

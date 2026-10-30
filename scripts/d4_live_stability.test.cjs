@@ -3,8 +3,12 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {create} = require('../web/doku_live_stability.js');
 const box = (x = 20) => ({x0: x, y0: 40, x1: x + 200, y1: 100});
-const sample = (sequence, cues = [{percent: 80, fiber: 'pamuk'}], x = 20) =>
-  ({sequence, cues, boxes: [box(x)], textPresent: true, width: 1000, height: 500});
+const sample = (sequence, cues = [{percent: 80, fiber: 'pamuk'}], x = 20) => {
+  const bounds = box(x);
+  return {sequence, cues, boxes: [bounds], pairBoxes: [bounds],
+    pairObservations: cues.map(c => ({...c, box: bounds})),
+    textPresent: true, width: 1000, height: 500};
+};
 
 test('requires separate ordered OCR frames and stable position, never green', () => {
   const s = create();
@@ -115,4 +119,61 @@ test('duplicate OCR callback cannot swap a matched-line box', () => {
   const first = s.observe({...sample(10), pairBoxes: [box(20)]}, 1000);
   const duplicate = s.observe({...sample(10), pairBoxes: [box(30)]}, 1100);
   assert.equal(duplicate.pairBoxes[0].x0, first.pairBoxes[0].x0);
+});
+
+
+test('swapped percent–fiber lines cannot gain stability from unchanged overall center', () => {
+  const s = create();
+  const left = box(20), right = box(500);
+  const cues = [{percent: 80, fiber: 'pamuk'}, {percent: 20, fiber: 'keten'}];
+  const two = (sequence, swapped = false) => ({
+    sequence, cues, boxes: [left, right], pairBoxes: [left, right],
+    pairObservations: [
+      {...cues[0], box: swapped ? right : left},
+      {...cues[1], box: swapped ? left : right}
+    ], width: 1000, height: 500, textPresent: true
+  });
+  assert.equal(s.observe(two(1), 1000).stableFrames, 1);
+  assert.equal(s.observe(two(2), 3000).stableFrames, 2);
+  const swapped = s.observe(two(3, true), 5000);
+  assert.equal(swapped.stableFrames, 1);
+  assert.equal(swapped.moved, true);
+  assert.equal(swapped.level, 'yellow');
+  assert.equal(s.observe(two(4, true), 7000).stableFrames, 2);
+});
+
+test('a pair needs its own retained OCR-line box before temporal stability counts', () => {
+  const s = create();
+  const missing = {...sample(1), pairObservations: []};
+  assert.equal(s.observe(missing, 1000).stableFrames, 0);
+  const unrelated = {...sample(2),
+    pairObservations: [{percent: 80, fiber: 'pamuk', box: box(450)}]};
+  assert.equal(s.observe(unrelated, 2000).stableFrames, 0);
+  assert.equal(s.observe(sample(3), 3000).stableFrames, 1);
+});
+
+test('duplicate or incomplete pair observations cannot look spatially stable', () => {
+  const s = create();
+  const p = sample(1);
+  const duplicated = {...p, pairObservations: [p.pairObservations[0],
+    p.pairObservations[0]]};
+  assert.equal(s.observe(duplicated, 1000).stableFrames, 0);
+  const second = {...sample(2), cues: [
+    {percent: 80, fiber: 'pamuk'}, {percent: 20, fiber: 'keten'}]};
+  assert.equal(s.observe(second, 3000).stableFrames, 0);
+  assert.equal(s.view(3000).level, 'yellow');
+});
+
+test('small per-pair jitter is tolerated but scale changes reset stability', () => {
+  const s = create();
+  s.observe(sample(1), 1000);
+  const b = {x0: 24, y0: 42, x1: 224, y1: 102};
+  assert.equal(s.observe({...sample(2), boxes: [b], pairBoxes: [b],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box: b}]},
+  3000).stableFrames, 2);
+  const huge = {x0: 0, y0: 20, x1: 500, y1: 180};
+  const result = s.observe({...sample(3), boxes: [huge], pairBoxes: [huge],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box: huge}]}, 5000);
+  assert.equal(result.stableFrames, 1);
+  assert.equal(result.moved, true);
 });
