@@ -10,6 +10,7 @@ import 'live_frame_quality.dart';
 import 'native_camera_recovery.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
+import 'native_spatial_pairs.dart';
 import 'native_pair_geometry.dart';
 import 'native_visible_text_edges.dart';
 import 'native_pair_overlay.dart';
@@ -204,10 +205,13 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final pairs = <String>[];
     final boxes = <Rect>[];
     final visibleTextBoxes = <Rect>[];
+    final spatialBlocks = <List<NativeOcrLine>>[];
     final pairBoxes = <String, Rect>{};
     var duplicatePair = false;
     for (final block in recognized.blocks) {
+      final blockLines = <NativeOcrLine>[];
       for (final line in block.lines) {
+        blockLines.add(NativeOcrLine(line.text, line.boundingBox));
         if (line.text.trim().isNotEmpty) visibleTextBoxes.add(line.boundingBox);
         final matches = livePairsFromLine(line.text);
         if (matches.isEmpty) continue;
@@ -221,6 +225,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         }
         boxes.add(line.boundingBox);
       }
+      spatialBlocks.add(blockLines);
     }
     // Use the SAME orientation captured for the ML Kit input. The camera
     // orientation can change while asynchronous OCR is processing.
@@ -228,6 +233,22 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final dimensions = nativeOcrImageSize(
       width: frame.width, height: frame.height,
       rotationDegrees: rotationDegrees, android: Platform.isAndroid);
+    // Only literal, one-to-one tokens on the same horizontal OCR-block row.
+    // These are transient yellow candidates, never automatically accepted.
+    if (dimensions != null) {
+      for (final blockLines in spatialBlocks) {
+        for (final candidate in nativeSpatialPairs(
+          imageSize: dimensions, lines: blockLines)) {
+          if (pairBoxes.containsKey(candidate.value)) {
+            duplicatePair = true;
+          } else {
+            pairBoxes[candidate.value] = candidate.box;
+            if (pairs.length < 8) pairs.add(candidate.value);
+            boxes.add(candidate.box);
+          }
+        }
+      }
+    }
     final geometry = dimensions == null
         ? const NativePairGeometry(null, NativeFramingHint.unknown)
         : assessNativePairGeometry(
