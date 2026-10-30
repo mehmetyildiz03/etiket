@@ -95,6 +95,7 @@ test('live camera OCR is bounded, local, and does not approve text', async () =>
   assert.equal(await scanner.sample(video), true);
   assert.equal(s.calls, 1);
   assert.equal(seen.length, 1);
+  assert.equal(seen[0].freshFrame, false, 'first OCR has no independent-frame baseline');
   assert.equal(seen[0].cues[0].percent, 80);
   assert.equal(seen[0].width, 1200);
   assert.equal(seen[0].height, 675);
@@ -352,10 +353,13 @@ test('frozen decoded camera frames cannot be counted as independent OCR observat
     'a genuinely newer decoded frame can be sampled');
   assert.equal(s.calls, 2);
   assert.equal(seen.length, 2);
+  assert.equal(seen[0].freshFrame, false, 'first counter observation is not a second frame');
+  assert.equal(seen[1].freshFrame, true, 'increased decoded counter proves new frame');
   now += 2100;
   decoded = 1; // A renegotiated camera track may reset its frame counter.
   assert.equal(await scanner.sample(stream), true);
   assert.equal(s.calls, 3, 'a counter reset must not freeze OCR indefinitely');
+  assert.equal(seen[2].freshFrame, false, 'counter reset is not proof of a new frame');
   scanner.stop();
 });
 
@@ -363,13 +367,16 @@ test('unavailable decoded-frame statistics preserve safe local OCR fallback', as
   let now = 10000;
   const Clock = class extends Date { static now() { return now; } };
   const s = setup({clock: Clock});
-  const scanner = s.api.create(() => {});
+  const seen = [];
+  const scanner = s.api.create(reading => seen.push(reading));
   const unsupported = {...video,
     getVideoPlaybackQuality: () => { throw Error('not supported'); }};
   assert.equal(await scanner.sample(unsupported), true);
   now += 2100;
   assert.equal(await scanner.sample(unsupported), true);
   assert.equal(s.calls, 2, 'older WebKit can still read local frames');
+  assert.ok(seen.every(reading => reading.freshFrame === false),
+    'unverified frames cannot be described as independent');
   scanner.stop();
 });
 
@@ -391,9 +398,12 @@ test('WebKit presented-frame callback prevents repeated OCR of a stalled frame',
   now += 2100;
   assert.equal(await scanner.sample(stream), false, 'stalled frame is not independent');
   assert.equal(readings.length, 1);
+  assert.equal(readings[0].freshFrame, false);
   callback(); // A newly presented frame is reported by the browser.
   assert.equal(await scanner.sample(stream), true);
   assert.equal(s.calls, 2);
+  assert.equal(readings[1].freshFrame, true,
+    'presented-frame callback proves a distinct frame');
   assert.equal(nextId, 2, 'arm a single callback for the next sample');
   now += 2100;
   assert.equal(await scanner.sample(stream), false);
@@ -421,12 +431,14 @@ test('broken presented-frame callback fails open to unverified OCR fallback', as
   let now = 10000;
   const Clock = class extends Date { static now() { return now; } };
   const s = setup({clock: Clock});
-  const scanner = s.api.create(() => {});
+  const seen = [];
+  const scanner = s.api.create(reading => seen.push(reading));
   const stream = {...video,
     requestVideoFrameCallback: () => { throw Error('not supported'); }};
   assert.equal(await scanner.sample(stream), true);
   now += 2100;
   assert.equal(await scanner.sample(stream), true);
   assert.equal(s.calls, 2);
+  assert.ok(seen.every(reading => reading.freshFrame === false));
   scanner.stop();
 });
