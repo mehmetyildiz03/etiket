@@ -17,6 +17,22 @@ final _fiberFirst = RegExp(
     r')\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)(?![0-9])',
     caseSensitive: false);
 
+
+final _isolatedRatio = RegExp(
+    r'^\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)\s*$');
+final _isolatedFiber = RegExp(
+    r'^\s*(' '$_fibers' r')\s*$', caseSensitive: false);
+
+/// Standalone printed tokens only; no OCR repair or percentage completion.
+String? liveIsolatedPercent(String text) {
+  final match = _isolatedRatio.firstMatch(text);
+  final value = int.tryParse(match?.group(1) ?? match?.group(2) ?? '');
+  return value != null && value > 0 && value <= 100 ? '$value' : null;
+}
+
+String? liveIsolatedFiber(String text) =>
+    _isolatedFiber.firstMatch(text)?.group(1)?.toLowerCase();
+
 List<String> livePairsFromLine(String text) {
   final firstPercent = _percent.firstMatch(text);
   final firstFiber = _fiber.firstMatch(text);
