@@ -17,6 +17,55 @@ final _fiberFirst = RegExp(
     r')\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)(?![0-9])',
     caseSensitive: false);
 
+
+final _isolatedRatio = RegExp(
+    r'^\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)\s*(String text) {
+  final firstPercent = _percent.firstMatch(text);
+  final firstFiber = _fiber.firstMatch(text);
+  if (firstPercent == null || firstFiber == null) return const [];
+  final ratioFirst = firstPercent.start <= firstFiber.start;
+  final result = <String>[];
+  for (final match in (ratioFirst ? _ratioFirst : _fiberFirst).allMatches(text)) {
+    final percent = int.tryParse(ratioFirst
+        ? (match.group(1) ?? match.group(2) ?? '')
+        : (match.group(2) ?? match.group(3) ?? ''));
+    final fiber = match.group(ratioFirst ? 3 : 1)?.toLowerCase();
+    if (percent == null || percent <= 0 || percent > 100 || fiber == null) continue;
+    final value = '$percent% $fiber';
+    if (!result.contains(value) && result.length < 8) result.add(value);
+  }
+  return List.unmodifiable(result);
+}
+);
+final _isolatedFiber = RegExp('^\\s*($_fibers)\\s*(String text) {
+  final firstPercent = _percent.firstMatch(text);
+  final firstFiber = _fiber.firstMatch(text);
+  if (firstPercent == null || firstFiber == null) return const [];
+  final ratioFirst = firstPercent.start <= firstFiber.start;
+  final result = <String>[];
+  for (final match in (ratioFirst ? _ratioFirst : _fiberFirst).allMatches(text)) {
+    final percent = int.tryParse(ratioFirst
+        ? (match.group(1) ?? match.group(2) ?? '')
+        : (match.group(2) ?? match.group(3) ?? ''));
+    final fiber = match.group(ratioFirst ? 3 : 1)?.toLowerCase();
+    if (percent == null || percent <= 0 || percent > 100 || fiber == null) continue;
+    final value = '$percent% $fiber';
+    if (!result.contains(value) && result.length < 8) result.add(value);
+  }
+  return List.unmodifiable(result);
+}
+, caseSensitive: false);
+
+/// Standalone printed tokens only; no OCR repair or percentage completion.
+String? liveIsolatedPercent(String text) {
+  final match = _isolatedRatio.firstMatch(text);
+  final value = int.tryParse(match?.group(1) ?? match?.group(2) ?? '');
+  return value != null && value > 0 && value <= 100 ? '$value' : null;
+}
+
+String? liveIsolatedFiber(String text) =>
+    _isolatedFiber.firstMatch(text)?.group(1)?.toLowerCase();
+
 List<String> livePairsFromLine(String text) {
   final firstPercent = _percent.firstMatch(text);
   final firstFiber = _fiber.firstMatch(text);
