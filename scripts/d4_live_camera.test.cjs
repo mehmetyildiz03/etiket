@@ -318,8 +318,10 @@ test('live OCR status counts independent frames, resets motion and expires stale
   const panel = s.nodes[0];
   const status = panel.children[2];
   const overlay = panel.children[1].children[1];
+  const matched = {x0: 50, y0: 70, x1: 250, y1: 120};
   const observation = sequence => ({sequence, width: 1200, height: 675,
-    boxes: [{x0: 50, y0: 70, x1: 250, y1: 120}],
+    boxes: [matched], pairBoxes: [matched],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box: matched}],
     cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true});
   s.emitOcr(observation(1));
   assert.match(status.textContent, /Tek kare adayı/);
