@@ -63,10 +63,12 @@
 
   function create() {
     let lastSequence = -1, lastTime = -Infinity, fingerprint = '',
-      center = null, pairGeometry = null, stableFrames = 0, observation = null, moved = false;
+      center = null, pairGeometry = null, frameAspect = null,
+      stableFrames = 0, observation = null, moved = false;
     function clear() {
       lastSequence = -1; lastTime = -Infinity; fingerprint = '';
-      center = null; pairGeometry = null; stableFrames = 0; observation = null; moved = false;
+      center = null; pairGeometry = null; frameAspect = null;
+      stableFrames = 0; observation = null; moved = false;
     }
     function view(now) {
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
@@ -92,6 +94,15 @@
       if (now < lastTime || now - lastTime > MAX_GAP_MS) {
         fingerprint = ''; center = null; pairGeometry = null; stableFrames = 0;
       }
+      const nextAspect = Number.isFinite(next.width) && next.width > 0 &&
+        Number.isFinite(next.height) && next.height > 0
+        ? next.width / next.height : null;
+      if (frameAspect !== null && (nextAspect === null ||
+          Math.abs(nextAspect / frameAspect - 1) > .025)) {
+        // Camera rotation/stream resize invalidates cross-frame agreement.
+        fingerprint = ''; center = null; pairGeometry = null; stableFrames = 0;
+      }
+      frameAspect = nextAspect;
       lastSequence = next.sequence;
       const cues = Array.isArray(next.cues) ? next.cues.filter(c =>
         Number.isInteger(c.percent) && c.percent > 0 && c.percent <= 100 &&
