@@ -329,3 +329,42 @@ test('detail fallback never upscales a low-resolution video or bypasses throttli
   assert.deepEqual(sizes, [[800, 600], [800, 600], [800, 600]]);
   scanner.stop();
 });
+
+
+test('frozen decoded camera frames cannot be counted as independent OCR observations', async () => {
+  let now = 10000, decoded = 17;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock});
+  const seen = [];
+  const scanner = s.api.create(reading => seen.push(reading));
+  const stream = {...video,
+    getVideoPlaybackQuality: () => ({totalVideoFrames: decoded})};
+  assert.equal(await scanner.sample(stream), true);
+  assert.equal(s.calls, 1);
+  now += 2100;
+  assert.equal(await scanner.sample(stream), false,
+    'do not rescan the same decoded camera frame after the throttle expires');
+  assert.equal(s.calls, 1);
+  assert.equal(seen.length, 1,
+    'a frozen frame must not generate a second independent stability cue');
+  decoded = 18;
+  assert.equal(await scanner.sample(stream), true,
+    'a genuinely newer decoded frame can be sampled');
+  assert.equal(s.calls, 2);
+  assert.equal(seen.length, 2);
+  scanner.stop();
+});
+
+test('unavailable decoded-frame statistics preserve safe local OCR fallback', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock});
+  const scanner = s.api.create(() => {});
+  const unsupported = {...video,
+    getVideoPlaybackQuality: () => { throw Error('not supported'); }};
+  assert.equal(await scanner.sample(unsupported), true);
+  now += 2100;
+  assert.equal(await scanner.sample(unsupported), true);
+  assert.equal(s.calls, 2, 'older WebKit can still read local frames');
+  scanner.stop();
+});
