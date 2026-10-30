@@ -218,6 +218,10 @@
     if (!available()) return null;
     let closed = false, busy = false, failed = false, worker = null;
     let initializing = null, lastStarted = -Infinity, sequence = 0, canvas = null;
+    // Retry small printed percentages with more of the CAMERA'S OWN pixels,
+    // not interpolation. Every third inconclusive frame may use <=2MP;
+    // normal frames remain <=1.2MP to bound CPU, memory and battery load.
+    let inconclusivePasses = 0;
     const base = new URL('ocr/', root.document.baseURI);
     async function engine() {
       if (worker) return worker;
@@ -247,8 +251,16 @@
       const id = ++sequence;
       const started = Date.now();
       try {
-        const scale = Math.min(1, 1200 / Math.max(video.videoWidth, video.videoHeight),
-          Math.sqrt(1200000 / (video.videoWidth * video.videoHeight)));
+        // The 1200px preview can erase tiny '%' glyphs even when the camera
+        // supplies a larger native video frame. After two OCR passes without
+        // a retained literal percent+fiber box, try ONE bounded detail pass.
+        // Do not upscale, change PSM, infer missing text, or treat it as proof.
+        const detail = inconclusivePasses >= 2 && id % 3 === 0 &&
+          Math.max(video.videoWidth, video.videoHeight) > 1200;
+        const longSide = detail ? 1600 : 1200;
+        const pixelBudget = detail ? 2000000 : 1200000;
+        const scale = Math.min(1, longSide / Math.max(video.videoWidth, video.videoHeight),
+          Math.sqrt(pixelBudget / (video.videoWidth * video.videoHeight)));
         const width = Math.max(1, Math.round(video.videoWidth * scale));
         const height = Math.max(1, Math.round(video.videoHeight * scale));
         canvas = root.document.createElement('canvas');
@@ -259,7 +271,12 @@
         const current = await engine();
         if (!current || closed) return true;
         const output = await current.recognize(canvas, {}, {text: true, blocks: true});
-        if (!closed) onResult(extract(output?.data, width, height, id, Date.now() - started));
+        if (!closed) {
+          const reading = extract(output?.data, width, height, id, Date.now() - started);
+          inconclusivePasses = reading.pairObservations.length
+            ? 0 : Math.min(3, inconclusivePasses + 1);
+          onResult(reading); // Still only unverified yellow/gray camera hints.
+        }
       } catch (_) {
         if (!closed) {
           failed = true; // Fail closed; keep camera/still/gallery usable.

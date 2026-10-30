@@ -10,12 +10,12 @@ const line = (text, bbox = {x0: 12, y0: 16, x1: 220, y1: 45}) =>
   ({text, bbox});
 const result = (...lines) => ({data: {text: 'not exposed to camera',
   blocks: [{paragraphs: [{lines}]}]}});
-function setup({recognize} = {}) {
+function setup({recognize, clock} = {}) {
   let terminated = 0, calls = 0, options = null, setParams = null;
   const canvas = {width: 0, height: 0,
     getContext: () => ({drawImage() {}})};
   const context = vm.createContext({
-    URL, Date, Number, Math, Promise, Worker: function Worker() {},
+    URL, Date: clock || Date, Number, Math, Promise, Worker: function Worker() {},
     isSecureContext: true,
     document: {baseURI: 'https://example.test/etiket/',
       createElement: type => {
@@ -31,7 +31,7 @@ function setup({recognize} = {}) {
           calls++;
           assert.equal(args[2].blocks, true);
           assert.equal(args[2].text, true);
-          return recognize ? recognize() : result(line('80% PAMUK'));
+          return recognize ? recognize(...args) : result(line('80% PAMUK'));
         },
         terminate: async () => { terminated++; }};
     }}
@@ -278,4 +278,54 @@ test('dense split-pair rows displace unrelated care boxes without exceeding budg
   assert.equal(out.pairBoxes.length, 1);
   assert.equal(out.pairBoxes[0].y0, 380);
   assert.equal(out.pairObservations.length, 1);
+});
+
+
+test('after two inconclusive OCR frames, a bounded native-pixel detail pass can recover a small percentage', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const sizes = [];
+  const s = setup({clock: Clock, recognize: canvas => {
+    sizes.push([canvas.width, canvas.height]);
+    // Synthetic OCR fixture: only the larger REAL source-pixel sample exposes
+    // the literal percentage. This is not a camera accuracy benchmark.
+    return canvas.width > 1200
+      ? result(line('80% PAMUK', {x0: 80, y0: 140, x1: 300, y1: 175}))
+      : result(line('WASH CARE', {x0: 80, y0: 140, x1: 300, y1: 175}));
+  }});
+  const readings = [];
+  const scanner = s.api.create(reading => readings.push(reading));
+  for (let i = 0; i < 4; i++) {
+    assert.equal(await scanner.sample(video), true);
+    now += 2100;
+  }
+  assert.deepEqual(sizes, [[1200, 675], [1200, 675], [1600, 900],
+    [1200, 675]], 'one detail pass, then normal sampling after a matched pair');
+  assert.equal(readings[0].cues.length, 0);
+  assert.deepEqual(Array.from(readings[2].cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk']);
+  assert.equal(readings[2].pairObservations.length, 1);
+  assert.equal('acceptedText' in readings[2], false);
+  assert.equal('verified' in readings[2], false);
+  scanner.stop();
+});
+
+test('detail fallback never upscales a low-resolution video or bypasses throttling', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const sizes = [];
+  const s = setup({clock: Clock, recognize: canvas => {
+    sizes.push([canvas.width, canvas.height]);
+    return result(line('WASH CARE'));
+  }});
+  const scanner = s.api.create(() => {});
+  const smallVideo = {readyState: 4, videoWidth: 800, videoHeight: 600};
+  assert.equal(await scanner.sample(smallVideo), true);
+  assert.equal(await scanner.sample(smallVideo), false, '2s backpressure preserved');
+  now += 2100;
+  assert.equal(await scanner.sample(smallVideo), true);
+  now += 2100;
+  assert.equal(await scanner.sample(smallVideo), true);
+  assert.deepEqual(sizes, [[800, 600], [800, 600], [800, 600]]);
+  scanner.stop();
 });
