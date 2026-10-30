@@ -118,17 +118,35 @@
             continue;
           }
           const ratioFirst = firstRatio <= firstFiber;
-          const pattern = ratioFirst ? before : after;
-          const fiberIndex = ratioFirst ? 3 : 1;
-          const percentIndices = ratioFirst ? [1, 2] : [2, 3];
+          // A real label can switch printing order on the SAME line:
+          // "80% PAMUK KETEN 20%". Reading only the first direction loses
+          // the second literal pair. Prefer the first printed direction,
+          // then accept opposite-direction matches ONLY when their character
+          // spans do not overlap any already selected pair. Otherwise
+          // "80% PAMUK 20% KETEN" could invent "PAMUK 20%".
+          const matches = [], occupied = [];
+          for (const [pattern, ratioBefore] of [
+            [ratioFirst ? before : after, ratioFirst],
+            [ratioFirst ? after : before, !ratioFirst]
+          ]) {
+            pattern.lastIndex = 0;
+            for (const match of value.matchAll(pattern)) {
+              const start = match.index, end = start + match[0].length;
+              if (occupied.some(([a, b]) => start < b && end > a)) continue;
+              const percent = Number(ratioBefore ?
+                (match[1] || match[2]) : (match[2] || match[3]));
+              const fiber = (ratioBefore ? match[3] : match[1])
+                .toLocaleLowerCase('tr');
+              if (!(percent > 0 && percent <= 100)) continue;
+              occupied.push([start, end]);
+              matches.push({start, percent, fiber});
+            }
+          }
+          matches.sort((a, b) => a.start - b.start);
           {
             let lineHasPair = false;
             const linePairs = [];
-            pattern.lastIndex = 0;
-            for (const match of value.matchAll(pattern)) {
-              const percent = Number(match[percentIndices[0]] || match[percentIndices[1]]);
-              const fiber = match[fiberIndex].toLocaleLowerCase('tr');
-              if (!(percent > 0 && percent <= 100)) continue;
+            for (const {percent, fiber} of matches) {
               lineHasPair = true;
               const key = percent + ':' + fiber;
               if (unique.has(key)) {
