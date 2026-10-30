@@ -122,7 +122,7 @@ function setup({permission = true, delayed = false, withOcr = false,
 }
 
 test('mobile web camera opens a private rear-camera preview and captures a still', async () => {
-  const s = setup();
+  const s = setup({still: new Blob(['native-still'], {type: 'image/jpeg'})});
   assert.equal(s.api.available, true);
   const photo = s.api.open();
   assert.equal(s.nodes.length, 1);
@@ -226,6 +226,9 @@ test('unsupported or over-32MiB still uses the safe local video fallback', async
     const pending = s.api.open();
     await Promise.resolve(); await Promise.resolve();
     await s.button('Fotoğrafı çek').emit('click');
+    assert.equal(s.lastDraw, null, 'never silently replace an unusable still');
+    assert.equal(s.tracks[0].stopped, false, 'user retains system camera option');
+    await s.button('Video karesini kullan').emit('click');
     const result = await pending;
     assert.equal(result.type, 'image/jpeg');
     assert.ok(result.size > 0);
@@ -240,10 +243,31 @@ test('undecodable camera still falls back rather than losing the photo session',
   const pending = s.api.open();
   await Promise.resolve(); await Promise.resolve();
   await s.button('Fotoğrafı çek').emit('click');
+  assert.equal(s.lastDraw, null, 'decode failure cannot silently use preview');
+  await s.button('Video karesini kullan').emit('click');
   const result = await pending;
   assert.notEqual(result, original);
   assert.equal(result.type, 'image/jpeg');
+  assert.equal(s.lastDraw[0].type, 'video');
   assert.equal(s.bitmapCloses, 0);
+});
+
+test('failed native still offers system camera without touching preview pixels', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const input = s.nodes[0].children[3].children.find(child => child.type === 'file');
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.equal(s.lastDraw, null, 'no low-resolution video is auto-selected');
+  assert.match(s.nodes[0].children[2].textContent, /Sistem kamerasını kullan/);
+  assert.equal(s.ocrCreates, 2, 'live OCR safely restarts after native still failure');
+  await s.button('Sistem kamerası').emit('click');
+  assert.equal(s.tracks[0].stopped, true);
+  const original = new Blob(['high-resolution-native-photo'], {type: 'image/jpeg'});
+  input.files = [original];
+  await input.emit('change');
+  assert.equal(await pending, original, 'use original system-camera still');
+  assert.equal(s.lastDraw, null, 'never sample a video fallback on this path');
 });
 
 test('optional hardware torch can be toggled without touching OCR or captured data', async () => {
@@ -272,7 +296,7 @@ test('optional hardware torch can be toggled without touching OCR or captured da
 });
 
 test('unsupported camera torch is hidden while capture remains usable', async () => {
-  const s = setup();
+  const s = setup({still: new Blob(['native-still'], {type: 'image/jpeg'})});
   const pending = s.api.open();
   await Promise.resolve();
   await Promise.resolve();
@@ -661,7 +685,8 @@ test('failed still capture restarts local OCR, discards retired results and perm
   assert.equal(s.ocrStops, 1, 'old worker stopped before capture');
   assert.equal(s.ocrCreates, 2, 'new worker starts after failed capture');
   assert.equal(s.tracks[0].stopped, false, 'camera remains available for retry');
-  assert.match(status.textContent, /Çekim başarısız/);
+  assert.match(status.textContent, /Yüksek çözünürlüklü fotoğraf alınamadı/);
+  assert.equal(s.button('Video karesini kullan').type, 'button');
   const box = {x0: 50, y0: 70, x1: 250, y1: 120};
   const observation = {sequence: 1, width: 1200, height: 675,
     textPresent: true, boxes: [box], pairBoxes: [box],
@@ -669,11 +694,14 @@ test('failed still capture restarts local OCR, discards retired results and perm
     pairObservations: [{percent: 80, fiber: 'pamuk', box}]};
   s.emitRetiredOcr(observation);
   assert.equal(overlay.children.length, 0, 'retired worker cannot paint stale boxes');
-  assert.match(status.textContent, /Çekim başarısız/);
+  assert.match(status.textContent, /Yüksek çözünürlüklü fotoğraf alınamadı/);
   s.emitOcr(observation);
   assert.match(status.textContent, /Sarı/);
   assert.equal(overlay.children.length, 1);
-  await s.button('Fotoğrafı çek').emit('click');
+  await s.button('Video karesini kullan').emit('click');
+  assert.equal(s.ocrCreates, 3, 'failed explicit preview capture restarts local OCR');
+  assert.match(status.textContent, /Çekim başarısız/);
+  await s.button('Video karesini kullan').emit('click');
   const result = await pending;
   assert.equal(result.type, 'image/jpeg');
   assert.ok(result.size > 0);
