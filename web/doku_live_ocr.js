@@ -224,6 +224,33 @@
     // Unsupported WebKit implementations keep the existing conservative path;
     // neither path can authorize green or approve an OCR value.
     let lastDecodedFrame = null;
+    // On WebKit builds without decoded-frame statistics, use a ONE-SHOT
+    // requestVideoFrameCallback to establish that another frame was presented.
+    // Never poll every display frame: the OCR budget remains 1 pass / 2 seconds.
+    let trackedVideo = null, frameCallbackId = null;
+    let presentedFrames = 0, lastSampledPresentedFrames = null;
+    function resetFrameTracking() {
+      if (trackedVideo && frameCallbackId !== null) {
+        try { trackedVideo.cancelVideoFrameCallback?.(frameCallbackId); }
+        catch (_) { /* A stopped camera may reject cancellation. */ }
+      }
+      trackedVideo = null;
+      frameCallbackId = null;
+      presentedFrames = 0;
+      lastSampledPresentedFrames = null;
+      lastDecodedFrame = null;
+    }
+    function watchNextPresentedFrame(video) {
+      if (typeof video.requestVideoFrameCallback !== 'function') return false;
+      if (frameCallbackId !== null) return true;
+      try {
+        frameCallbackId = video.requestVideoFrameCallback(() => {
+          frameCallbackId = null;
+          if (!closed && trackedVideo === video) presentedFrames++;
+        });
+        return true;
+      } catch (_) { return false; }
+    }
     // Retry small printed percentages with more of the CAMERA'S OWN pixels,
     // not interpolation. Every third inconclusive frame may use <=2MP;
     // normal frames remain <=1.2MP to bound CPU, memory and battery load.
@@ -252,16 +279,32 @@
       if (closed || busy || failed || !video || video.readyState < 2 ||
           !video.videoWidth || !video.videoHeight ||
           Date.now() - lastStarted < 2000) return false;
+      if (trackedVideo !== video) {
+        resetFrameTracking(); // A new camera element has an independent clock.
+        trackedVideo = video;
+      }
       let decodedFrame = null;
       try {
         const count = video.getVideoPlaybackQuality?.()?.totalVideoFrames;
         if (Number.isSafeInteger(count) && count > 0) decodedFrame = count;
       } catch (_) { /* Browser does not expose decoded-frame statistics. */ }
-      // A camera track renegotiation may reset this counter to a smaller
-      // value; only an unchanged count proves no newer decoded frame exists.
-      if (decodedFrame !== null && lastDecodedFrame !== null &&
-          decodedFrame === lastDecodedFrame) return false;
-      lastDecodedFrame = decodedFrame;
+      if (decodedFrame !== null) {
+        // A camera track renegotiation may reset its counter; equality alone
+        // proves that no additional decoded frame has arrived.
+        if (lastDecodedFrame !== null && decodedFrame === lastDecodedFrame) return false;
+        lastDecodedFrame = decodedFrame;
+      } else if (watchNextPresentedFrame(video)) {
+        // The first observation is advisory. Every later one needs a new
+        // presented frame, not just an elapsed throttle interval.
+        if (lastSampledPresentedFrames !== null &&
+            lastSampledPresentedFrames === presentedFrames) return false;
+        lastSampledPresentedFrames = presentedFrames;
+      } else {
+        // Older WebKit and unsupported camera mocks keep the existing local
+        // gray/yellow fallback. This path never authorizes green.
+        lastDecodedFrame = null;
+        lastSampledPresentedFrames = null;
+      }
       busy = true;
       lastStarted = Date.now();
       const id = ++sequence;
@@ -306,6 +349,7 @@
     }
     function stop() {
       closed = true;
+      resetFrameTracking();
       if (canvas) { canvas.width = canvas.height = 0; canvas = null; }
       if (worker) { const old = worker; worker = null; Promise.resolve(old.terminate()).catch(() => {}); }
       // An in-flight createWorker terminates itself after resolving if closed.
