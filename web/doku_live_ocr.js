@@ -218,6 +218,12 @@
     if (!available()) return null;
     let closed = false, busy = false, failed = false, worker = null;
     let initializing = null, lastStarted = -Infinity, sequence = 0, canvas = null;
+    // Some cameras keep presenting the same decoded frame after a stream stall.
+    // When the browser exposes a real decoded-frame counter, do not run OCR
+    // again on that frozen frame or count it as independent stability evidence.
+    // Unsupported WebKit implementations keep the existing conservative path;
+    // neither path can authorize green or approve an OCR value.
+    let lastDecodedFrame = null;
     // Retry small printed percentages with more of the CAMERA'S OWN pixels,
     // not interpolation. Every third inconclusive frame may use <=2MP;
     // normal frames remain <=1.2MP to bound CPU, memory and battery load.
@@ -246,6 +252,16 @@
       if (closed || busy || failed || !video || video.readyState < 2 ||
           !video.videoWidth || !video.videoHeight ||
           Date.now() - lastStarted < 2000) return false;
+      let decodedFrame = null;
+      try {
+        const count = video.getVideoPlaybackQuality?.()?.totalVideoFrames;
+        if (Number.isSafeInteger(count) && count > 0) decodedFrame = count;
+      } catch (_) { /* Browser does not expose decoded-frame statistics. */ }
+      // A camera track renegotiation may reset this counter to a smaller
+      // value; only an unchanged count proves no newer decoded frame exists.
+      if (decodedFrame !== null && lastDecodedFrame !== null &&
+          decodedFrame === lastDecodedFrame) return false;
+      lastDecodedFrame = decodedFrame;
       busy = true;
       lastStarted = Date.now();
       const id = ++sequence;
