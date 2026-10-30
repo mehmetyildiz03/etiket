@@ -20,7 +20,8 @@ final _fiberFirst = RegExp(
 
 final _isolatedRatio = RegExp(
     r'^\s*(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)\s*$');
-final _isolatedFiber = RegExp('^\\s*($_fibers)\\s*$', caseSensitive: false);
+final _isolatedFiber = RegExp(
+    r'^\s*(' '$_fibers' r')\s*$', caseSensitive: false);
 
 /// Standalone printed tokens only; no OCR repair or percentage completion.
 String? liveIsolatedPercent(String text) {
