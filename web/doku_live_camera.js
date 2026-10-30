@@ -106,16 +106,18 @@
         b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
         b.x1 <= reading.width && b.y1 <= reading.height).slice(0, 24) : [];
       if (valid.length) {
-        const left = Math.max(0, Math.floor(Math.min(...valid.map(b => b.x0)) /
-          reading.width * w) - 5);
-        const right = Math.min(w, Math.ceil(Math.max(...valid.map(b => b.x1)) /
-          reading.width * w) + 5);
-        const top = Math.max(0, Math.floor(Math.min(...valid.map(b => b.y0)) /
-          reading.height * h) - 5);
-        const bottom = Math.min(h, Math.ceil(Math.max(...valid.map(b => b.y1)) /
-          reading.height * h) + 5);
-        const rw = right - left, rh = bottom - top;
-        if (rw >= 16 && rh >= 16) {
+        // A union rectangle spanning separated OCR lines can include mostly
+        // background/garment. It can misreport the text as dark or blurred
+        // even when each visible line is well lit. Measure each real line
+        // independently, then use a robust median for advisory-only hints.
+        const lineMetrics = [];
+        for (const b of valid) {
+          const left = Math.max(0, Math.floor(b.x0 / reading.width * w) - 5);
+          const right = Math.min(w, Math.ceil(b.x1 / reading.width * w) + 5);
+          const top = Math.max(0, Math.floor(b.y0 / reading.height * h) - 5);
+          const bottom = Math.min(h, Math.ceil(b.y1 / reading.height * h) + 5);
+          const rw = right - left, rh = bottom - top;
+          if (rw < 16 || rh < 16) continue;
           let sum = 0, lo = 255, hi = 0, detail = 0;
           for (let y = top; y < bottom; y++) {
             for (let x = left; x < right; x++) {
@@ -125,9 +127,22 @@
               if (y > top) detail += Math.abs(value - lumas[(y - 1) * w + x]);
             }
           }
-          textMetrics = {meanLuminance: sum / (rw * rh),
+          lineMetrics.push({meanLuminance: sum / (rw * rh),
             dynamicRange: hi - lo, edgeEnergy: detail / (2 * rw * rh),
-            sampleWidth: rw, sampleHeight: rh};
+            sampleWidth: rw, sampleHeight: rh});
+        }
+        if (lineMetrics.length) {
+          const median = key => {
+            const values = lineMetrics.map(m => m[key]).sort((a, b) => a - b);
+            const mid = Math.floor(values.length / 2);
+            return values.length % 2 ? values[mid] :
+              (values[mid - 1] + values[mid]) / 2;
+          };
+          textMetrics = {meanLuminance: median('meanLuminance'),
+            dynamicRange: median('dynamicRange'),
+            edgeEnergy: median('edgeEnergy'),
+            sampleWidth: Math.round(median('sampleWidth')),
+            sampleHeight: Math.round(median('sampleHeight'))};
         }
       }
     }
