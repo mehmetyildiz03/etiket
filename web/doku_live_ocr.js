@@ -16,7 +16,8 @@
   const after = new RegExp('(?:^|[^\\p{L}])(' + fibers + ')\\s*(?:%\\s*(' + number + ')|(' + number + ')\\s*%)', 'giu');
 
   function extract(data, width, height, sequence, durationMs) {
-    const boxes = [], pairBoxes = [], cues = [], unique = new Set();
+    const boxes = [], pairBoxes = [], cues = [], pairObservations = [];
+    const unique = new Set(), duplicateKeys = new Set();
     let textPresent = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
     for (const block of blocks) {
@@ -53,9 +54,16 @@
               if (!(percent > 0 && percent <= 100)) continue;
               lineHasPair = true;
               const key = percent + ':' + fiber;
-              if (!unique.has(key) && cues.length < 8) {
+              if (unique.has(key)) {
+                // Two lines claiming the same pair cannot be tracked uniquely.
+                duplicateKeys.add(key);
+              } else if (cues.length < 8) {
                 unique.add(key);
                 cues.push({percent, fiber});
+                if (retainedBox) {
+                  pairObservations.push({percent, fiber,
+                    box: {x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1}});
+                }
               }
             }
             // Distinguish actual same-line ratio+fiber matches from unrelated
@@ -68,7 +76,13 @@
       }
     }
     // Tesseract's raw text is intentionally not returned to the camera UI.
-    return {boxes, pairBoxes, cues, textPresent, width, height, sequence, durationMs};
+    // Every observation is tied to a literal matched OCR line. A duplicate
+    // key or a non-retained/invalid line has no usable temporal geometry.
+    // No raw text, photo or video frame is returned.
+    return {boxes, pairBoxes, cues,
+      pairObservations: pairObservations.filter(p =>
+        !duplicateKeys.has(p.percent + ':' + p.fiber)),
+      textPresent, width, height, sequence, durationMs};
   }
 
   function create(onResult, onError) {
