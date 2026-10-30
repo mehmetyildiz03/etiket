@@ -326,7 +326,7 @@
           }
         ) || null;
       };
-      // iPhone Safari/WebKit commonly lacks ImageCapture.takePhoto().
+      // Older Safari/WebKit and other browsers may lack ImageCapture.takePhoto().
       // A video canvas frame can be only 1080p even when the native camera
       // can provide a full-resolution still. On unsupported browsers, make
       // the PRIMARY capture action open the system camera instead of silently
