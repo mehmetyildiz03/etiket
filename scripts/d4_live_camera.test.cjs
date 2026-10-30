@@ -390,10 +390,10 @@ test('live camera distinguishes ordinary text from exact pair lines without gree
   s.emitOcr({sequence: 1, width: 1200, height: 675, textPresent: true,
     boxes: [matched, other], pairBoxes: [matched],
     cues: [{percent: 80, fiber: 'pamuk'}]});
-  assert.equal(overlay.children.length, 3);
+  assert.equal(overlay.children.length, 2,
+    'matched pair is yellow once; unrelated text remains gray');
   assert.match(overlay.children[0].style.cssText, /dashed #c4cbd0/);
-  assert.match(overlay.children[1].style.cssText, /dashed #c4cbd0/);
-  assert.match(overlay.children[2].style.cssText, /solid #ffd45c/);
+  assert.match(overlay.children[1].style.cssText, /solid #ffd45c/);
   assert.match(status.textContent, /Sarı/);
   assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
   s.advance(7000); s.timer();
