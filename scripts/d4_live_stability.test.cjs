@@ -244,3 +244,32 @@ test('out-of-order sampled video frames cannot replace newer camera evidence', (
   assert.equal(s.observe({...sample(3), durationMs: 100}, 4000)
     .stableFrames, 2, 'the next genuinely newer frame can advance stability');
 });
+
+test('partial percent detail advice survives only the fresh OCR frame', () => {
+  const s = create();
+  const partial = s.observe({...sample(1), detailNeeded: true}, 1000);
+  assert.equal(partial.level, 'yellow');
+  assert.equal(partial.detailNeeded, true);
+  assert.equal(partial.cues[0].percent, 80, 'printed candidate is unchanged');
+  const updated = s.observe({...sample(2), detailNeeded: false}, 3000);
+  assert.equal(updated.detailNeeded, false, 'new OCR replaces stale detail hints');
+  assert.equal(s.observe({...sample(3), detailNeeded: true}, 5000).detailNeeded, true);
+  assert.equal(s.view(11001).detailNeeded, false, 'expired frame loses its advice');
+  assert.equal(s.view(11001).level, 'gray');
+  s.observe({...sample(4), detailNeeded: true}, 12000);
+  s.clear();
+  assert.equal(s.view(12000).detailNeeded, false, 'camera reset clears hints');
+});
+
+test('partial-percent hint alone never becomes a pair or green', () => {
+  const s = create();
+  const reading = s.observe({
+    sequence: 1, width: 1200, height: 675, boxes: [],
+    pairBoxes: [], pairObservations: [], cues: [], textPresent: true,
+    detailNeeded: true, freshFrame: true
+  }, 1000);
+  assert.equal(reading.level, 'yellow');
+  assert.equal(reading.detailNeeded, true);
+  assert.deepEqual(reading.cues, []);
+  assert.equal(reading.stableFrames, 0);
+});
