@@ -392,7 +392,7 @@ test('pending hardware torch request cannot publish pre-toggle OCR or scan new f
   const toggling = s.button('Kamera ışığını aç').emit('click');
   assert.equal(s.ocrStops, 1);
   assert.equal(s.ocrCreates, 1, 'no new worker until hardware request finishes');
-  s.emitRetiredOcr(old);
+  s.emitOcr(old); // The still-retained callback is now generation-invalid.
   assert.equal(overlay.children.length, 0);
   s.timer();
   assert.equal(s.ocrCreates, 1);
