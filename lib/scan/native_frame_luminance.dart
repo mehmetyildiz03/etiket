@@ -37,11 +37,14 @@ Uint8List? sampleNativeLuminance({
 }
 
 
-/// Bounded 48x48 probe for camera frames, with a 16x16 fallback for small\n/// frames, of the central 60% of the *visible* camera image.
+/// Bounded 48x48 probe for camera frames, with a 16x16 fallback for small
+/// frames, of the central 60% of the *visible* camera image.
 /// Unlike a full-frame average, bright/dark surroundings cannot mask a label
 /// positioned in the guide area. A sparse 16x16 grid can miss thin printed
 /// strokes entirely and falsely call a bright care label glare. The denser
-/// 2304-pixel probe remains bounded and is sampled only on throttled frames.\n/// Small valid frames retain the original 16x16 behavior; malformed frames\n/// still fail closed.
+/// 2304-pixel probe remains bounded and is sampled only on throttled frames.
+/// Small valid frames retain the original 16x16 behavior; malformed frames
+/// still fail closed.
 /// This is a light/contrast hint, NOT focus,
 /// OCR confidence, or evidence that a label is present. No pixels are stored.
 Uint8List? sampleNativeCenterLuminance({
