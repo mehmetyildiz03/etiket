@@ -291,6 +291,53 @@ test('split tokens cannot be joined across OCR blocks or invalid coordinates', (
   assert.equal(s.api.extract(invalid.data, 1200, 675, 2, 100).cues.length, 0);
 });
 
+test('unboxed unrelated care text does not hide adjacent real composition tokens', () => {
+  const s = setup();
+  const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
+  const fiber = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
+  const invalid = {x0: -2, y0: 10, x1: 120, y1: 40};
+  for (const badBox of [invalid, null,
+    {x0: -2, y0: 300, x1: 182, y1: 340}]) {
+    const out = s.api.extract(result(ratio, fiber,
+      line('WASH AT 30 C', badBox)).data, 1200, 675, 1, 100);
+    assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+      ['80:pamuk']);
+    assert.equal(out.pairObservations.length, 1);
+    assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
+      [[100, 300, 300, 337]]);
+    assert.equal('acceptedText' in out, false);
+  }
+  for (const uncertain of ['20%', 'KETEN', '80% KETEN']) {
+    const blocked = s.api.extract(result(ratio, fiber,
+      line(uncertain, invalid)).data, 1200, 675, 2, 100);
+    assert.equal(blocked.pairObservations.length, 0,
+      'unboxed competing composition token must block spatial inference');
+    assert.equal(blocked.cues.some(p => p.percent === 80 && p.fiber === 'pamuk'),
+      false, 'cannot infer a pair from ambiguous geometry');
+  }
+});
+
+test('dense OCR blocks keep late split percentage and fiber boxes within budget', () => {
+  const s = setup();
+  const lines = Array.from({length: 75}, (_, i) =>
+    line('CARE INSTRUCTION ' + i,
+      {x0: 10, y0: i * 5, x1: 140, y1: i * 5 + 4}));
+  lines.push(line('80%', {x0: 100, y0: 480, x1: 165, y1: 515}));
+  lines.push(line('PAMUK', {x0: 185, y0: 482, x1: 300, y1: 517}));
+  const paragraphs = [];
+  for (let i = 0; i < lines.length; i += 25) {
+    paragraphs.push({lines: lines.slice(i, i + 25)});
+  }
+  const out = s.api.extract({blocks: [{paragraphs}]}, 1200, 675, 1, 120);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk']);
+  assert.equal(out.boxes.length, 24);
+  assert.equal(out.pairBoxes.length, 1);
+  assert.equal(out.pairObservations.length, 1);
+  assert.equal(out.pairBoxes[0].y0, 480);
+  assert.equal('rawText' in out, false);
+});
+
 test('dense split-pair rows displace unrelated care boxes without exceeding budget', () => {
   const s = setup();
   const lines = Array.from({length: 24}, (_, i) =>

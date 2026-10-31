@@ -21,16 +21,24 @@
   function spatialCandidates(lines, width, height) {
     if (!Number.isFinite(width) || !Number.isFinite(height) ||
         width <= 0 || height <= 0 || width * height > 48000000 ||
-        lines.length < 2 || lines.length > 64) return [];
-    const ratios = [], names = [];
+        lines.length < 2 || lines.length > 256) return [];
+    const ratios = [], names = [], ignored = new Set();
     const isolatedPercent = /^(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)$/u;
     const isolatedName = new RegExp('^(?:' + fibers + ')$', 'iu');
+    const possibleFiber = new RegExp(
+      '(?:^|[^\\p{L}])(?:' + fibers + ')(?![\\p{L}])', 'iu');
     for (let i = 0; i < lines.length; i++) {
       const {text, box} = lines[i];
+      const value = text.trim();
       if (!box || ![box.x0, box.y0, box.x1, box.y1].every(Number.isFinite) ||
           box.x0 < 0 || box.y0 < 0 || box.x1 <= box.x0 || box.y1 <= box.y0 ||
-          box.x1 > width || box.y1 > height) return [];
-      const value = text.trim();
+          box.x1 > width || box.y1 > height) {
+        // Unboxed unrelated care instructions must not hide real split pairs.
+        // An unboxed possible percentage/fiber could compete: fail closed.
+        if (value.includes('%') || possibleFiber.test(value)) return [];
+        ignored.add(i);
+        continue;
+      }
       const match = isolatedPercent.exec(value);
       if (match) {
         const percent = Number(match[1] || match[2]);
@@ -56,7 +64,7 @@
       }
       // Intervening or overlapping OCR tokens make the association ambiguous.
       for (let i = 0; i < lines.length; i++) {
-        if (i === ai || i === bi) continue;
+        if (i === ai || i === bi || ignored.has(i)) continue;
         const other = lines[i].box;
         const intersects = (p, q) => p.x0 < q.x1 && p.x1 > q.x0 &&
           p.y0 < q.y1 && p.y1 > q.y0;
