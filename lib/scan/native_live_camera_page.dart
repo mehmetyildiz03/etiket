@@ -8,6 +8,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 
 import 'live_frame_quality.dart';
 import 'native_live_timing.dart';
+import 'native_center_refocus.dart';
 import 'native_camera_recovery.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
@@ -31,7 +32,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   CameraController? _controller;
   TextRecognizer? _recognizer;
   Timer? _staleTimer;
-  bool _starting = true, _reading = false, _capturing = false, _closed = false;
+  bool _starting = true, _reading = false, _capturing = false,
+      _focusing = false, _closed = false;
   int _generation = 0, _sequence = 0, _stableFrames = 0;
   DateTime _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
@@ -269,7 +271,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   void _onFrame(CameraImage frame) {
-    if (_closed || _reading || _capturing || _controller == null ||
+    if (_closed || _reading || _capturing || _focusing || _controller == null ||
         _recognizer == null) { return; }
     final now = DateTime.now();
     if (now.difference(_lastSample).inMilliseconds < 1800) { return; }
@@ -312,7 +314,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       // Reject expired pixels before the spatial matcher and again after it.
       if (!nativeLiveHintFresh(started, DateTime.now())) return;
       final result = _extract(recognized, frame, rotationDegrees!);
-      if (!mounted || _closed || _capturing || token != _generation ||
+      if (!mounted || _closed || _capturing || _focusing || token != _generation ||
           !nativeLiveHintFresh(started, DateTime.now()) ||
           sequence != _sequence) { return; }
       final fingerprint = [...result.pairs]..sort();
@@ -353,7 +355,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         _lastResultSample = started;
       });
     } catch (_) {
-      if (mounted && token == _generation && !_closed) {
+      if (mounted && token == _generation && !_closed && !_focusing) {
         setState(() {
           _pairs = const [];
           _textPresent = false;
@@ -369,6 +371,55 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     } finally {
       _reading = false;
     }
+  }
+
+  /// Explicit user action: request camera hardware to refocus and meter the
+  /// central label area. The device may reject either operation. Do not call
+  /// this proof of OCR correctness or let old in-flight OCR survive a refocus.
+  Future<void> _focusCenter() async {
+    final camera = _controller;
+    if (camera == null || !camera.value.isInitialized || _closed ||
+        _capturing || _focusing) return;
+    final token = ++_generation;
+    setState(() {
+      _focusing = true;
+      _pairs = const [];
+      _textPresent = false;
+      _fingerprint = '';
+      _lastCenter = null;
+      _lastPairBoxes = null;
+      _lastOcrImageSize = null;
+      _lastPairRotation = null;
+      _stableFrames = 0;
+      _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _advice = 'Merkezdeki etikete odak ve ışık ayarı isteniyor…';
+    });
+    final result = await requestNativeCenterRefocus(
+      setFocusPoint: (point) async {
+        // Some platforms cannot change the focus mode; a point request can
+        // still work. Neither call captures or uploads camera pixels.
+        try { await camera.setFocusMode(FocusMode.auto); } catch (_) {}
+        await camera.setFocusPoint(point);
+      },
+      setExposurePoint: camera.setExposurePoint,
+    );
+    if (!mounted || _closed || _capturing || token != _generation ||
+        _controller != camera) return;
+    setState(() {
+      _focusing = false;
+      _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _advice = switch (result) {
+        NativeCenterRefocusResult.focusAndExposureRequested =>
+          'Odak ve ışık ölçümü istendi. Etiketi sabitle; yeni OCR sonucunu bekle.',
+        NativeCenterRefocusResult.focusOnlyRequested =>
+          'Odak istendi. Işığı elle ayarla ve etiketi sabitle.',
+        NativeCenterRefocusResult.exposureOnlyRequested =>
+          'Işık ölçümü istendi; odak desteklenmedi. Kamerayı sabitle.',
+        NativeCenterRefocusResult.unavailable =>
+          'Bu cihazda merkez odak ayarı kullanılamıyor. '
+          'Biraz uzaklaşıp yeniden yaklaş veya sistem kamerasını kullan.',
+      };
+    });
   }
 
   Future<void> _takePicture() async {
@@ -407,6 +458,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   Future<void> _shutdown() async {
     ++_generation;
+    _focusing = false;
     _pairs = const [];
     _textPresent = false;
     _fingerprint = '';
@@ -495,8 +547,13 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                 'Fotoğraf sonrası gerçek OCR, metin düzeltmesi ve açık onay gerekir.',
                 style: TextStyle(fontSize: 12)),
             const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: available && !_capturing && !_focusing ? _focusCenter : null,
+              icon: const Icon(Icons.center_focus_strong),
+              label: Text(_focusing ? 'Odaklanıyor…' : 'Merkeze odakla'),
+            ),
             FilledButton.icon(
-              onPressed: available && !_capturing ? _takePicture : null,
+              onPressed: available && !_capturing && !_focusing ? _takePicture : null,
               icon: const Icon(Icons.camera),
               label: Text(_capturing ? 'Çekiliyor…' : 'Fotoğrafı çek'),
             ),
