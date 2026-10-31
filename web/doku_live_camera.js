@@ -163,6 +163,7 @@
       let previewFallbackApproved = false;
       let liveScanner = null, lastMetrics = null, scannerGeneration = 0;
       let torchTrack = null, torchEnabled = false, torchBusy = false;
+      let focusTrack = null, focusing = false, focusMessage = '';
       const stability = root.dokuLiveStability?.create?.() || null;
       let usingSystemPicker = false;
       let layoutInvalidatedAt = -Infinity;
@@ -242,6 +243,7 @@
         status.style.color = liveScanner && (reading.cues.length || reading.textPresent)
           ? '#ffd45c' : '#c4cbd0';
         if (torchEnabled) message += ' Kamera ışığı açık.';
+        if (focusMessage) message += ' ' + focusMessage;
         // Avoid repeating the same aria-live announcement every 700ms.
         if (status.textContent !== message) status.textContent = message;
       };
@@ -309,6 +311,7 @@
         video.srcObject = null;
         torchTrack = null;
         torchEnabled = false;
+        focusTrack = null;
       };
       const close = (value, failure) => {
         if (done) return;
@@ -349,7 +352,7 @@
       // Create a fresh worker after a failed attempt; the stopped worker can
       // never deliver an accepted result or overwrite manual corrections.
       const startLiveScanner = () => {
-        if (done || capturing || usingSystemPicker || !stream || liveScanner) return;
+        if (done || capturing || focusing || usingSystemPicker || !stream || liveScanner) return;
         const generation = ++scannerGeneration;
         liveScanner = root.dokuLiveOcr?.create?.(
           observation => {
@@ -360,6 +363,7 @@
             if (layoutInvalidatedAt > -Infinity &&
                 (!Number.isFinite(observation?.durationMs) ||
                  Date.now() - observation.durationMs < layoutInvalidatedAt)) return;
+            focusMessage = '';
             const reading = stability?.observe(observation, Date.now());
             // Ignore late/duplicate observations; render only validated geometry.
             if (reading && !reading.stale && reading.sequence === observation.sequence) {
@@ -397,7 +401,7 @@
           openSystemPicker();
           return;
         }
-        if (capturing || !stream || !video.videoWidth || !video.videoHeight) return;
+        if (capturing || focusing || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
         liveScanner?.stop(); liveScanner = null;
         status.textContent = 'Fotoğraf hazırlanıyor…';
@@ -447,7 +451,7 @@
       // confidence. Stopping the track also releases the light.
       const torchButton = button('Kamera ışığını aç', async () => {
         const track = torchTrack;
-        if (!track || torchBusy || done || capturing || usingSystemPicker ||
+        if (!track || torchBusy || focusing || done || capturing || usingSystemPicker ||
             track.readyState === 'ended') return;
         torchBusy = true;
         torchButton.disabled = true;
@@ -473,6 +477,47 @@
       });
       torchButton.style.display = 'none';
       torchButton.setAttribute('aria-pressed', 'false');
+      // Chromium exposes optional single-shot focus on some camera tracks.
+      // WebKit/Safari often does not. Never fake focus by changing OCR data,
+      // and never claim that a successful constraint proves sharp text.
+      const focusButton = button('Yeniden odakla', async () => {
+        const track = focusTrack;
+        if (!track || focusing || torchBusy || done || capturing || usingSystemPicker ||
+            track.readyState === 'ended') return;
+        focusing = true;
+        focusButton.disabled = true;
+        // Old OCR belongs to the pre-focus optical state. Invalidate its
+        // callback generation and all boxes before requesting hardware focus.
+        ++scannerGeneration;
+        liveScanner?.stop(); liveScanner = null;
+        stability?.clear();
+        overlay.replaceChildren();
+        lastMetrics = null;
+        focusMessage = 'Kameradan yeniden odak isteniyor.';
+        renderStatus();
+        try {
+          // applyConstraints replaces the track's prior constraint set.
+          // Preserve an explicitly enabled torch while requesting focus.
+          const requested = {focusMode: 'single-shot'};
+          if (torchEnabled && torchTrack === track) requested.torch = true;
+          await track.applyConstraints({advanced: [requested]});
+          if (done || usingSystemPicker || focusTrack !== track) return;
+          focusMessage = 'Yeniden odak istendi; yeni OCR sonucunu bekle.';
+        } catch (_) {
+          if (!done && !usingSystemPicker && focusTrack === track) {
+            focusButton.style.display = 'none';
+            focusMessage = 'Bu cihazda yeniden odak uygulanamadı; sistem kamerasını kullanabilirsin.';
+          }
+        } finally {
+          focusing = false;
+          focusButton.disabled = false;
+          if (!done && !usingSystemPicker && focusTrack === track) {
+            startLiveScanner();
+            renderStatus();
+          }
+        }
+      });
+      focusButton.style.display = 'none';
       // Never auto-close on focus: native camera can take time to return a
       // file change event. The picker cancel event and İptal close the dialog.
       button('Sistem kamerası (yüksek çözünürlük)', openSystemPicker);
@@ -524,17 +569,24 @@
         video.srcObject = stream;
         try {
           const track = got.getVideoTracks()[0];
-          if (track && typeof track.applyConstraints === 'function' &&
-              track.getCapabilities?.().torch === true) {
-            torchTrack = track;
-            torchButton.style.display = '';
+          if (track && typeof track.applyConstraints === 'function') {
+            const capabilities = track.getCapabilities?.();
+            if (capabilities?.torch === true) {
+              torchTrack = track;
+              torchButton.style.display = '';
+            }
+            if (Array.isArray(capabilities?.focusMode) &&
+                capabilities.focusMode.includes('single-shot')) {
+              focusTrack = track;
+              focusButton.style.display = '';
+            }
           }
         } catch (_) { /* Safari or device does not expose torch capability. */ }
         Promise.resolve(video.play()).catch(() => {});
         startLiveScanner();
         renderStatus();
         interval = root.setInterval(() => {
-          if (done || capturing) return;
+          if (done || capturing || focusing) return;
           try {
             lastMetrics = sampleQuality(video, canvas, stability?.view(Date.now()));
             renderStatus();
