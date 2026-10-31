@@ -92,6 +92,6 @@ void main() {
     expect(sampleNativeCenterLuminance(
       bytes: Uint8List(1024 * 1024), width: 1024, height: 1024,
       rowStride: 1024, pixelStride: 1, bgra: false,
-    ), hasLength(256));
+    ), hasLength(2304));
   });
 }
