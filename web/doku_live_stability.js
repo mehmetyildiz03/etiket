@@ -74,13 +74,14 @@
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
         clear();
         return {cues: [], boxes: [], pairBoxes: [], textPresent: false, stableFrames: 0,
-          moved: false, freshFrame: false, stale: true, level: 'gray', sequence: -1};
+          moved: false, freshFrame: false, detailNeeded: false, stale: true, level: 'gray', sequence: -1};
       }
       return {cues: observation.cues, boxes: observation.boxes,
         pairBoxes: observation.pairBoxes,
         width: observation.width, height: observation.height, sequence: lastSequence,
         textPresent: observation.textPresent, stableFrames, moved,
-        freshFrame: observation.freshFrame, stale: false, level: observation.textPresent ? 'yellow' : 'gray'};
+        detailNeeded: observation.detailNeeded, freshFrame: observation.freshFrame,
+        stale: false, level: observation.textPresent ? 'yellow' : 'gray'};
     }
     function observe(next, now) {
       if (!next || !Number.isSafeInteger(next.sequence) ||
@@ -176,6 +177,9 @@
       lastTime = sampledAt;
       observation = {cues, boxes, pairBoxes, width: next.width, height: next.height,
         textPresent: next.textPresent === true || cues.length > 0,
+        // A missing or tiny printed percent mark is a reason to refocus,
+        // never evidence for an inferred ratio or an accepted/green pair.
+        detailNeeded: next.detailNeeded === true,
         freshFrame: independentFrame};
       return view(now);
     }
