@@ -556,3 +556,52 @@ test('broken presented-frame callback fails open to unverified OCR fallback', as
   assert.ok(seen.every(reading => reading.freshFrame === false));
   scanner.stop();
 });
+
+
+test('partial composition triggers native-pixel retry without inventing a missing percent', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const sizes = [];
+  const s = setup({clock: Clock, recognize: canvas => {
+    sizes.push([canvas.width, canvas.height]);
+    const cotton = line('80% PAMUK', {x0: 60, y0: 140, x1: 290, y1: 172});
+    const linen = line(canvas.width > 1200 ? '20% KETEN' : '20 KETEN',
+      {x0: 60, y0: 210, x1: 290, y1: 240});
+    return result(cotton, linen);
+  }});
+  const readings = [], scanner = s.api.create(r => readings.push(r));
+  for (let i = 0; i < 4; i++) {
+    assert.equal(await scanner.sample(video), true);
+    now += 2100;
+  }
+  assert.deepEqual(sizes, [[1200, 675], [1200, 675], [1600, 900],
+    [1200, 675]]);
+  assert.deepEqual(Array.from(readings[0].cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk'], '20 without a printed % must not become a candidate');
+  assert.equal(readings[0].detailNeeded, true);
+  assert.deepEqual(Array.from(readings[2].cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.equal(readings[2].detailNeeded, false);
+  assert.equal('acceptedText' in readings[2], false);
+  assert.equal('verified' in readings[2], false);
+  scanner.stop();
+});
+
+test('tiny matched text requests bounded detail without green or auto-approval', () => {
+  const s = setup();
+  const small = s.api.extract(result(line('80% PAMUK',
+    {x0: 60, y0: 100, x1: 200, y1: 110})).data, 1200, 675, 1, 80);
+  assert.equal(small.cues.length, 1);
+  assert.equal(small.detailNeeded, true);
+  const readable = s.api.extract(result(line('80% PAMUK',
+    {x0: 60, y0: 100, x1: 200, y1: 135})).data, 1200, 675, 2, 80);
+  assert.equal(readable.detailNeeded, false);
+  const missing = s.api.extract(result(line('20 KETEN')).data, 1200, 675, 3, 80);
+  assert.equal(missing.cues.length, 0);
+  assert.equal(missing.detailNeeded, true);
+  for (const reading of [small, readable, missing]) {
+    assert.equal('verified' in reading, false);
+    assert.equal('acceptedText' in reading, false);
+    assert.equal('rawText' in reading, false);
+  }
+});

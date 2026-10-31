@@ -14,6 +14,9 @@
   const number = '(?:100|[1-9]?[0-9])';
   const before = new RegExp('(?:^|[^\\p{L}\\p{N}])(?:%\\s*(' + number + ')|(' + number + ')\\s*%)\\s*(' + fibers + ')(?![\\p{L}])', 'giu');
   const after = new RegExp('(?:^|[^\\p{L}])(' + fibers + ')\\s*(?:%\\s*(' + number + ')|(' + number + ')\\s*%)', 'giu');
+  // A visible number next to a fiber without the printed % is NOT a pair.
+  // It can, however, justify one bounded native-pixel detail retry.
+  const missingPercent = new RegExp('(?:^|\\s)' + number + '\\s+(?:' + fibers + ')(?![\\p{L}])|(?:^|\\s)(?:' + fibers + ')\\s+' + number + '(?![\\p{L}\\p{N}%])', 'iu');
 
   // Tesseract sometimes separates a printed "80% PAMUK" row into two OCR
   // lines. Recover only literal, isolated tokens in ONE OCR block and ONE
@@ -95,7 +98,7 @@
   function extract(data, width, height, sequence, durationMs) {
     const boxes = [], pairBoxes = [], cues = [], pairObservations = [];
     const unique = new Set(), duplicateKeys = new Set();
-    let textPresent = false;
+    let textPresent = false, detailNeeded = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
     // A dense care label can have composition AFTER 30 Tesseract lines or
     // paragraphs. Keep scanning real OCR lines, not just the first 30, while
@@ -113,6 +116,10 @@
           const value = typeof line.text === 'string' ? line.text : '';
           if (!value.trim()) continue;
           textPresent = true;
+          // A partly read composition line can coexist with a correct pair.
+          // Do not let that first pair suppress a higher-detail retry for the
+          // still-unreadable small percentage. Never infer the missing '%'.
+          if (missingPercent.test(value)) detailNeeded = true;
           const bb = line.bbox;
           const validBox = bb && [bb.x0, bb.y0, bb.x1, bb.y1].every(Number.isFinite) &&
             bb.x0 >= 0 && bb.y0 >= 0 && bb.x1 > bb.x0 && bb.y1 > bb.y0 &&
@@ -160,6 +167,12 @@
             }
           }
           matches.sort((a, b) => a.start - b.start);
+          // Even a recognized pair can be tiny at preview resolution. Use
+          // source camera pixels for an occasional retry, never interpolation.
+          if (lineBox && matches.length &&
+              lineBox.y1 - lineBox.y0 < Math.max(12, height * .022)) {
+            detailNeeded = true;
+          }
           {
             let lineHasPair = false;
             const linePairs = [];
@@ -247,7 +260,8 @@
     return {boxes, pairBoxes, cues,
       pairObservations: pairObservations.filter(p =>
         !duplicateKeys.has(p.percent + ':' + p.fiber)),
-      textPresent, width, height, sequence, durationMs};
+      // Boolean advisory only; no raw OCR, pixels or user data leave the worker.
+      detailNeeded, textPresent, width, height, sequence, durationMs};
   }
 
   function create(onResult, onError) {
@@ -377,7 +391,7 @@
         if (!closed) {
           const reading = extract(output?.data, width, height, id, Date.now() - started);
           reading.freshFrame = freshFrame; // No raw frame/time metadata leaves the worker.
-          inconclusivePasses = reading.pairObservations.length
+          inconclusivePasses = reading.pairObservations.length && !reading.detailNeeded
             ? 0 : Math.min(3, inconclusivePasses + 1);
           onResult(reading); // Still only unverified yellow/gray camera hints.
         }
