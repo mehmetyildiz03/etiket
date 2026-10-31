@@ -81,8 +81,7 @@ test('mixed printed ratio–fiber order keeps both literal live pairs without cr
       ['80:pamuk', '20:keten', '10:polyester']],
     // A tempting reverse match "PAMUK 20%" overlaps the real first
     // "80% PAMUK"; it must not create a second percentage for that fiber.
-    ['80% PAMUK 20% KETEN', ['80:pamuk', '20:keten']],
-    ['80% PAMUK 20%', ['80:pamuk']]
+    ['80% PAMUK 20% KETEN', ['80:pamuk', '20:keten']]
   ];
   for (const [printed, expected] of mixed) {
     const out = s.api.extract(result(line(printed)).data, 1200, 675, 1, 50);
@@ -93,6 +92,27 @@ test('mixed printed ratio–fiber order keeps both literal live pairs without cr
     assert.equal('verified' in out, false, 'mixed order remains an unverified hint');
     assert.equal('acceptedText' in out, false);
   }
+});
+
+test('ambiguous live OCR percentage ownership fails closed without a tracked pair', () => {
+  const s = setup();
+  for (const printed of [
+    'PAMUK 80% KETEN',
+    'KETEN 40% PAMUK',
+    '80% PAMUK 20%'
+  ]) {
+    const out = s.api.extract(result(line(printed)).data, 1200, 675, 1, 50);
+    assert.equal(out.cues.length, 0, printed);
+    assert.equal(out.pairBoxes.length, 0, printed);
+    assert.equal(out.pairObservations.length, 0, printed);
+    assert.equal(out.textPresent, true, 'ambiguous OCR text is still visible');
+    assert.equal('acceptedText' in out, false);
+    assert.equal('verified' in out, false);
+  }
+  const unique = s.api.extract(result(line('PAMUK 80% KETEN 20%')).data,
+    1200, 675, 2, 50);
+  assert.deepEqual(Array.from(unique.cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk', '20:keten'], 'unique two-pair assignment must survive');
 });
 
 test('malformed three/four digit ratios never yield a truncated percentage', () => {

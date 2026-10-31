@@ -18,6 +18,63 @@
   // It can, however, justify one bounded native-pixel detail retry.
   const missingPercent = new RegExp('(?:^|\\s)' + number + '\\s+(?:' + fibers + ')(?![\\p{L}])|(?:^|\\s)(?:' + fibers + ')\\s+' + number + '(?![\\p{L}\\p{N}%])', 'iu');
 
+  // Select the UNIQUE maximum set of non-overlapping literal pairs.
+  // Greedy regex order can assign "PAMUK 80% KETEN" to either fiber.
+  // Ambiguity fails closed: no yellow pair, no matched geometry or stability.
+  // This is a bounded live hint only, never an accepted scan or green signal.
+  function literalPairsFromLine(value) {
+    if (value.length > 512) return [];
+    const candidates = [];
+    for (const [pattern, ratioBefore] of [[before, true], [after, false]]) {
+      pattern.lastIndex = 0;
+      for (const match of value.matchAll(pattern)) {
+        const percent = Number(ratioBefore ?
+          (match[1] || match[2]) : (match[2] || match[3]));
+        const fiber = (ratioBefore ? match[3] : match[1])
+          .toLocaleLowerCase('tr');
+        if (percent > 0 && percent <= 100) {
+          candidates.push({start: match.index,
+            end: match.index + match[0].length, percent, fiber});
+        }
+        if (candidates.length > 32) return [];
+      }
+    }
+    if (!candidates.length) return [];
+    candidates.sort((a, b) => a.end - b.end || a.start - b.start);
+    const n = candidates.length;
+    const score = Array(n + 1).fill(0);
+    const ways = Array(n + 1).fill(1);
+    const previous = Array(n + 1).fill(0);
+    const taken = Array(n + 1).fill(false);
+    for (let i = 1; i <= n; i++) {
+      const current = candidates[i - 1];
+      let compatible = i - 1;
+      while (compatible > 0 &&
+          candidates[compatible - 1].end > current.start) compatible--;
+      const withCurrent = score[compatible] + 1;
+      const withoutCurrent = score[i - 1];
+      if (withCurrent > withoutCurrent) {
+        score[i] = withCurrent;
+        ways[i] = ways[compatible];
+        previous[i] = compatible;
+        taken[i] = true;
+      } else if (withCurrent < withoutCurrent) {
+        score[i] = withoutCurrent;
+        ways[i] = ways[i - 1];
+        previous[i] = i - 1;
+      } else {
+        score[i] = withCurrent;
+        ways[i] = 2;
+      }
+    }
+    if (ways[n] !== 1 || score[n] > 8) return [];
+    const selected = [];
+    for (let i = n; i > 0; i = previous[i]) {
+      if (taken[i]) selected.push(candidates[i - 1]);
+    }
+    return selected.reverse().sort((a, b) => a.start - b.start);
+  }
+
   // Tesseract sometimes separates a printed "80% PAMUK" row into two OCR
   // lines. Recover only literal, isolated tokens in ONE OCR block and ONE
   // horizontal row. This is an unverified yellow hint, not an accepted value.
@@ -128,45 +185,9 @@
           const lineBox = validBox ?
             {x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1} : null;
           blockLines.push({text: value, box: lineBox});
-          // Only literal percent-marked fiber pairs on the SAME OCR line.
-          // Do not infer missing %, section, full-label coverage or correctness.
-          // Select a single reading order per line. Running both regexes
-          // would invent "20% PAMUK" from "80% PAMUK 20% KETEN".
-          const firstRatio = value.search(/(?:%\s*\d{1,3}|\d{1,3}\s*%)/u);
-          const firstFiber = value.search(new RegExp(
-            '(?:^|[^\\p{L}])(?:' + fibers + ')(?![\\p{L}])', 'iu'));
-          if (firstRatio < 0 || firstFiber < 0) {
-            // Keep ordinary OCR text visible in gray. Only matched pairs
-            // may displace an unrelated line when the overlay budget fills.
-            if (lineBox && boxes.length < 24) boxes.push(lineBox);
-            continue;
-          }
-          const ratioFirst = firstRatio <= firstFiber;
-          // A real label can switch printing order on the SAME line:
-          // "80% PAMUK KETEN 20%". Reading only the first direction loses
-          // the second literal pair. Prefer the first printed direction,
-          // then accept opposite-direction matches ONLY when their character
-          // spans do not overlap any already selected pair. Otherwise
-          // "80% PAMUK 20% KETEN" could invent "PAMUK 20%".
-          const matches = [], occupied = [];
-          for (const [pattern, ratioBefore] of [
-            [ratioFirst ? before : after, ratioFirst],
-            [ratioFirst ? after : before, !ratioFirst]
-          ]) {
-            pattern.lastIndex = 0;
-            for (const match of value.matchAll(pattern)) {
-              const start = match.index, end = start + match[0].length;
-              if (occupied.some(([a, b]) => start < b && end > a)) continue;
-              const percent = Number(ratioBefore ?
-                (match[1] || match[2]) : (match[2] || match[3]));
-              const fiber = (ratioBefore ? match[3] : match[1])
-                .toLocaleLowerCase('tr');
-              if (!(percent > 0 && percent <= 100)) continue;
-              occupied.push([start, end]);
-              matches.push({start, percent, fiber});
-            }
-          }
-          matches.sort((a, b) => a.start - b.start);
+          // Literal printed pairs only; ambiguous token assignment fails closed.
+          const matches = literalPairsFromLine(value);
+
           // Even a recognized pair can be tiny at preview resolution. Use
           // source camera pixels for an occasional retry, never interpolation.
           if (lineBox && matches.length &&
