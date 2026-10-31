@@ -296,14 +296,17 @@ test('unboxed unrelated care text does not hide adjacent real composition tokens
   const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
   const fiber = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
   const invalid = {x0: -2, y0: 10, x1: 120, y1: 40};
-  const out = s.api.extract(result(ratio, fiber,
-    line('WASH AT 30 C', invalid)).data, 1200, 675, 1, 100);
-  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
-    ['80:pamuk']);
-  assert.equal(out.pairObservations.length, 1);
-  assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
-    [[100, 300, 300, 337]]);
-  assert.equal('acceptedText' in out, false);
+  for (const badBox of [invalid, null,
+    {x0: -2, y0: 300, x1: 182, y1: 340}]) {
+    const out = s.api.extract(result(ratio, fiber,
+      line('WASH AT 30 C', badBox)).data, 1200, 675, 1, 100);
+    assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+      ['80:pamuk']);
+    assert.equal(out.pairObservations.length, 1);
+    assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
+      [[100, 300, 300, 337]]);
+    assert.equal('acceptedText' in out, false);
+  }
   for (const uncertain of ['20%', 'KETEN', '80% KETEN']) {
     const blocked = s.api.extract(result(ratio, fiber,
       line(uncertain, invalid)).data, 1200, 675, 2, 100);
