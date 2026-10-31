@@ -25,6 +25,8 @@ function setup({permission = true, delayed = false, withOcr = false,
         this.focusCalls.push(constraints);
         if (focusDelayed) await focusPending;
         if (focusReject) throw new DOMException('unsupported', 'OverconstrainedError');
+        // Constraint replacement can reset torch unless it is requested too.
+        if (torch) this.torchEnabled = constraints.advanced?.[0]?.torch === true;
         return;
       }
       this.torchCalls.push(constraints);
@@ -873,4 +875,21 @@ test('closing camera during pending refocus cannot restart OCR or revive UI', as
   assert.equal(s.ocrCreates, 1, 'no new scanner after camera shutdown');
   assert.equal(s.nodes.length, 0);
   assert.equal(s.tracks[0].stopped, true);
+});
+
+test('web refocus preserves an explicitly enabled camera light', async () => {
+  const s = setup({withOcr: true, torch: true, focusModes: ['single-shot']});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  await s.button('Kamera ışığını aç').emit('click');
+  assert.equal(s.tracks[0].torchEnabled, true);
+  await s.button('Yeniden odakla').emit('click');
+  assert.equal(s.tracks[0].focusCalls.length, 1);
+  assert.equal(s.tracks[0].focusCalls[0].advanced[0].focusMode, 'single-shot');
+  assert.equal(s.tracks[0].focusCalls[0].advanced[0].torch, true);
+  assert.equal(s.tracks[0].torchEnabled, true,
+    'requesting focus must not silently turn off an active torch');
+  s.api.cancel();
+  assert.equal(await pending, null);
+  assert.equal(s.tracks[0].torchEnabled, false, 'camera close releases the torch');
 });
