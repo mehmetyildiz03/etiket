@@ -380,7 +380,8 @@ test('changing hardware light retires pre-light OCR boxes and stability', async 
 });
 
 test('pending hardware torch request cannot publish pre-toggle OCR or scan new frames', async () => {
-  const s = setup({torch: true, torchDelayed: true, withOcr: true});
+  const s = setup({torch: true, torchDelayed: true, withOcr: true,
+    still: new Blob(['full-res-still'], {type: 'image/jpeg'})});
   const pending = s.api.open();
   await Promise.resolve(); await Promise.resolve();
   const overlay = s.nodes[0].children[1].children[1];
@@ -396,6 +397,10 @@ test('pending hardware torch request cannot publish pre-toggle OCR or scan new f
   assert.equal(overlay.children.length, 0);
   s.timer();
   assert.equal(s.ocrCreates, 1);
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.equal(s.tracks[0].stopped, false,
+    'capture must not race a pending hardware illumination change');
+  assert.equal(s.nodes.length, 1);
   s.resolveTorch();
   await toggling;
   assert.equal(s.ocrCreates, 2);
