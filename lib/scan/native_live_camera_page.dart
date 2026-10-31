@@ -349,8 +349,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       final drift = _lastCenter != null && result.center != null &&
           (_lastCenter! - result.center!).distance > .15;
       final withinGap = nativeLiveSamplesWithinGap(_lastResultSample, started);
+      // An unresolved bare ratio in the same frame invalidates temporal
+      // readiness, even if other percentage-fiber lines were recognized.
       final goodObservation = quality == LiveFrameQuality.usable &&
-          result.trackedBoxes != null;
+          result.trackedBoxes != null && !result.missingPercent;
       final stable = goodObservation && key.isNotEmpty &&
           key == _fingerprint && !drift && withinGap &&
           _lastPairRotation == rotationDegrees &&
