@@ -22,7 +22,7 @@
     if (!Number.isFinite(width) || !Number.isFinite(height) ||
         width <= 0 || height <= 0 || width * height > 48000000 ||
         lines.length < 2 || lines.length > 256) return [];
-    const ratios = [], names = [];
+    const ratios = [], names = [], ignored = new Set();
     const isolatedPercent = /^(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)$/u;
     const isolatedName = new RegExp('^(?:' + fibers + ')$', 'iu');
     const possibleFiber = new RegExp(
@@ -36,6 +36,7 @@
         // Unboxed unrelated care instructions must not hide real split pairs.
         // An unboxed possible percentage/fiber could compete: fail closed.
         if (value.includes('%') || possibleFiber.test(value)) return [];
+        ignored.add(i);
         continue;
       }
       const match = isolatedPercent.exec(value);
@@ -63,7 +64,7 @@
       }
       // Intervening or overlapping OCR tokens make the association ambiguous.
       for (let i = 0; i < lines.length; i++) {
-        if (i === ai || i === bi) continue;
+        if (i === ai || i === bi || ignored.has(i)) continue;
         const other = lines[i].box;
         const intersects = (p, q) => p.x0 < q.x1 && p.x1 > q.x0 &&
           p.y0 < q.y1 && p.y1 > q.y0;
