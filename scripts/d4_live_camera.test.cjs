@@ -8,15 +8,16 @@ const source = fs.readFileSync(path.join(__dirname, '../web/doku_live_camera.js'
 const stability = require('../web/doku_live_stability.js');
 
 function setup({permission = true, delayed = false, withOcr = false,
-  torch = false, torchReject = false, focusModes = [], focusReject = false,
+  torch = false, torchReject = false, torchDelayed = false, focusModes = [], focusReject = false,
   focusDelayed = false, still = null,
   noImageCapture = false, withResizeObserver = false,
   stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false,
   previewBlobFailures = 0} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
   const resizeObservers = [];
-  let resolveFocus;
+  let resolveFocus, resolveTorch;
   const focusPending = new Promise(resolve => { resolveFocus = resolve; });
+  const torchPending = new Promise(resolve => { resolveTorch = resolve; });
   const tracks = [{stopped: false, torchEnabled: false, torchCalls: [], focusCalls: [],
     stop() { this.stopped = true; this.torchEnabled = false; },
     getCapabilities() { return {torch, focusMode: focusModes}; },
@@ -30,6 +31,7 @@ function setup({permission = true, delayed = false, withOcr = false,
         return;
       }
       this.torchCalls.push(constraints);
+      if (torchDelayed) await torchPending;
       if (torchReject) throw new DOMException('unsupported', 'OverconstrainedError');
       this.torchEnabled = constraints.advanced?.[0]?.torch === true;
     }
@@ -125,7 +127,7 @@ function setup({permission = true, delayed = false, withOcr = false,
     emitRetiredOcr(observation) { assert.ok(ocrCallbacks.length > 1); ocrCallbacks[0](observation); },
     get requested() { return requested; }, get cameraCalls() { return cameraCalls; },
     get timer() { return timer; }, docEvents, pageEvents, resizeObservers,
-    requestResolve, requestReject, resolveFocus,
+    requestResolve, requestReject, resolveFocus, resolveTorch,
     advance(ms) { clock.now += ms; },
     emitOcr(observation) { assert.equal(typeof ocrResult, 'function'); ocrResult(observation); },
     button(label) { const b = buttons.find(b => b.textContent.startsWith(label));
@@ -343,6 +345,84 @@ test('optional hardware torch can be toggled without touching OCR or captured da
   assert.equal(s.tracks[0].stopped, true);
   assert.equal(s.tracks[0].torchEnabled, false,
     'closing the preview releases the hardware light');
+});
+
+test('changing hardware light retires pre-light OCR boxes and stability', async () => {
+  const s = setup({torch: true, withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const status = s.nodes[0].children[2];
+  const overlay = s.nodes[0].children[1].children[1];
+  const box = {x0: 50, y0: 70, x1: 250, y1: 120};
+  const observation = sequence => ({sequence, width: 1200, height: 675,
+    boxes: [box], pairBoxes: [box],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box}],
+    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true, freshFrame: true});
+  s.emitOcr(observation(1));
+  assert.equal(overlay.children.length, 1);
+  await s.button('Kamera ışığını aç').emit('click');
+  assert.equal(s.tracks[0].torchEnabled, true);
+  assert.equal(s.ocrStops, 1, 'pre-light worker is retired');
+  assert.equal(s.ocrCreates, 2, 'post-light worker is fresh');
+  assert.equal(overlay.children.length, 0, 'pre-light rectangles disappear');
+  assert.match(status.textContent, /Gri/);
+  s.emitRetiredOcr(observation(2));
+  assert.equal(overlay.children.length, 0, 'retired callback cannot revive old pixels');
+  s.emitOcr(observation(1));
+  assert.match(status.textContent, /Tek kare adayı/);
+  assert.doesNotMatch(status.textContent, /2 ayrı OCR karesinde/);
+  await s.button('Kamera ışığını kapat').emit('click');
+  assert.equal(s.ocrStops, 2);
+  assert.equal(s.ocrCreates, 3);
+  assert.equal(overlay.children.length, 0);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
+
+test('pending hardware torch request cannot publish pre-toggle OCR or scan new frames', async () => {
+  const s = setup({torch: true, torchDelayed: true, withOcr: true,
+    still: new Blob(['full-res-still'], {type: 'image/jpeg'})});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const overlay = s.nodes[0].children[1].children[1];
+  const old = {sequence: 1, width: 1200, height: 675,
+    boxes: [{x0: 20, y0: 20, x1: 150, y1: 50}],
+    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true};
+  s.emitOcr(old);
+  assert.equal(overlay.children.length, 1);
+  const toggling = s.button('Kamera ışığını aç').emit('click');
+  assert.equal(s.ocrStops, 1);
+  assert.equal(s.ocrCreates, 1, 'no new worker until hardware request finishes');
+  s.emitOcr(old); // The still-retained callback is now generation-invalid.
+  assert.equal(overlay.children.length, 0);
+  s.timer();
+  assert.equal(s.ocrCreates, 1);
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.equal(s.tracks[0].stopped, false,
+    'capture must not race a pending hardware illumination change');
+  assert.equal(s.nodes.length, 1);
+  s.resolveTorch();
+  await toggling;
+  assert.equal(s.ocrCreates, 2);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
+
+test('rejected torch change resumes fresh OCR without trusting old lighting', async () => {
+  const s = setup({torch: true, torchReject: true, withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  await s.button('Kamera ışığını aç').emit('click');
+  assert.equal(s.ocrStops, 1);
+  assert.equal(s.ocrCreates, 2, 'failed constraints do not strand scanning');
+  assert.equal(s.button('Kamera ışığını aç').style.display, 'none');
+  assert.match(s.nodes[0].children[2].textContent, /ortam ışığını artır/);
+  s.emitRetiredOcr({sequence: 1, width: 1200, height: 675,
+    boxes: [{x0: 20, y0: 20, x1: 100, y1: 40}],
+    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true});
+  assert.match(s.nodes[0].children[2].textContent, /Gri/);
+  s.api.cancel();
+  assert.equal(await pending, null);
 });
 
 test('unsupported camera torch is hidden while capture remains usable', async () => {

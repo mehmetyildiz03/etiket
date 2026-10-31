@@ -352,7 +352,7 @@
       // Create a fresh worker after a failed attempt; the stopped worker can
       // never deliver an accepted result or overwrite manual corrections.
       const startLiveScanner = () => {
-        if (done || capturing || focusing || usingSystemPicker || !stream || liveScanner) return;
+        if (done || capturing || focusing || torchBusy || usingSystemPicker || !stream || liveScanner) return;
         const generation = ++scannerGeneration;
         liveScanner = root.dokuLiveOcr?.create?.(
           observation => {
@@ -401,7 +401,7 @@
           openSystemPicker();
           return;
         }
-        if (capturing || focusing || !stream || !video.videoWidth || !video.videoHeight) return;
+        if (capturing || focusing || torchBusy || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
         liveScanner?.stop(); liveScanner = null;
         status.textContent = 'Fotoğraf hazırlanıyor…';
@@ -455,6 +455,15 @@
             track.readyState === 'ended') return;
         torchBusy = true;
         torchButton.disabled = true;
+        // Changing illumination changes the actual pixels under the OCR
+        // boxes. Retire every pre-toggle result before touching hardware,
+        // including a worker callback that completes while constraints wait.
+        ++scannerGeneration;
+        liveScanner?.stop(); liveScanner = null;
+        stability?.clear();
+        overlay.replaceChildren();
+        lastMetrics = null;
+        renderStatus();
         try {
           const next = !torchEnabled;
           await track.applyConstraints({advanced: [{torch: next}]});
@@ -468,11 +477,17 @@
           // Keep preview, OCR and the high-resolution system picker usable.
           if (!done && !usingSystemPicker) {
             torchButton.style.display = 'none';
-            status.textContent = 'Kamera ışığı kontrol edilemiyor; ortam ışığını artır veya sistem kamerasını kullan.';
+            focusMessage = 'Kamera ışığı kontrol edilemiyor; ortam ışığını artır veya sistem kamerasını kullan.';
           }
         } finally {
           torchBusy = false;
           torchButton.disabled = false;
+          // A failed torch request must not strand the live scanner. Never
+          // resurrect the retired worker or its pre-light OCR evidence.
+          if (!done && !usingSystemPicker && torchTrack === track) {
+            startLiveScanner();
+            renderStatus();
+          }
         }
       });
       torchButton.style.display = 'none';
@@ -586,7 +601,7 @@
         startLiveScanner();
         renderStatus();
         interval = root.setInterval(() => {
-          if (done || capturing || focusing) return;
+          if (done || capturing || focusing || torchBusy) return;
           try {
             lastMetrics = sampleQuality(video, canvas, stability?.view(Date.now()));
             renderStatus();
