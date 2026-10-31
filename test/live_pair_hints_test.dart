@@ -10,6 +10,24 @@ void main() {
     expect(livePairsFromLine('%100 POLYESTER'), ['100% polyester']);
     expect(livePairsFromLine('viskon %40'), ['40% viskon']);
   });
+  test('mixed-order same-line native OCR retains both literal pairs', () {
+    expect(livePairsFromLine('80% PAMUK KETEN 20%'),
+        ['80% pamuk', '20% keten']);
+    expect(livePairsFromLine('KETEN 20% 80% PAMUK'),
+        ['20% keten', '80% pamuk']);
+    expect(livePairsFromLine('70% COTTON LINEN 30%'),
+        ['70% cotton', '30% linen']);
+  });
+
+  test('shared percentage or fiber without a unique assignment fails closed', () {
+    expect(livePairsFromLine('PAMUK 80% KETEN'), isEmpty);
+    expect(livePairsFromLine('80% PAMUK 20%'), isEmpty);
+    expect(livePairsFromLine('80% PAMUK 20% KETEN'),
+        ['80% pamuk', '20% keten']);
+    expect(livePairsFromLine('PAMUK 80% KETEN 20%'),
+        ['80% pamuk', '20% keten']);
+  });
+
   test('separate lines, missing percent and care instructions are never paired', () {
     expect(livePairsFromLine('80%'), isEmpty);
     expect(livePairsFromLine('PAMUK'), isEmpty);

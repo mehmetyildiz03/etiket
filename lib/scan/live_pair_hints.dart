@@ -39,20 +39,80 @@ String? liveIsolatedFiber(String text) =>
 bool liveHasPossibleCompositionToken(String text) =>
     _percent.hasMatch(text) || _fiber.hasMatch(text);
 
+/// Keep only a unique maximum set of non-overlapping *printed* pairs.
+/// Mixed token order is common on real labels (80% PAMUK KETEN 20%).
+/// Ambiguous shared tokens fail closed rather than assigning a percentage to
+/// the wrong fiber. This is a yellow preview candidate, never approval.
 List<String> livePairsFromLine(String text) {
-  final firstPercent = _percent.firstMatch(text);
-  final firstFiber = _fiber.firstMatch(text);
-  if (firstPercent == null || firstFiber == null) return const [];
-  final ratioFirst = firstPercent.start <= firstFiber.start;
+  if (text.length > 512 || !_percent.hasMatch(text) || !_fiber.hasMatch(text)) {
+    return const [];
+  }
+  final candidates = <({int start, int end, String value})>[];
+
+  void collect(RegExp pattern, bool ratioFirst) {
+    for (final match in pattern.allMatches(text)) {
+      final percent = int.tryParse(ratioFirst
+          ? (match.group(1) ?? match.group(2) ?? '')
+          : (match.group(2) ?? match.group(3) ?? ''));
+      final fiber = match.group(ratioFirst ? 3 : 1)?.toLowerCase();
+      if (percent == null || percent < 1 || percent > 100 || fiber == null) {
+        continue;
+      }
+      candidates.add((start: match.start, end: match.end,
+          value: '$percent% $fiber'));
+    }
+  }
+
+  collect(_ratioFirst, true);
+  collect(_fiberFirst, false);
+  if (candidates.isEmpty || candidates.length > 32) return const [];
+  candidates.sort((a, b) {
+    final byEnd = a.end.compareTo(b.end);
+    return byEnd != 0 ? byEnd : a.start.compareTo(b.start);
+  });
+
+  // Weighted interval scheduling: maximize complete pairs, not regex order.
+  // Count optimal solutions up to two. Ties are genuinely ambiguous, so
+  // return no pairs rather than guessing which shared token belongs where.
+  final count = candidates.length;
+  final scores = List<int>.filled(count + 1, 0);
+  final ways = List<int>.filled(count + 1, 1);
+  final previous = List<int>.filled(count + 1, 0);
+  final taken = List<bool>.filled(count + 1, false);
+  for (var i = 1; i <= count; i++) {
+    final current = candidates[i - 1];
+    var compatible = i - 1;
+    while (compatible > 0 &&
+        candidates[compatible - 1].end > current.start) {
+      compatible--;
+    }
+    final withCurrent = scores[compatible] + 1;
+    final withoutCurrent = scores[i - 1];
+    if (withCurrent > withoutCurrent) {
+      scores[i] = withCurrent;
+      ways[i] = ways[compatible];
+      previous[i] = compatible;
+      taken[i] = true;
+    } else if (withCurrent < withoutCurrent) {
+      scores[i] = withoutCurrent;
+      ways[i] = ways[i - 1];
+      previous[i] = i - 1;
+    } else {
+      scores[i] = withCurrent;
+      ways[i] = 2;
+    }
+  }
+  if (ways[count] != 1 || scores[count] > 8) return const [];
+  final selected = <({int start, int end, String value})>[];
+  var i = count;
+  while (i > 0) {
+    if (taken[i]) selected.add(candidates[i - 1]);
+    i = previous[i];
+  }
+  selected.sort((a, b) => a.start.compareTo(b.start));
   final result = <String>[];
-  for (final match in (ratioFirst ? _ratioFirst : _fiberFirst).allMatches(text)) {
-    final percent = int.tryParse(ratioFirst
-        ? (match.group(1) ?? match.group(2) ?? '')
-        : (match.group(2) ?? match.group(3) ?? ''));
-    final fiber = match.group(ratioFirst ? 3 : 1)?.toLowerCase();
-    if (percent == null || percent <= 0 || percent > 100 || fiber == null) continue;
-    final value = '$percent% $fiber';
-    if (!result.contains(value) && result.length < 8) result.add(value);
+  for (final candidate in selected) {
+    if (!result.contains(candidate.value)) result.add(candidate.value);
   }
   return List.unmodifiable(result);
 }
