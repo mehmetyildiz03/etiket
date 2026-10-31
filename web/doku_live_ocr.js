@@ -97,10 +97,19 @@
     const unique = new Set(), duplicateKeys = new Set();
     let textPresent = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
+    // A dense care label can have composition AFTER 30 Tesseract lines or
+    // paragraphs. Keep scanning real OCR lines, not just the first 30, while
+    // bounding per-block spatial matching and total live-preview work.
+    // These are still unverified candidates; never infer missing tokens.
+    let remainingLines = 512;
     for (const block of blocks) {
+      if (remainingLines <= 0) break;
       const blockLines = [];
-      for (const paragraph of (block.paragraphs || []).slice(0, 30)) {
-        for (const line of (paragraph.lines || []).slice(0, 30)) {
+      let blockRemaining = Math.min(256, remainingLines);
+      for (const paragraph of (block.paragraphs || []).slice(0, 256)) {
+        for (const line of (paragraph.lines || []).slice(0, blockRemaining)) {
+          blockRemaining--;
+          remainingLines--;
           const value = typeof line.text === 'string' ? line.text : '';
           if (!value.trim()) continue;
           textPresent = true;
@@ -198,6 +207,7 @@
             }
           }
         }
+        if (blockRemaining <= 0) break;
       }
       // Spatially split tokens are only advisory; never fill in a missing
       // percentage or fiber. The union box comes from two real OCR boxes.
