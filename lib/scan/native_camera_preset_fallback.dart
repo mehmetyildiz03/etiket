@@ -24,8 +24,10 @@ Future<T> openNativeCameraWithPresetFallback<T>({
       // entire attempt before creating the next controller.
       try {
         await dispose(candidate);
-      } catch (_) {
-        // Preserve the original start failure, not a cleanup error.
+      } catch (cleanupError, cleanupStack) {
+        // A camera that could not be released may still own the device.
+        // Do not start another controller on top of a possibly live stream.
+        Error.throwWithStackTrace(cleanupError, cleanupStack);
       }
       // Lifecycle pause/dispose is NOT a reason to open another camera.
       if (cancelled()) Error.throwWithStackTrace(error, stack);
