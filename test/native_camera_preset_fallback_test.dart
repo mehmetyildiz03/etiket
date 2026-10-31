@@ -105,4 +105,10 @@ void main() {
         reason: 'never open a second stream while first may own the camera');
   });
 
+  test('reduced stream resolution cannot silently become the OCR still', () {
+    expect(nativeStreamRequiresSystemStill(ResolutionPreset.ultraHigh), false);
+    expect(nativeStreamRequiresSystemStill(ResolutionPreset.high), true);
+    expect(nativeStreamRequiresSystemStill(ResolutionPreset.medium), true);
+  });
+
 }
