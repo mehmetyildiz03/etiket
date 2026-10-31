@@ -23,6 +23,22 @@ final _isolatedRatio = RegExp(
 final _isolatedFiber = RegExp(
     r'^\s*(' '$_fibers' r')\s*$', caseSensitive: false);
 
+// A number next to a recognized fiber without a printed percent sign is
+// a reason to refocus, NEVER a composition candidate or inferred percentage.
+// Avoid matching an existing "80% PAMUK", "PAMUK 80%" or invalid 120/0 ratio.
+final _bareRatioFirst = RegExp(
+    '(?:^|\\s)(?:100|[1-9][0-9]?)\\s+(?:$_fibers)(?![$_letters])',
+    caseSensitive: false);
+final _bareFiberFirst = RegExp(
+    '(?:^|[^$_letters])(?:$_fibers)\\s+(?:100|[1-9][0-9]?)(?![0-9]|\\s*%)',
+    caseSensitive: false);
+
+/// Only a transient focus hint for a possibly missed small '%' glyph.
+/// No percentage is added to livePairsFromLine or the accepted scan.
+bool liveMissingPercentNearFiber(String text) =>
+    text.length <= 512 &&
+    (_bareRatioFirst.hasMatch(text) || _bareFiberFirst.hasMatch(text));
+
 /// Standalone printed tokens only; no OCR repair or percentage completion.
 String? liveIsolatedPercent(String text) {
   final match = _isolatedRatio.firstMatch(text);
