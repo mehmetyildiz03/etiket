@@ -217,3 +217,30 @@ test('only two independently evidenced frames can report pair stability', () => 
   assert.equal(s.observe(sample(5), 9000).stableFrames, 1,
     'unsupported frame evidence cannot bridge a stability streak');
 });
+
+test('slow but permitted OCR expires from video capture time, not callback time', () => {
+  const s = create();
+  const result = s.observe({...sample(1), durationMs: 5500}, 10000);
+  assert.equal(result.level, 'yellow');
+  assert.equal(result.stableFrames, 1);
+  assert.equal(s.view(10501).level, 'gray',
+    'a 5.5s OCR may only remain visible for the remaining 0.5s');
+  assert.deepEqual(s.view(10501).pairBoxes, []);
+  assert.equal(s.observe({...sample(2), durationMs: 6000}, 20000).level,
+    'gray', 'a result already six seconds old is never shown');
+});
+
+test('out-of-order sampled video frames cannot replace newer camera evidence', () => {
+  const s = create();
+  const recent = s.observe({...sample(1), durationMs: 100}, 2000);
+  assert.equal(recent.sequence, 1);
+  const older = s.observe({
+    ...sample(2, [{percent: 20, fiber: 'keten'}], 500),
+    durationMs: 1800
+  }, 3000); // Sampled at 1200ms, before the prior frame at 1900ms.
+  assert.equal(older.sequence, 1);
+  assert.equal(older.cues[0].fiber, 'pamuk');
+  assert.equal(older.stableFrames, 1);
+  assert.equal(s.observe({...sample(3), durationMs: 100}, 4000)
+    .stableFrames, 2, 'the next genuinely newer frame can advance stability');
+});
