@@ -379,7 +379,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   Future<void> _focusCenter() async {
     final camera = _controller;
     if (camera == null || !camera.value.isInitialized || _closed ||
-        _capturing || _focusing) return;
+        _capturing || _focusing) { return; }
     final token = ++_generation;
     setState(() {
       _focusing = true;
@@ -404,7 +404,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       setExposurePoint: camera.setExposurePoint,
     );
     if (!mounted || _closed || _capturing || token != _generation ||
-        _controller != camera) return;
+        _controller != camera) { return; }
     setState(() {
       _focusing = false;
       _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
