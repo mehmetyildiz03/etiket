@@ -352,6 +352,50 @@ test('dense split-pair rows displace unrelated care boxes without exceeding budg
 });
 
 
+
+test('dense web OCR retains a literal split percentage and fiber after 75 care lines', () => {
+  const s = setup();
+  const care = Array.from({length: 75}, (_, i) =>
+    line('WASH ' + i, {x0: 10, y0: i * 4, x1: 80, y1: i * 4 + 3}));
+  care.push(line('80%', {x0: 100, y0: 420, x1: 165, y1: 452}));
+  care.push(line('PAMUK', {x0: 185, y0: 421, x1: 300, y1: 453}));
+  const out = s.api.extract(result(...care).data, 1200, 675, 1, 80);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk']);
+  assert.equal(out.boxes.length, 24, 'live overlay budget remains bounded');
+  assert.equal(out.pairBoxes.length, 1);
+  assert.equal(out.pairObservations.length, 1);
+  assert.equal(out.pairBoxes[0].y0, 420);
+  assert.equal('rawText' in out, false);
+  assert.equal('verified' in out, false);
+});
+
+test('dense web OCR reads composition after 30 paragraphs without approving it', () => {
+  const s = setup();
+  const paragraphs = Array.from({length: 45}, (_, i) => ({lines: [
+    line('CARE ' + i, {x0: 10, y0: i * 5, x1: 80, y1: i * 5 + 4})
+  ]}));
+  paragraphs.push({lines: [
+    line('20% KETEN', {x0: 100, y0: 400, x1: 310, y1: 440})
+  ]});
+  const out = s.api.extract({blocks: [{paragraphs}]}, 1200, 675, 2, 90);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['20:keten']);
+  assert.equal(out.pairObservations.length, 1);
+  assert.equal(out.pairBoxes[0].y0, 400);
+  assert.equal('acceptedText' in out, false);
+});
+
+test('web live OCR bounds pathological dense blocks to 256 lines', () => {
+  const s = setup();
+  const care = Array.from({length: 256}, (_, i) =>
+    line('CARE ' + i, {x0: 10, y0: i * 2, x1: 80, y1: i * 2 + 1}));
+  care.push(line('80% PAMUK', {x0: 100, y0: 550, x1: 310, y1: 580}));
+  const out = s.api.extract(result(...care).data, 1200, 675, 3, 90);
+  assert.equal(out.cues.length, 0, 'no unbounded late-line processing');
+  assert.ok(out.boxes.length <= 24);
+});
+
 test('after two inconclusive OCR frames, a bounded native-pixel detail pass can recover a small percentage', async () => {
   let now = 10000;
   const Clock = class extends Date { static now() { return now; } };
