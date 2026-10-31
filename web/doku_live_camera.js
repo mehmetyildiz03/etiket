@@ -496,7 +496,11 @@
         focusMessage = 'Kameradan yeniden odak isteniyor.';
         renderStatus();
         try {
-          await track.applyConstraints({advanced: [{focusMode: 'single-shot'}]});
+          // applyConstraints replaces the track's prior constraint set.
+          // Preserve an explicitly enabled torch while requesting focus.
+          const requested = {focusMode: 'single-shot'};
+          if (torchEnabled && torchTrack === track) requested.torch = true;
+          await track.applyConstraints({advanced: [requested]});
           if (done || usingSystemPicker || focusTrack !== track) return;
           focusMessage = 'Yeniden odak istendi; yeni OCR sonucunu bekle.';
         } catch (_) {
