@@ -112,7 +112,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _recognizer = recognizer;
       // A high-resolution STREAM preset may also reduce takePicture() pixels.
       // Never silently treat its still as the original full-detail capture.
-      _usingHighStream = openedPreset == ResolutionPreset.high;
+      _usingHighStream = openedPreset != null &&
+          nativeStreamRequiresSystemStill(openedPreset!);
       if (mounted && token == _generation) {
         setState(() { _starting = false; _error = null; });
       }
