@@ -34,7 +34,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   TextRecognizer? _recognizer;
   Timer? _staleTimer;
   bool _starting = true, _reading = false, _capturing = false,
-      _focusing = false, _closed = false;
+      _focusing = false, _closed = false, _usingHighStream = false;
   int _generation = 0, _sequence = 0, _stableFrames = 0;
   DateTime _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
@@ -76,6 +76,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final token = ++_generation;
     CameraController? controller;
     TextRecognizer? recognizer;
+    ResolutionPreset? openedPreset;
     if (mounted) { setState(() { _starting = true; _error = null; }); }
     try {
       final cameras = await availableCameras();
@@ -88,11 +89,14 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       // and uses the camera plugin's actual photo pixels, never OCR preview.
       controller = await openNativeCameraWithPresetFallback<CameraController>(
         cancelled: () => !mounted || token != _generation || _closed,
-        create: (preset) => CameraController(
-          description, preset, enableAudio: false,
-          imageFormatGroup: Platform.isAndroid
-              ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
-        ),
+        create: (preset) {
+          openedPreset = preset;
+          return CameraController(
+            description, preset, enableAudio: false,
+            imageFormatGroup: Platform.isAndroid
+                ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+          );
+        },
         initializeAndStart: (attempt) async {
           await attempt.initialize();
           if (!mounted || token != _generation || _closed) {
@@ -106,6 +110,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       recognizer = TextRecognizer(script: TextRecognitionScript.latin);
       _controller = controller;
       _recognizer = recognizer;
+      // A high-resolution STREAM preset may also reduce takePicture() pixels.
+      // Never silently treat its still as the original full-detail capture.
+      _usingHighStream = openedPreset == ResolutionPreset.high;
       if (mounted && token == _generation) {
         setState(() { _starting = false; _error = null; });
       }
@@ -439,7 +446,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   Future<void> _takePicture() async {
     final camera = _controller;
-    if (camera == null || _capturing || _closed || !camera.value.isInitialized) { return; }
+    if (camera == null || _capturing || _closed || _usingHighStream ||
+        !camera.value.isInitialized) { return; }
     setState(() => _capturing = true);
     final captureToken = ++_generation; // Invalidate late preview OCR.
     final outcome = await takeNativeStillWithRecovery<XFile>(
@@ -486,6 +494,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final recognizer = _recognizer;
     _controller = null;
     _recognizer = null;
+    _usingHighStream = false;
     try {
       if (camera?.value.isStreamingImages ?? false) { await camera!.stopImageStream(); }
     } catch (_) { /* Camera may have already stopped. */ }
@@ -578,6 +587,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             if (Platform.isAndroid)
               const Text('Yazının bulunduğu yere dokunarak odak ve ışık ölçümü isteyebilirsin.',
                   style: TextStyle(fontSize: 12)),
+            if (_usingHighStream)
+              const Text('Bu cihazda ultra yüksek çözünürlüklü canlı akış açılamadı. '
+                  'Önizleme düşük çözünürlükte çalışıyor. Küçük yüzde işaretlerini '
+                  'kaybetmemek için geri dönüp sistem kamerasıyla yüksek '
+                  'çözünürlüklü fotoğraf çek.',
+                  style: TextStyle(fontSize: 12)),
             const Text('Yeşil hazır değil: tüm etiket görünürlüğü doğrulanmadı. '
                 'Fotoğraf sonrası gerçek OCR, metin düzeltmesi ve açık onay gerekir.',
                 style: TextStyle(fontSize: 12)),
@@ -589,9 +604,15 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
               label: Text(_focusing ? 'Odaklanıyor…' : 'Merkeze odakla'),
             ),
             FilledButton.icon(
-              onPressed: available && !_capturing && !_focusing ? _takePicture : null,
+              onPressed: available && !_capturing && !_focusing
+                  ? _usingHighStream
+                      ? () => Navigator.of(context).pop()
+                      : _takePicture
+                  : null,
               icon: const Icon(Icons.camera),
-              label: Text(_capturing ? 'Çekiliyor…' : 'Fotoğrafı çek'),
+              label: Text(_usingHighStream
+                  ? 'Sistem kamerasına dön'
+                  : _capturing ? 'Çekiliyor…' : 'Fotoğrafı çek'),
             ),
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
