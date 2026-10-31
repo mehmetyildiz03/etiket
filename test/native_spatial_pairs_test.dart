@@ -69,6 +69,37 @@ void main() {
     ]).single.value, '100% pamuk');
   });
 
+  test('dense Android OCR blocks preserve late real split pairs', () {
+    final care = List.generate(75, (i) => NativeOcrLine(
+      'WASH AT 30 C $i', Rect.fromLTWH(10, 10 + i * 5.0, 120, 4)));
+    final found = nativeSpatialPairs(imageSize: size,
+      lines: [...care, ratio, fiber]);
+    expect(found.map((p) => p.value), ['80% pamuk']);
+    expect(found.single.box, const Rect.fromLTRB(100, 500, 370, 542));
+    // Bounded work: oversized blocks must not silently bypass the limit.
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      ...List.generate(255, (i) => NativeOcrLine('CARE $i',
+        Rect.fromLTWH(10, 10 + i * 5.0, 120, 4))),
+      ratio, fiber,
+    ]), isEmpty);
+  });
+
+  test('unboxed care instructions are ignored but competing tokens block pairing', () {
+    const bad = Rect.fromLTWH(-2, 450, 100, 30);
+    for (final care in ['WASH AT 30 C', 'IRON LOW']) {
+      final found = nativeSpatialPairs(imageSize: size, lines: [
+        ratio, fiber, NativeOcrLine(care, bad),
+      ]);
+      expect(found.map((p) => p.value), ['80% pamuk'], reason: care);
+    }
+    for (final competing in ['20%', 'KETEN', 'WASH PAMUK',
+      '80% KETEN', 'POLYESTER 20%']) {
+      expect(nativeSpatialPairs(imageSize: size, lines: [
+        ratio, fiber, NativeOcrLine(competing, bad),
+      ]), isEmpty, reason: competing);
+    }
+  });
+
   test('bad geometry or duplicate same-value rows fail closed', () {
     expect(nativeSpatialPairs(imageSize: Size.zero, lines: [ratio, fiber]), isEmpty);
     expect(nativeSpatialPairs(imageSize: size, lines: [

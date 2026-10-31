@@ -33,6 +33,12 @@ String? liveIsolatedPercent(String text) {
 String? liveIsolatedFiber(String text) =>
     _isolatedFiber.firstMatch(text)?.group(1)?.toLowerCase();
 
+/// A missing/invalid OCR box containing a possible composition token can
+/// compete with a nearby split pair. Never silently ignore that ambiguity.
+/// No inferred values or text are returned by this conservative check.
+bool liveHasPossibleCompositionToken(String text) =>
+    _percent.hasMatch(text) || _fiber.hasMatch(text);
+
 List<String> livePairsFromLine(String text) {
   final firstPercent = _percent.firstMatch(text);
   final firstFiber = _fiber.firstMatch(text);

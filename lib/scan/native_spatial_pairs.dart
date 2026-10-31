@@ -27,12 +27,13 @@ List<NativeSpatialPair> nativeSpatialPairs({
 }) {
   final width = imageSize.width, height = imageSize.height;
   if (!width.isFinite || !height.isFinite || width <= 0 || height <= 0 ||
-      width * height > 48000000 || lines.length < 2 || lines.length > 32) {
+      width * height > 48000000 || lines.length < 2 || lines.length > 256) {
     return const [];
   }
 
   final ratios = <(int, String)>[];
   final fibers = <(int, String)>[];
+  final ignored = <int>{};
   for (var i = 0; i < lines.length; i++) {
     final box = lines[i].box;
     if (!box.left.isFinite || !box.top.isFinite ||
@@ -40,7 +41,12 @@ List<NativeSpatialPair> nativeSpatialPairs({
         box.width <= 0 || box.height <= 0 ||
         box.left < 0 || box.top < 0 ||
         box.right > width || box.bottom > height) {
-      return const []; // Any uncertain geometry invalidates spatial pairing.
+      // Invalid unrelated care instructions must not hide real percentage
+      // and fiber tokens on dense labels. An unboxed composition token can
+      // compete with the candidate, so its geometry still fails closed.
+      if (liveHasPossibleCompositionToken(lines[i].text)) return const [];
+      ignored.add(i);
+      continue;
     }
     // Complete same-line candidates already have a safer extraction path.
     if (livePairsFromLine(lines[i].text).isNotEmpty) continue;
@@ -70,7 +76,7 @@ List<NativeSpatialPair> nativeSpatialPairs({
     }
     // A third visible token between the two could change the association.
     for (var i = 0; i < lines.length; i++) {
-      if (i == ratioIndex || i == fiberIndex) continue;
+      if (i == ratioIndex || i == fiberIndex || ignored.contains(i)) continue;
       final other = lines[i].box;
       // Overlapping alternative OCR tokens make the row association ambiguous.
       if (other.overlaps(a) || other.overlaps(b)) return false;
