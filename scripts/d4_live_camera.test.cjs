@@ -1070,3 +1070,28 @@ test('zoom change blocks still capture until hardware settles', async () => {
   await s.button('Fotoğrafı çek').emit('click');
   assert.equal((await pending).type, 'image/jpeg');
 });
+
+test('partial printed percent gives actionable camera guidance without inventing a pair', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  const status = s.nodes[0].children[2];
+  const partial = {sequence: 1, width: 1200, height: 675,
+    textPresent: true, detailNeeded: true, freshFrame: true,
+    boxes: [], pairBoxes: [], pairObservations: [], cues: []};
+  s.emitOcr(partial);
+  assert.match(status.textContent, /Yüzde işareti küçük veya eksik okunuyor/);
+  assert.match(status.textContent, /yakınlaş.*odakla/);
+  assert.match(status.textContent, /güvenilir yüzde–elyaf çifti yok/);
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı|80%/);
+  s.advance(2000);
+  s.emitOcr({...partial, sequence: 2, detailNeeded: false});
+  assert.doesNotMatch(status.textContent, /Yüzde işareti küçük veya eksik okunuyor/);
+  s.advance(2000);
+  s.emitOcr({...partial, sequence: 3, textPresent: false, detailNeeded: true});
+  assert.match(status.textContent, /Gri/);
+  assert.doesNotMatch(status.textContent, /Yüzde işareti küçük veya eksik okunuyor/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
