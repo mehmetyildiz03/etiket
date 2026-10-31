@@ -87,4 +87,22 @@ void main() {
     expect(attempts.length, 1);
     expect(attempts.single.disposed, true);
   });
+  test('failed cleanup prevents a second camera from claiming the device', () async {
+    final attempts = <ResolutionPreset>[];
+    await expectLater(
+      openNativeCameraWithPresetFallback<_FakeStream>(
+        cancelled: () => false,
+        create: (preset) {
+          attempts.add(preset);
+          return _FakeStream(preset);
+        },
+        initializeAndStart: (_) async { throw StateError('stream unsupported'); },
+        dispose: (_) async { throw StateError('camera release failed'); },
+      ),
+      throwsStateError,
+    );
+    expect(attempts, [ResolutionPreset.ultraHigh],
+        reason: 'never open a second stream while first may own the camera');
+  });
+
 }
