@@ -52,4 +52,38 @@ void main() {
       rowStride: 1024, pixelStride: 1, bgra: false);
     expect(samples, hasLength(512));
   });
+
+  test('thin printed strokes in camera guide are not falsely called glare', () {
+    // Bright label with narrow dark glyph strokes between 16x16 probe points.
+    // Test actual YUV luminance and iOS BGRA camera byte layouts, not OCR.
+    const width = 96, height = 96;
+    final y = Uint8List(width * height)..fillRange(0, width * height, 245);
+    final bgra = Uint8List(width * height * 4);
+    for (var i = 0; i < width * height; i++) {
+      bgra[i * 4] = 245;
+      bgra[i * 4 + 1] = 245;
+      bgra[i * 4 + 2] = 245;
+      bgra[i * 4 + 3] = 255;
+    }
+    for (var row = 24; row < 72; row++) {
+      for (final column in [22, 26, 30, 34]) {
+        y[row * width + column] = 10;
+        final offset = (row * width + column) * 4;
+        bgra[offset] = 10;
+        bgra[offset + 1] = 10;
+        bgra[offset + 2] = 10;
+      }
+    }
+    final android = sampleNativeCenterLuminance(
+      bytes: y, width: width, height: height,
+      rowStride: width, pixelStride: 1, bgra: false);
+    final ios = sampleNativeCenterLuminance(
+      bytes: bgra, width: width, height: height,
+      rowStride: width * 4, pixelStride: 4, bgra: true);
+    expect(android, hasLength(2304));
+    expect(ios, android);
+    expect(assessLiveLuminance(android!), LiveFrameQuality.usable);
+    expect(assessLiveLuminance(ios!), LiveFrameQuality.usable);
+  });
+
 }
