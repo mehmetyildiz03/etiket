@@ -164,6 +164,7 @@
       let liveScanner = null, lastMetrics = null, scannerGeneration = 0;
       let torchTrack = null, torchEnabled = false, torchBusy = false;
       let focusTrack = null, focusing = false, focusMessage = '';
+      let zoomTrack = null, zoomRange = null, zoomValue = null, zoomBusy = false;
       const stability = root.dokuLiveStability?.create?.() || null;
       let usingSystemPicker = false;
       let layoutInvalidatedAt = -Infinity;
@@ -312,6 +313,9 @@
         torchTrack = null;
         torchEnabled = false;
         focusTrack = null;
+        zoomTrack = null;
+        zoomRange = null;
+        zoomValue = null;
       };
       const close = (value, failure) => {
         if (done) return;
@@ -352,7 +356,7 @@
       // Create a fresh worker after a failed attempt; the stopped worker can
       // never deliver an accepted result or overwrite manual corrections.
       const startLiveScanner = () => {
-        if (done || capturing || focusing || torchBusy || usingSystemPicker || !stream || liveScanner) return;
+        if (done || capturing || focusing || torchBusy || zoomBusy || usingSystemPicker || !stream || liveScanner) return;
         const generation = ++scannerGeneration;
         liveScanner = root.dokuLiveOcr?.create?.(
           observation => {
@@ -401,7 +405,7 @@
           openSystemPicker();
           return;
         }
-        if (capturing || focusing || torchBusy || !stream || !video.videoWidth || !video.videoHeight) return;
+        if (capturing || focusing || torchBusy || zoomBusy || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
         liveScanner?.stop(); liveScanner = null;
         status.textContent = 'Fotoğraf hazırlanıyor…';
@@ -451,7 +455,7 @@
       // confidence. Stopping the track also releases the light.
       const torchButton = button('Kamera ışığını aç', async () => {
         const track = torchTrack;
-        if (!track || torchBusy || focusing || done || capturing || usingSystemPicker ||
+        if (!track || torchBusy || focusing || zoomBusy || done || capturing || usingSystemPicker ||
             track.readyState === 'ended') return;
         torchBusy = true;
         torchButton.disabled = true;
@@ -497,7 +501,7 @@
       // and never claim that a successful constraint proves sharp text.
       const focusButton = button('Yeniden odakla', async () => {
         const track = focusTrack;
-        if (!track || focusing || torchBusy || done || capturing || usingSystemPicker ||
+        if (!track || focusing || torchBusy || zoomBusy || done || capturing || usingSystemPicker ||
             track.readyState === 'ended') return;
         focusing = true;
         focusButton.disabled = true;
@@ -533,6 +537,66 @@
         }
       });
       focusButton.style.display = 'none';
+      // Camera zoom can give tiny printed percentages more source pixels
+      // before the bounded OCR downsample. It is an optional hardware
+      // request, not a recognition-confidence or verification signal.
+      const zoomInButton = button('Yakınlaştır', () => changeZoom(1));
+      const zoomOutButton = button('Uzaklaştır', () => changeZoom(-1));
+      zoomInButton.style.display = zoomOutButton.style.display = 'none';
+      const updateZoomButtons = () => {
+        const usable = !!(zoomTrack && zoomRange && Number.isFinite(zoomValue));
+        zoomInButton.style.display = zoomOutButton.style.display = usable ? '' : 'none';
+        if (!usable) return;
+        zoomInButton.disabled = zoomBusy || zoomValue >= zoomRange.max - .0001;
+        zoomOutButton.disabled = zoomBusy || zoomValue <= zoomRange.min + .0001;
+      };
+      async function changeZoom(direction) {
+        const track = zoomTrack, range = zoomRange;
+        if (!track || !range || zoomBusy || focusing || torchBusy ||
+            capturing || done || usingSystemPicker || track.readyState === 'ended') return;
+        const wanted = zoomValue * (direction > 0 ? 1.5 : 1 / 1.5);
+        const bounded = Math.min(range.max, Math.max(range.min, wanted));
+        const steps = Math.round((bounded - range.min) / range.step);
+        const target = Math.min(range.max, Math.max(range.min,
+          Number((range.min + steps * range.step).toFixed(5))));
+        if (Math.abs(target - zoomValue) < .0001) return;
+        zoomBusy = true;
+        updateZoomButtons();
+        // A change of field-of-view invalidates every previous OCR rectangle
+        // and stability claim, including callbacks already in flight.
+        ++scannerGeneration;
+        liveScanner?.stop(); liveScanner = null;
+        stability?.clear();
+        overlay.replaceChildren();
+        lastMetrics = null;
+        focusMessage = 'Kamera yakınlaştırması ayarlanıyor…';
+        renderStatus();
+        try {
+          const requested = {zoom: target};
+          // applyConstraints can replace an existing torch constraint.
+          if (torchEnabled && torchTrack === track) requested.torch = true;
+          await track.applyConstraints({advanced: [requested]});
+          if (done || usingSystemPicker || zoomTrack !== track) return;
+          const reported = track.getSettings?.()?.zoom;
+          zoomValue = Number.isFinite(reported) &&
+            reported >= range.min && reported <= range.max ? reported : target;
+          focusMessage = 'Yakınlaştırma istendi; yeni OCR sonucunu bekle. ' +
+            'Etiket kenarları kesiliyorsa uzaklaştır.';
+        } catch (_) {
+          if (!done && !usingSystemPicker && zoomTrack === track) {
+            zoomTrack = null; zoomRange = null; zoomValue = null;
+            focusMessage = 'Bu kamerada yakınlaştırma uygulanamadı. ' +
+              'Etikete fiziksel olarak yaklaş veya sistem kamerasını kullan.';
+          }
+        } finally {
+          zoomBusy = false;
+          updateZoomButtons();
+          if (!done && !usingSystemPicker && stream) {
+            startLiveScanner();
+            renderStatus();
+          }
+        }
+      }
       // Never auto-close on focus: native camera can take time to return a
       // file change event. The picker cancel event and İptal close the dialog.
       button('Sistem kamerası (yüksek çözünürlük)', openSystemPicker);
@@ -595,13 +659,25 @@
               focusTrack = track;
               focusButton.style.display = '';
             }
+            const range = capabilities?.zoom;
+            if (range && [range.min, range.max].every(Number.isFinite) &&
+                range.min > 0 && range.max > range.min) {
+              const step = Number.isFinite(range.step) && range.step > 0
+                ? range.step : .1;
+              const reported = track.getSettings?.()?.zoom;
+              zoomTrack = track;
+              zoomRange = {min: range.min, max: range.max, step};
+              zoomValue = Number.isFinite(reported) &&
+                reported >= range.min && reported <= range.max ? reported : range.min;
+              updateZoomButtons();
+            }
           }
         } catch (_) { /* Safari or device does not expose torch capability. */ }
         Promise.resolve(video.play()).catch(() => {});
         startLiveScanner();
         renderStatus();
         interval = root.setInterval(() => {
-          if (done || capturing || focusing || torchBusy) return;
+          if (done || capturing || focusing || torchBusy || zoomBusy) return;
           try {
             lastMetrics = sampleQuality(video, canvas, stability?.view(Date.now()));
             renderStatus();
