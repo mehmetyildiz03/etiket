@@ -207,6 +207,13 @@
         if (geometry === 'smallText') {
           return 'Yazılar kadrajda küçük; etikete yaklaş, sabitle ve odakla.';
         }
+        if (reading && !reading.stale && reading.textPresent &&
+            reading.detailNeeded === true) {
+          // Live OCR noticed a missing or tiny literal percent mark.
+          // Guide the next camera frame; never manufacture a percentage.
+          return 'Yüzde işareti küçük veya eksik okunuyor; biraz yakınlaş, ' +
+            'yazıya dokunarak odakla ve kamerayı sabitle.';
+        }
         return 'Etiketi kadraja al, kamerayı sabit tut.';
       };
       const renderStatus = () => {
