@@ -451,7 +451,7 @@
       // confidence. Stopping the track also releases the light.
       const torchButton = button('Kamera ışığını aç', async () => {
         const track = torchTrack;
-        if (!track || torchBusy || done || capturing || usingSystemPicker ||
+        if (!track || torchBusy || focusing || done || capturing || usingSystemPicker ||
             track.readyState === 'ended') return;
         torchBusy = true;
         torchButton.disabled = true;
@@ -482,7 +482,7 @@
       // and never claim that a successful constraint proves sharp text.
       const focusButton = button('Yeniden odakla', async () => {
         const track = focusTrack;
-        if (!track || focusing || done || capturing || usingSystemPicker ||
+        if (!track || focusing || torchBusy || done || capturing || usingSystemPicker ||
             track.readyState === 'ended') return;
         focusing = true;
         focusButton.disabled = true;
