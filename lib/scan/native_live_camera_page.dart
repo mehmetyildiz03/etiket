@@ -376,7 +376,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   /// Explicit user action: request camera hardware to refocus and meter the
   /// central label area. The device may reject either operation. Do not call
   /// this proof of OCR correctness or let old in-flight OCR survive a refocus.
-  Future<void> _focusCenter() async {
+  Future<void> _focusAt(Offset point) async {
     final camera = _controller;
     if (camera == null || !camera.value.isInitialized || _closed ||
         _capturing || _focusing) { return; }
@@ -392,9 +392,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _lastPairRotation = null;
       _stableFrames = 0;
       _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
-      _advice = 'Merkezdeki etikete odak ve ışık ayarı isteniyor…';
+      _advice = 'Seçilen noktada odak ve ışık ayarı isteniyor…';
     });
     final result = await requestNativeCenterRefocus(
+      point: point,
       setFocusPoint: (point) async {
         // Some platforms cannot change the focus mode; a point request can
         // still work. Neither call captures or uploads camera pixels.
@@ -410,7 +411,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
       _advice = switch (result) {
         NativeCenterRefocusResult.focusAndExposureRequested =>
-          'Odak ve ışık ölçümü istendi. Etiketi sabitle; yeni OCR sonucunu bekle.',
+          'Seçilen noktada odak ve ışık ölçümü istendi. Etiketi sabitle; yeni OCR sonucunu bekle.',
         NativeCenterRefocusResult.focusOnlyRequested =>
           'Odak istendi. Işığı elle ayarla ve etiketi sabitle.',
         NativeCenterRefocusResult.exposureOnlyRequested =>
@@ -521,11 +522,28 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         Expanded(child: Center(child: available
             ? AspectRatio(
                 aspectRatio: 1 / camera.value.aspectRatio,
-                child: Stack(fit: StackFit.expand, children: [
-                  CameraPreview(camera),
-                  if (showBoxes)
-                    NativePairOverlay(normalizedBoxes: _lastPairBoxes!),
-                ]),
+                child: LayoutBuilder(builder: (context, constraints) =>
+                  GestureDetector(
+                    // The camera plugin accepts normalized points relative
+                    // to the displayed preview. Until physical iOS preview
+                    // calibration, taps are Android-only; the accessible
+                    // center-focus button remains available on both.
+                    onTapDown: Platform.isAndroid && !_capturing && !_focusing
+                        ? (details) {
+                            final point = nativePreviewTapPoint(
+                              details.localPosition,
+                              Size(constraints.maxWidth, constraints.maxHeight),
+                            );
+                            if (point != null) unawaited(_focusAt(point));
+                          }
+                        : null,
+                    child: Stack(fit: StackFit.expand, children: [
+                      CameraPreview(camera),
+                      if (showBoxes)
+                        NativePairOverlay(normalizedBoxes: _lastPairBoxes!),
+                    ]),
+                  ),
+                ),
               )
             : const Icon(Icons.camera_alt_outlined, size: 64))),
         Padding(padding: const EdgeInsets.all(16), child: Column(
@@ -543,12 +561,16 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
               const Text('Sarı çerçeveler tahmini OCR satır yeridir; kesin doğruluk değildir.',
                   style: TextStyle(fontSize: 12)),
             Text(_advice),
+            if (Platform.isAndroid)
+              const Text('Yazının bulunduğu yere dokunarak odak ve ışık ölçümü isteyebilirsin.',
+                  style: TextStyle(fontSize: 12)),
             const Text('Yeşil hazır değil: tüm etiket görünürlüğü doğrulanmadı. '
                 'Fotoğraf sonrası gerçek OCR, metin düzeltmesi ve açık onay gerekir.',
                 style: TextStyle(fontSize: 12)),
             const SizedBox(height: 10),
             OutlinedButton.icon(
-              onPressed: available && !_capturing && !_focusing ? _focusCenter : null,
+              onPressed: available && !_capturing && !_focusing
+                  ? () => _focusAt(const Offset(0.5, 0.5)) : null,
               icon: const Icon(Icons.center_focus_strong),
               label: Text(_focusing ? 'Odaklanıyor…' : 'Merkeze odakla'),
             ),
