@@ -1,5 +1,10 @@
 import 'package:camera/camera.dart';
 
+/// The camera plugin may apply the STREAM resolution preset to takePicture().
+/// A fallback preview must not silently become the final OCR still.
+bool nativeStreamRequiresSystemStill(ResolutionPreset preset) =>
+    preset != ResolutionPreset.ultraHigh;
+
 /// Try a lower stream resolution only when the camera cannot initialize or
 /// start streaming at ultraHigh. This is about live camera availability, not
 /// OCR confidence. The full-resolution still is taken separately by the
