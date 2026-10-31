@@ -8,16 +8,25 @@ const source = fs.readFileSync(path.join(__dirname, '../web/doku_live_camera.js'
 const stability = require('../web/doku_live_stability.js');
 
 function setup({permission = true, delayed = false, withOcr = false,
-  torch = false, torchReject = false, still = null,
+  torch = false, torchReject = false, focusModes = [], focusReject = false,
+  focusDelayed = false, still = null,
   noImageCapture = false, withResizeObserver = false,
   stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false,
   previewBlobFailures = 0} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
   const resizeObservers = [];
-  const tracks = [{stopped: false, torchEnabled: false, torchCalls: [],
+  let resolveFocus;
+  const focusPending = new Promise(resolve => { resolveFocus = resolve; });
+  const tracks = [{stopped: false, torchEnabled: false, torchCalls: [], focusCalls: [],
     stop() { this.stopped = true; this.torchEnabled = false; },
-    getCapabilities() { return {torch}; },
+    getCapabilities() { return {torch, focusMode: focusModes}; },
     async applyConstraints(constraints) {
+      if (constraints.advanced?.[0]?.focusMode) {
+        this.focusCalls.push(constraints);
+        if (focusDelayed) await focusPending;
+        if (focusReject) throw new DOMException('unsupported', 'OverconstrainedError');
+        return;
+      }
       this.torchCalls.push(constraints);
       if (torchReject) throw new DOMException('unsupported', 'OverconstrainedError');
       this.torchEnabled = constraints.advanced?.[0]?.torch === true;
@@ -114,7 +123,7 @@ function setup({permission = true, delayed = false, withOcr = false,
     emitRetiredOcr(observation) { assert.ok(ocrCallbacks.length > 1); ocrCallbacks[0](observation); },
     get requested() { return requested; }, get cameraCalls() { return cameraCalls; },
     get timer() { return timer; }, docEvents, pageEvents, resizeObservers,
-    requestResolve, requestReject,
+    requestResolve, requestReject, resolveFocus,
     advance(ms) { clock.now += ms; },
     emitOcr(observation) { assert.equal(typeof ocrResult, 'function'); ocrResult(observation); },
     button(label) { const b = buttons.find(b => b.textContent.startsWith(label));
@@ -786,4 +795,82 @@ test('separated OCR lines use their own pixels for light advice, not dark garmen
   assert.equal('image' in metrics, false);
   assert.equal(s.api.sampleQuality(video, canvas, {...reading, stale: true}).textMetrics,
     null, 'stale OCR coordinates cannot drive light advice');
+});
+
+test('supported browser single-shot refocus clears old OCR and restarts local scanner', async () => {
+  const s = setup({withOcr: true, focusModes: ['continuous', 'single-shot']});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const overlay = s.nodes[0].children[1].children[1];
+  const status = s.nodes[0].children[2];
+  const box = {x0: 50, y0: 70, x1: 250, y1: 120};
+  const observation = sequence => ({
+    sequence, width: 1200, height: 675, textPresent: true,
+    boxes: [box], pairBoxes: [box],
+    cues: [{percent: 80, fiber: 'pamuk'}],
+    pairObservations: [{percent: 80, fiber: 'pamuk', box}]
+  });
+  s.emitOcr(observation(1));
+  assert.equal(overlay.children.length, 1);
+  assert.equal(s.button('Yeniden odakla').style.display, '');
+  await s.button('Yeniden odakla').emit('click');
+  assert.equal(s.tracks[0].focusCalls.length, 1);
+  assert.equal(s.tracks[0].focusCalls[0].advanced[0].focusMode, 'single-shot');
+  assert.equal(s.ocrStops, 1, 'pre-focus OCR worker must stop');
+  assert.equal(s.ocrCreates, 2, 'new OCR worker starts after focus request');
+  assert.equal(overlay.children.length, 0, 'old coordinates must disappear');
+  assert.match(status.textContent, /Yeniden odak istendi/);
+  s.emitRetiredOcr(observation(2));
+  assert.equal(overlay.children.length, 0, 'retired worker cannot revive stale boxes');
+  s.emitOcr(observation(1));
+  assert.equal(overlay.children.length, 1, 'new OCR may provide new yellow candidates');
+  assert.match(status.textContent, /Sarı/);
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+  assert.equal(s.tracks[0].stopped, true);
+});
+
+test('Safari or unsupported browser never requests speculative camera focus', async () => {
+  const s = setup({withOcr: true, focusModes: ['continuous']});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  assert.equal(s.button('Yeniden odakla').style.display, 'none');
+  await s.button('Yeniden odakla').emit('click');
+  assert.equal(s.tracks[0].focusCalls.length, 0);
+  assert.equal(s.ocrStops, 0);
+  assert.equal(s.ocrCreates, 1);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
+
+test('rejected browser refocus safely falls back without stale OCR or lost capture', async () => {
+  const s = setup({withOcr: true, focusModes: ['single-shot'], focusReject: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  await s.button('Yeniden odakla').emit('click');
+  assert.equal(s.button('Yeniden odakla').style.display, 'none');
+  assert.equal(s.ocrCreates, 2, 'OCR resumes after rejected focus request');
+  assert.match(s.nodes[0].children[2].textContent, /yeniden odak uygulanamadı/);
+  assert.equal(s.tracks[0].stopped, false);
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.match(s.nodes[0].children[2].textContent, /Yüksek çözünürlüklü fotoğraf alınamadı/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
+
+test('closing camera during pending refocus cannot restart OCR or revive UI', async () => {
+  const s = setup({withOcr: true, focusModes: ['single-shot'], focusDelayed: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const focus = s.button('Yeniden odakla').emit('click');
+  assert.equal(s.ocrStops, 1);
+  assert.equal(s.ocrCreates, 1);
+  s.api.cancel();
+  assert.equal(await pending, null);
+  s.resolveFocus();
+  await focus;
+  assert.equal(s.ocrCreates, 1, 'no new scanner after camera shutdown');
+  assert.equal(s.nodes.length, 0);
+  assert.equal(s.tracks[0].stopped, true);
 });
