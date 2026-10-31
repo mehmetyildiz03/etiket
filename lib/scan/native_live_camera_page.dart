@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 
 import 'live_frame_quality.dart';
+import 'native_live_timing.dart';
 import 'native_camera_recovery.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
@@ -33,7 +34,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   bool _starting = true, _reading = false, _capturing = false, _closed = false;
   int _generation = 0, _sequence = 0, _stableFrames = 0;
   DateTime _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
-  DateTime _lastResult = DateTime.fromMillisecondsSinceEpoch(0);
+  DateTime _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
   List<String> _pairs = const [];
   String _fingerprint = '';
   Offset? _lastCenter;
@@ -51,7 +52,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     _staleTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted || _closed || _capturing) return;
       if ((_pairs.isNotEmpty || _textPresent) &&
-          DateTime.now().difference(_lastResult).inMilliseconds > 6000) {
+          !nativeLiveHintFresh(_lastResultSample, DateTime.now())) {
         setState(() {
           _pairs = const [];
           _textPresent = false;
@@ -307,15 +308,18 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       // A rotated phone makes old bounding boxes unsafe for framing hints.
       // Discard the entire stale result; the next sampled frame will retry.
       if (_rotationDegrees(camera) != rotationDegrees) return;
+      // OCR results describe the original video sample, not the callback.
+      // Reject expired pixels before the spatial matcher and again after it.
+      if (!nativeLiveHintFresh(started, DateTime.now())) return;
       final result = _extract(recognized, frame, rotationDegrees!);
-      final elapsed = DateTime.now().difference(started);
       if (!mounted || _closed || _capturing || token != _generation ||
-          elapsed.inMilliseconds > 6000 || sequence != _sequence) { return; }
+          !nativeLiveHintFresh(started, DateTime.now()) ||
+          sequence != _sequence) { return; }
       final fingerprint = [...result.pairs]..sort();
       final key = fingerprint.join('|');
       final drift = _lastCenter != null && result.center != null &&
           (_lastCenter! - result.center!).distance > .15;
-      final withinGap = DateTime.now().difference(_lastResult).inMilliseconds <= 5000;
+      final withinGap = nativeLiveSamplesWithinGap(_lastResultSample, started);
       final goodObservation = quality == LiveFrameQuality.usable &&
           result.trackedBoxes != null;
       final stable = goodObservation && key.isNotEmpty &&
@@ -346,7 +350,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         _lastPairBoxes = goodObservation ? result.trackedBoxes : null;
         _lastOcrImageSize = goodObservation ? result.imageSize : null;
         _lastPairRotation = goodObservation ? rotationDegrees : null;
-        _lastResult = DateTime.now();
+        _lastResultSample = started;
       });
     } catch (_) {
       if (mounted && token == _generation && !_closed) {
