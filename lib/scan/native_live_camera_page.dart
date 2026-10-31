@@ -224,7 +224,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   ({List<String> pairs, Offset? center, NativeFramingHint framing,
-      Map<String, Rect>? trackedBoxes, Size? imageSize, bool textNearEdge})
+      Map<String, Rect>? trackedBoxes, Size? imageSize, bool textNearEdge,
+      bool missingPercent})
       _extract(RecognizedText recognized, CameraImage frame,
           int rotationDegrees) {
     final pairs = <String>[];
@@ -233,10 +234,14 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     final spatialBlocks = <List<NativeOcrLine>>[];
     final pairBoxes = <String, Rect>{};
     var duplicatePair = false;
+    var missingPercent = false;
     for (final block in recognized.blocks) {
       final blockLines = <NativeOcrLine>[];
       for (final line in block.lines) {
         blockLines.add(NativeOcrLine(line.text, line.boundingBox));
+        // Advisory only: a bare number near a fiber may be a missed tiny '%'.
+        // Do not manufacture a pair or let this signal authorize green.
+        if (liveMissingPercentNearFiber(line.text)) missingPercent = true;
         if (line.text.trim().isNotEmpty) visibleTextBoxes.add(line.boundingBox);
         final matches = livePairsFromLine(line.text);
         if (matches.isEmpty) continue;
@@ -289,7 +294,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     return (pairs: pairs, center: geometry.center,
         framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown,
         trackedBoxes: trackedBoxes, imageSize: dimensions,
-        textNearEdge: textNearEdge);
+        textNearEdge: textNearEdge, missingPercent: missingPercent);
   }
 
   void _onFrame(CameraImage frame) {
@@ -344,8 +349,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       final drift = _lastCenter != null && result.center != null &&
           (_lastCenter! - result.center!).distance > .15;
       final withinGap = nativeLiveSamplesWithinGap(_lastResultSample, started);
+      // An unresolved bare ratio in the same frame invalidates temporal
+      // readiness, even if other percentage-fiber lines were recognized.
       final goodObservation = quality == LiveFrameQuality.usable &&
-          result.trackedBoxes != null;
+          result.trackedBoxes != null && !result.missingPercent;
       final stable = goodObservation && key.isNotEmpty &&
           key == _fingerprint && !drift && withinGap &&
           _lastPairRotation == rotationDegrees &&
@@ -359,6 +366,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             ? liveQualityAdvice(quality)
             : nextStableFrames >= 2 && result.textNearEdge
                 ? 'Görünen yazı kadrajın kenarında. Biraz uzaklaş ve etiketi ortala.'
+                : result.missingPercent &&
+                    result.framing != NativeFramingHint.moveBack
+                    ? 'Yüzde işareti küçük veya eksik okunuyor. '
+                      'Biraz yakınlaş, yazıya dokunarak odakla ve sabitle.'
                 : switch (result.framing) {
                 NativeFramingHint.moveBack =>
                   'Yüzde–elyaf satırı kenara yakın. Biraz uzaklaş ve etiketi ortala.',
