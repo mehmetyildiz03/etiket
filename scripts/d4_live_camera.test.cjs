@@ -9,19 +9,29 @@ const stability = require('../web/doku_live_stability.js');
 
 function setup({permission = true, delayed = false, withOcr = false,
   torch = false, torchReject = false, torchDelayed = false, focusModes = [], focusReject = false,
-  focusDelayed = false, still = null,
+  focusDelayed = false, zoom = null, zoomReject = false, zoomDelayed = false, still = null,
   noImageCapture = false, withResizeObserver = false,
   stillWidth = 4032, stillHeight = 3024, stillDecodeReject = false,
   previewBlobFailures = 0} = {}) {
   const buttons = [], nodes = [], docEvents = new Map(), pageEvents = new Map();
   const resizeObservers = [];
-  let resolveFocus, resolveTorch;
+  let resolveFocus, resolveTorch, resolveZoom;
   const focusPending = new Promise(resolve => { resolveFocus = resolve; });
   const torchPending = new Promise(resolve => { resolveTorch = resolve; });
-  const tracks = [{stopped: false, torchEnabled: false, torchCalls: [], focusCalls: [],
+  const zoomPending = new Promise(resolve => { resolveZoom = resolve; });
+  const tracks = [{stopped: false, torchEnabled: false, torchCalls: [], focusCalls: [], zoomCalls: [], zoomValue: 1,
     stop() { this.stopped = true; this.torchEnabled = false; },
-    getCapabilities() { return {torch, focusMode: focusModes}; },
+    getCapabilities() { return {torch, focusMode: focusModes, zoom}; },
+    getSettings() { return {zoom: this.zoomValue}; },
     async applyConstraints(constraints) {
+      if (constraints.advanced?.[0]?.zoom !== undefined) {
+        this.zoomCalls.push(constraints);
+        if (zoomDelayed) await zoomPending;
+        if (zoomReject) throw new DOMException('unsupported', 'OverconstrainedError');
+        this.zoomValue = constraints.advanced[0].zoom;
+        if (torch) this.torchEnabled = constraints.advanced[0].torch === true;
+        return;
+      }
       if (constraints.advanced?.[0]?.focusMode) {
         this.focusCalls.push(constraints);
         if (focusDelayed) await focusPending;
@@ -127,7 +137,7 @@ function setup({permission = true, delayed = false, withOcr = false,
     emitRetiredOcr(observation) { assert.ok(ocrCallbacks.length > 1); ocrCallbacks[0](observation); },
     get requested() { return requested; }, get cameraCalls() { return cameraCalls; },
     get timer() { return timer; }, docEvents, pageEvents, resizeObservers,
-    requestResolve, requestReject, resolveFocus, resolveTorch,
+    requestResolve, requestReject, resolveFocus, resolveTorch, resolveZoom,
     advance(ms) { clock.now += ms; },
     emitOcr(observation) { assert.equal(typeof ocrResult, 'function'); ocrResult(observation); },
     button(label) { const b = buttons.find(b => b.textContent.startsWith(label));
@@ -989,4 +999,74 @@ test('pending browser refocus blocks conflicting torch constraints', async () =>
   assert.equal(s.tracks[0].torchCalls.length, 1, 'torch works again after focus');
   s.api.cancel();
   assert.equal(await pending, null);
+});
+
+test('web hardware zoom uses actual camera constraints, retains torch and retires old OCR', async () => {
+  const s = setup({withOcr: true, torch: true, zoom: {min: 1, max: 4, step: .5}});
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(s.button('Yakınlaştır').style.display, '');
+  assert.equal(s.button('Uzaklaştır').disabled, true);
+  await s.button('Kamera ışığını aç').emit('click');
+  const pair = {x0: 40, y0: 50, x1: 200, y1: 90};
+  const observation = {sequence: 1, width: 1200, height: 675, boxes: [pair],
+    pairBoxes: [pair], pairObservations: [{percent: 80, fiber: 'pamuk', box: pair}],
+    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true, freshFrame: true};
+  s.emitOcr(observation);
+  const overlay = s.nodes[0].children[1].children[1];
+  assert.equal(overlay.children.length, 1);
+  const before = s.ocrCreates;
+  await s.button('Yakınlaştır').emit('click');
+  assert.equal(s.tracks[0].zoomCalls.length, 1);
+  assert.equal(s.tracks[0].zoomCalls[0].advanced[0].zoom, 1.5);
+  assert.equal(s.tracks[0].zoomCalls[0].advanced[0].torch, true);
+  assert.equal(s.tracks[0].torchEnabled, true);
+  assert.equal(overlay.children.length, 0, 'old boxes invalidated on zoom');
+  assert.equal(s.ocrCreates, before + 1, 'new scanner for changed camera pixels');
+  s.emitRetiredOcr(observation);
+  assert.equal(overlay.children.length, 0, 'late old-frame OCR is rejected');
+  await s.button('Uzaklaştır').emit('click');
+  assert.equal(s.tracks[0].zoomValue, 1);
+  assert.equal(s.button('Uzaklaştır').disabled, true);
+  s.api.cancel();
+  assert.equal(await pending, null);
+  assert.equal(s.tracks[0].stopped, true);
+});
+
+test('unsupported or rejected hardware zoom retains the system-camera fallback', async () => {
+  const noZoom = setup();
+  const a = noZoom.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(noZoom.button('Yakınlaştır').style.display, 'none');
+  noZoom.api.cancel();
+  await a;
+  const s = setup({zoom: {min: 1, max: 3, step: .5}, zoomReject: true, withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  await s.button('Yakınlaştır').emit('click');
+  assert.equal(s.button('Yakınlaştır').style.display, 'none');
+  assert.equal(s.ocrCreates, 2, 'OCR restarts after failed hardware request');
+  assert.match(s.nodes[0].children[2].textContent, /yakınlaştırma uygulanamadı/i);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
+
+test('zoom change blocks still capture until hardware settles', async () => {
+  const s = setup({zoom: {min: 1, max: 3, step: .5}, zoomDelayed: true,
+    still: new Blob(['real-still'], {type: 'image/jpeg'})});
+  const pending = s.api.open();
+  await Promise.resolve();
+  await Promise.resolve();
+  const zooming = s.button('Yakınlaştır').emit('click');
+  assert.equal(s.button('Yakınlaştır').disabled, true);
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.equal(s.nodes.length, 1, 'capture does not use pre-zoom frame');
+  s.resolveZoom();
+  await zooming;
+  assert.equal(s.button('Yakınlaştır').disabled, false);
+  await s.button('Fotoğrafı çek').emit('click');
+  assert.equal((await pending).type, 'image/jpeg');
 });
