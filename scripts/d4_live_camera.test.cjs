@@ -893,3 +893,20 @@ test('web refocus preserves an explicitly enabled camera light', async () => {
   assert.equal(await pending, null);
   assert.equal(s.tracks[0].torchEnabled, false, 'camera close releases the torch');
 });
+
+test('pending browser refocus blocks conflicting torch constraints', async () => {
+  const s = setup({withOcr: true, torch: true, focusModes: ['single-shot'],
+    focusDelayed: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const focusing = s.button('Yeniden odakla').emit('click');
+  await s.button('Kamera ışığını aç').emit('click');
+  assert.equal(s.tracks[0].torchCalls.length, 0,
+    'a concurrent torch toggle must not overwrite the in-flight focus request');
+  s.resolveFocus();
+  await focusing;
+  await s.button('Kamera ışığını aç').emit('click');
+  assert.equal(s.tracks[0].torchCalls.length, 1, 'torch works again after focus');
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
