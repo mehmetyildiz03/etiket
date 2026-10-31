@@ -10,6 +10,7 @@ import 'live_frame_quality.dart';
 import 'native_live_timing.dart';
 import 'native_center_refocus.dart';
 import 'native_camera_recovery.dart';
+import 'native_camera_preset_fallback.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
@@ -81,17 +82,30 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       if (cameras.isEmpty) { throw StateError('no camera'); }
       final rear = cameras.where((c) => c.lensDirection == CameraLensDirection.back);
       final description = rear.isNotEmpty ? rear.first : cameras.first;
-      controller = CameraController(
-        description, ResolutionPreset.ultraHigh, enableAudio: false,
-        imageFormatGroup: Platform.isAndroid
-            ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+      // Some phones can take an ultra-high-resolution still but cannot
+      // deliver a continuous ultraHigh video stream. Retry the STREAM at high
+      // after releasing the failed controller; still capture remains separate
+      // and uses the camera plugin's actual photo pixels, never OCR preview.
+      controller = await openNativeCameraWithPresetFallback<CameraController>(
+        cancelled: () => !mounted || token != _generation || _closed,
+        create: (preset) => CameraController(
+          description, preset, enableAudio: false,
+          imageFormatGroup: Platform.isAndroid
+              ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888,
+        ),
+        initializeAndStart: (attempt) async {
+          await attempt.initialize();
+          if (!mounted || token != _generation || _closed) {
+            throw StateError('camera start cancelled');
+          }
+          await attempt.startImageStream(_onFrame);
+        },
+        dispose: (attempt) => attempt.dispose(),
       );
-      await controller.initialize();
       if (!mounted || token != _generation || _closed) { return; }
       recognizer = TextRecognizer(script: TextRecognitionScript.latin);
       _controller = controller;
       _recognizer = recognizer;
-      await controller.startImageStream(_onFrame);
       if (mounted && token == _generation) {
         setState(() { _starting = false; _error = null; });
       }
