@@ -401,7 +401,7 @@
           openSystemPicker();
           return;
         }
-        if (capturing || focusing || !stream || !video.videoWidth || !video.videoHeight) return;
+        if (capturing || focusing || torchBusy || !stream || !video.videoWidth || !video.videoHeight) return;
         capturing = true;
         liveScanner?.stop(); liveScanner = null;
         status.textContent = 'Fotoğraf hazırlanıyor…';
