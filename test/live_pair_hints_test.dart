@@ -40,6 +40,25 @@ void main() {
       expect(livePairsFromLine(text), isEmpty, reason: text);
     }
   });
+  test('native camera flags only plausible missing printed percent for focus', () {
+    for (final line in [
+      '80 PAMUK', 'KETEN 20', '100 POLYESTER',
+      '80% PAMUK 20 KETEN', 'COTTON 70 LINEN 30%',
+    ]) {
+      expect(liveMissingPercentNearFiber(line), true, reason: line);
+    }
+    for (final line in [
+      '80% PAMUK', '%80 PAMUK', 'KETEN 20%', 'KETEN 20 %',
+      'KETEN %20', '0 PAMUK', 'PAMUK 0', '120 KETEN',
+      'KETEN 120', '80% PAMUK 20% KETEN', 'PAMUK',
+      '30% wash only', 'PAMUKLU 80', '80 PAMUKLU',
+    ]) {
+      expect(liveMissingPercentNearFiber(line), false, reason: line);
+    }
+    // The advisory must never create a literal candidate or accepted value.
+    expect(livePairsFromLine('80 PAMUK 20 KETEN'), isEmpty);
+  });
+
   test('repeated candidates are deduplicated and never imply approval', () {
     expect(livePairsFromLine('50% PAMUK 50% PAMUK'), ['50% pamuk']);
   });
