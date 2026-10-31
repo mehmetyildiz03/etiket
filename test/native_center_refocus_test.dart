@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:etiket/scan/native_center_refocus.dart';
 
@@ -65,7 +67,7 @@ void main() {
         isNull);
     expect(nativePreviewTapPoint(const Offset(20, 30), const Size(0, 100)),
         isNull);
-    expect(nativePreviewTapPoint(Offset(double.nan, 30),
+    expect(nativePreviewTapPoint(const Offset(double.nan, 30),
         const Size(200, 100)), isNull);
   });
 
