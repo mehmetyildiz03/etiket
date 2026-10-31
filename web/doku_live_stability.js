@@ -85,13 +85,24 @@
     function observe(next, now) {
       if (!next || !Number.isSafeInteger(next.sequence) ||
           !Number.isFinite(now) || next.sequence <= lastSequence) return view(now);
-      if (next.durationMs !== undefined &&
-          (!Number.isFinite(next.durationMs) || next.durationMs < 0 ||
-           next.durationMs > MAX_OCR_LATENCY_MS)) {
-        clear(); // Never keep stale candidates or their boxes on screen.
+      // The OCR result describes the video pixels sampled BEFORE the worker
+      // finished, not the camera view at callback time. Age hints from their
+      // capture time so a 5.9s OCR cannot stay on-screen for another 6s.
+      const duration = next.durationMs === undefined ? 0 : next.durationMs;
+      if (!Number.isFinite(duration) || duration < 0 ||
+          duration > MAX_OCR_LATENCY_MS || duration >= STALE_MS) {
+        clear(); // Never show a too-old frame or keep its overlay boxes.
         return view(now);
       }
-      if (now < lastTime || now - lastTime > MAX_GAP_MS) {
+      const sampledAt = now - duration;
+      if (!Number.isFinite(sampledAt)) {
+        clear();
+        return view(now);
+      }
+      // A later callback may describe an EARLIER frame. Do not let it replace
+      // newer evidence or increase temporal stability.
+      if (sampledAt < lastTime) return view(now);
+      if (sampledAt - lastTime > MAX_GAP_MS) {
         fingerprint = ''; center = null; pairGeometry = null; stableFrames = 0;
       }
       const nextAspect = Number.isFinite(next.width) && next.width > 0 &&
@@ -157,12 +168,12 @@
         (fingerprint && nextFingerprint === fingerprint && pairGeometry &&
           !samePairGeometry));
       if (nextFingerprint && nextFingerprint === fingerprint && !moved &&
-          samePairGeometry && now - lastTime <= MAX_GAP_MS) stableFrames++;
+          samePairGeometry && sampledAt - lastTime <= MAX_GAP_MS) stableFrames++;
       else stableFrames = nextFingerprint ? 1 : 0;
       fingerprint = nextFingerprint;
       center = bounds;
       pairGeometry = completePairs ? currentGeometry : null;
-      lastTime = now;
+      lastTime = sampledAt;
       observation = {cues, boxes, pairBoxes, width: next.width, height: next.height,
         textPresent: next.textPresent === true || cues.length > 0,
         freshFrame: independentFrame};
