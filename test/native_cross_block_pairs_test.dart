@@ -183,4 +183,16 @@ void main() {
     ]), isEmpty);
   });
 
+
+  test('incomplete columns do not hide an independent single-line OCR pair', () {
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [ratio],
+      [fiber],
+      [
+        const NativeOcrLine('30%', Rect.fromLTWH(100, 700, 80, 40)),
+        const NativeOcrLine('10%', Rect.fromLTWH(100, 810, 80, 40)),
+      ],
+    ]).map((p) => p.value), ['80% pamuk']);
+  });
+
 }
