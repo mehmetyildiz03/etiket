@@ -30,10 +30,11 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
       b.right <= width && b.bottom <= height;
 
   final entries = <({int block, NativeOcrLine line, bool eligible})>[];
+  var scannedLines = 0;
   for (var block = 0; block < blocks.length; block++) {
     final lines = blocks[block];
     for (final line in lines) {
-      if (entries.length > 256) return const [];
+      if (++scannedLines > 256) return const [];
       if (!valid(line.box)) {
         // Unknown geometry of a possible competing composition token cannot
         // be silently ignored when pairing two other blocks.
