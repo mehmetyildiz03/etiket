@@ -767,7 +767,7 @@ test('live quality uses observed OCR text pixels instead of dark surroundings', 
     }
   };
   const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
-  const reading = {stale: false, width: 1200, height: 675,
+  const reading = {stale: false, sampledAt: 1000, width: 1200, height: 675,
     boxes: [{x0: 450, y0: 260, x1: 750, y1: 410}],
     pairBoxes: [{x0: 450, y0: 260, x1: 750, y1: 410}]};
   const measured = s.api.sampleQuality(video, canvas, reading);
@@ -778,6 +778,10 @@ test('live quality uses observed OCR text pixels instead of dark surroundings', 
   assert.ok(measured.textMetrics.sampleWidth >= 16);
   assert.equal('image' in measured, false);
   assert.equal('rawText' in measured, false);
+  s.advance(1300);
+  assert.equal(s.api.sampleQuality(video, canvas, reading).textMetrics, null,
+    'old OCR coordinates cannot measure unrelated current video pixels');
+  assert.deepEqual(Array.from(s.api.sampleQuality(video, canvas, reading).textLineHints), []);
   assert.equal(s.api.sampleQuality(video, canvas, {...reading, stale: true}).textMetrics,
     null, 'stale OCR geometry cannot drive image-quality advice');
   assert.equal(s.api.sampleQuality(video, canvas, {...reading,
@@ -874,7 +878,7 @@ test('separated OCR lines use their own pixels for light advice, not dark garmen
   const line1 = {x0: 150, y0: 263, x1: 300, y1: 413};
   const line2 = {x0: 900, y0: 263, x1: 1050, y1: 413};
   const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
-  const reading = {stale: false, width: 1200, height: 675,
+  const reading = {stale: false, sampledAt: 1000, width: 1200, height: 675,
     boxes: [line1, line2], pairBoxes: [line1, line2]};
   const metrics = s.api.sampleQuality(video, canvas, reading);
   assert.ok(metrics.meanLuminance < 150, 'garment makes full-frame mean misleading');
@@ -1094,4 +1098,49 @@ test('partial printed percent gives actionable camera guidance without inventing
   assert.doesNotMatch(status.textContent, /Yüzde işareti küçük veya eksik okunuyor/);
   s.api.cancel();
   assert.equal(await pending, null);
+});
+
+
+test('mixed-exposure OCR lines report both shadow and glare instead of a misleading median', () => {
+  const s = setup();
+  s.context.dokuCaptureGuidance.evaluate =
+    require('../web/doku_capture_guidance.js').evaluate;
+  const canvas = {width: 0, height: 0, getContext() {
+    return {drawImage() {}, getImageData(_x, _y, w, h) {
+      const data = new Uint8ClampedArray(w * h * 4);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        const bright = x >= 18 && x <= 62 && y >= 20 && y <= 69;
+        const dark = x >= 98 && x <= 142 && y >= 20 && y <= 69;
+        const value = bright ? 248 : dark ? 8 : 120;
+        const p = (y * w + x) * 4;
+        data[p] = data[p + 1] = data[p + 2] = value;
+        data[p + 3] = 255;
+      }
+      return {data};
+    }};
+  }};
+  const line1 = {x0: 180, y0: 200, x1: 420, y1: 470};
+  const line2 = {x0: 780, y0: 200, x1: 1020, y1: 470};
+  const reading = {stale: false, sampledAt: 1000, width: 1200, height: 675,
+    boxes: [line1, line2], pairBoxes: [line1, line2]};
+  const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
+  const metrics = s.api.sampleQuality(video, canvas, reading);
+  assert.deepEqual(Array.from(metrics.textLineHints).sort(), ['veryBright', 'veryDark']);
+  assert.match(s.api.lineExposureAdvice(metrics.textLineHints), /gölge hem parlama/);
+  assert.equal('rawText' in metrics, false);
+  assert.equal('image' in metrics, false);
+  s.advance(1300);
+  assert.equal(s.api.sampleQuality(video, canvas, reading).textMetrics, null);
+  assert.deepEqual(Array.from(s.api.sampleQuality(video, canvas, reading).textLineHints), []);
+});
+
+test('exposure hints never imply OCR approval or a percentage', () => {
+  const s = setup();
+  assert.match(s.api.lineExposureAdvice(['veryDark']), /karanlık/);
+  assert.match(s.api.lineExposureAdvice(['veryBright']), /Parlayan/);
+  assert.match(s.api.lineExposureAdvice(['lowDetail']), /odakla/);
+  assert.equal(s.api.lineExposureAdvice([]), null);
+  for (const hints of [['veryDark'], ['veryBright'], ['veryDark', 'veryBright']]) {
+    assert.doesNotMatch(s.api.lineExposureAdvice(hints), /Yeşil|onaylandı|%|pamuk/);
+  }
 });
