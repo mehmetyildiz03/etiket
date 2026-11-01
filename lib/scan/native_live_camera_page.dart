@@ -746,20 +746,24 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                 label: const Text('Yakınlaştır'),
               )),
             ]),
-            OutlinedButton.icon(
-              onPressed: available && !_capturing && !_focusing && !_zooming && !_lighting
-                  ? () => _focusAt(const Offset(0.5, 0.5)) : null,
-              icon: const Icon(Icons.center_focus_strong),
-              label: Text(_focusing ? 'Odaklanıyor…' : 'Merkeze odakla'),
-            ),
-            OutlinedButton.icon(
-              onPressed: available && !_capturing && !_focusing &&
-                      !_zooming && !_lighting
-                  ? _toggleTorch : null,
-              icon: Icon(_torchOn ? Icons.flash_off : Icons.flash_on),
-              label: Text(_lighting ? 'Işık ayarlanıyor…'
-                  : _torchOn ? 'Işığı kapat' : 'Işığı aç'),
-            ),
+            Row(children: [
+              Expanded(child: OutlinedButton.icon(
+                onPressed: available && !_capturing && !_focusing &&
+                        !_zooming && !_lighting
+                    ? () => _focusAt(const Offset(0.5, 0.5)) : null,
+                icon: const Icon(Icons.center_focus_strong),
+                label: Text(_focusing ? 'Odaklanıyor…' : 'Odakla'),
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: OutlinedButton.icon(
+                onPressed: available && !_capturing && !_focusing &&
+                        !_zooming && !_lighting
+                    ? _toggleTorch : null,
+                icon: Icon(_torchOn ? Icons.flash_off : Icons.flash_on),
+                label: Text(_lighting ? 'Işık ayarlanıyor…'
+                    : _torchOn ? 'Işığı kapat' : 'Işığı aç'),
+              )),
+            ]),
             FilledButton.icon(
               onPressed: available && !_capturing && !_focusing && !_zooming && !_lighting
                   ? _usingHighStream
