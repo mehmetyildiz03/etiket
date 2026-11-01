@@ -8,6 +8,7 @@ import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart
 
 import 'live_frame_quality.dart';
 import 'native_live_timing.dart';
+import 'native_live_sampling.dart';
 import 'native_center_refocus.dart';
 import 'native_camera_recovery.dart';
 import 'native_camera_preset_fallback.dart';
@@ -46,6 +47,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   bool _torchOn = false;
   int _generation = 0, _sequence = 0, _stableFrames = 0;
   DateTime _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
+  Duration? _lastOcrDuration;
   DateTime _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
   List<String> _pairs = const [];
   String _fingerprint = '';
@@ -120,6 +122,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _controller = controller;
       _recognizer = recognizer;
       _zoomLevel = 1.0;
+      _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _lastOcrDuration = null;
       _torchOn = false;
       _lighting = false;
       // A high-resolution STREAM preset may also reduce takePicture() pixels.
@@ -334,7 +338,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         _controller == null ||
         _recognizer == null) { return; }
     final now = DateTime.now();
-    if (now.difference(_lastSample).inMilliseconds < 1800) { return; }
+    if (!nativeLiveSampleDue(
+        previousSample: _lastSample, now: now,
+        previousOcrDuration: _lastOcrDuration)) { return; }
     _lastSample = now;
     _reading = true;
     final token = _generation, sequence = ++_sequence;
@@ -460,6 +466,11 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         });
       }
     } finally {
+      // Store only the local processing duration, never frame or OCR data.
+      // The existing _reading guard ensures a single in-flight OCR request.
+      if (token == _generation && !_closed) {
+        _lastOcrDuration = DateTime.now().difference(started);
+      }
       _reading = false;
     }
   }
@@ -483,6 +494,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _lastPairRotation = null;
       _stableFrames = 0;
       _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _lastOcrDuration = null;
       _advice = 'Seçilen noktada odak ve ışık ayarı isteniyor…';
     });
     final result = await requestNativeCenterRefocus(
@@ -533,6 +545,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _lastPairRotation = null;
       _stableFrames = 0;
       _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _lastOcrDuration = null;
       _advice = 'Kamera yakınlaştırması ayarlanıyor…';
     });
     final outcome = await changeNativeCameraZoom(
@@ -579,6 +592,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _lastPairRotation = null;
       _stableFrames = 0;
       _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _lastOcrDuration = null;
       _advice = 'Kamera ışığı ayarlanıyor…';
     });
     final outcome = await changeNativeCameraTorch(
@@ -644,6 +658,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     _lighting = false;
     _torchOn = false;
     _zoomLevel = 1.0;
+    _lastOcrDuration = null;
     _pairs = const [];
     _textPresent = false;
     _fingerprint = '';
@@ -748,6 +763,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                 key: const ValueKey('native-live-pairs')),
             if (_stableFrames >= 2)
               Text('$_stableFrames ayrı karede benzer adaylar görüldü; doğrulanmadı.'),
+            if (_lastOcrDuration != null)
+              Text('Son yerel OCR süresi: ${_lastOcrDuration!.inMilliseconds} ms',
+                  style: const TextStyle(fontSize: 12)),
             if (showBoxes)
               const Text('Sarı çerçeveler tahmini OCR satır yeridir; kesin doğruluk değildir.',
                   style: TextStyle(fontSize: 12)),
