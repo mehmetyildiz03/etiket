@@ -83,7 +83,7 @@
     if (!Number.isFinite(width) || !Number.isFinite(height) ||
         width <= 0 || height <= 0 || width * height > 48000000 ||
         lines.length < 2 || lines.length > 256) return [];
-    const ratios = [], names = [], ignored = new Set();
+    const ratios = [], names = [], digits = [], marks = [], ignored = new Set();
     const isolatedPercent = /^(?:%\s*(100|[1-9]?[0-9])|(100|[1-9]?[0-9])\s*%)$/u;
     const isolatedName = new RegExp('^(?:' + fibers + ')$', 'iu');
     const possibleFiber = new RegExp(
@@ -103,15 +103,48 @@
       const match = isolatedPercent.exec(value);
       if (match) {
         const percent = Number(match[1] || match[2]);
-        if (percent > 0 && percent <= 100) ratios.push({i, percent});
+        if (percent > 0 && percent <= 100)
+          ratios.push({i, percent, box, members: [i]});
       } else if (isolatedName.test(value)) {
-        names.push({i, fiber: value.toLocaleLowerCase('tr')});
+        names.push({i, fiber: value.toLocaleLowerCase('tr'), box});
+      } else if (/^(?:100|[1-9]?[0-9])$/.test(value)) {
+        digits.push({i, percent: Number(value), box});
+      } else if (value === '%') {
+        marks.push({i, box});
       }
+    }
+    // Tesseract can isolate the ACTUALLY PRINTED percent glyph from "80".
+    // Recover only a tightly adjacent, same-row digit + '%' with unique
+    // ownership. A bare number alone NEVER becomes a percentage.
+    function markAdjacent(digit, mark) {
+      const a = digit.box, b = mark.box;
+      const ah = a.y1 - a.y0, bh = b.y1 - b.y0;
+      const overlap = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      const horizontalGap = Math.max(a.x0, b.x0) - Math.min(a.x1, b.x1);
+      return overlap >= .6 * Math.min(ah, bh) &&
+        Math.abs((a.y0 + a.y1 - b.y0 - b.y1) / 2) <= .4 * Math.max(ah, bh) &&
+        horizontalGap >= -.15 * Math.min(a.x1 - a.x0, b.x1 - b.x0) &&
+        horizontalGap <= Math.min(width * .015, Math.max(4, .55 * Math.max(ah, bh)));
+    }
+    for (const digit of digits) {
+      const possible = marks.filter(mark => markAdjacent(digit, mark));
+      if (possible.length > 1) return []; // One number, two glyphs.
+      if (possible.length !== 1) continue;
+      const mark = possible[0];
+      if (digits.filter(other => markAdjacent(other, mark)).length !== 1)
+        return []; // One glyph, competing numbers.
+      ratios.push({i: -1, percent: digit.percent,
+        box: {x0: Math.min(digit.box.x0, mark.box.x0),
+          y0: Math.min(digit.box.y0, mark.box.y0),
+          x1: Math.max(digit.box.x1, mark.box.x1),
+          y1: Math.max(digit.box.y1, mark.box.y1)},
+        members: [digit.i, mark.i]});
     }
     if (!ratios.length || !names.length || ratios.length > 8 ||
         names.length > 8) return [];
-    function adjacent(ai, bi) {
-      const a = lines[ai].box, b = lines[bi].box;
+    function adjacent(ratio, name) {
+      const a = ratio.box, b = name.box;
+      const consumed = new Set([...ratio.members, name.i]);
       const left = a.x0 <= b.x0 ? a : b;
       const right = left === a ? b : a;
       if (left.x1 >= right.x0) return false;
@@ -125,7 +158,7 @@
       }
       // Intervening or overlapping OCR tokens make the association ambiguous.
       for (let i = 0; i < lines.length; i++) {
-        if (i === ai || i === bi || ignored.has(i)) continue;
+        if (consumed.has(i) || ignored.has(i)) continue;
         const other = lines[i].box;
         const intersects = (p, q) => p.x0 < q.x1 && p.x1 > q.x0 &&
           p.y0 < q.y1 && p.y1 > q.y0;
@@ -138,14 +171,14 @@
     }
     const found = [], keys = new Set();
     for (const ratio of ratios) {
-      const matches = names.filter(name => adjacent(ratio.i, name.i));
+      const matches = names.filter(name => adjacent(ratio, name));
       if (matches.length !== 1) continue;
       const name = matches[0];
-      if (ratios.filter(other => adjacent(other.i, name.i)).length !== 1) continue;
+      if (ratios.filter(other => adjacent(other, name)).length !== 1) continue;
       const key = ratio.percent + ':' + name.fiber;
       if (keys.has(key)) return []; // Repeated values cannot be tracked uniquely.
       keys.add(key);
-      const a = lines[ratio.i].box, b = lines[name.i].box;
+      const a = ratio.box, b = name.box;
       found.push({percent: ratio.percent, fiber: name.fiber,
         box: {x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0),
           x1: Math.max(a.x1, b.x1), y1: Math.max(a.y1, b.y1)}});
