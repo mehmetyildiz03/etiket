@@ -17,6 +17,7 @@ import 'native_frame_luminance.dart';
 import 'native_pair_pixel_quality.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
+import 'native_cross_block_pairs.dart';
 import 'native_split_missing_percent.dart';
 import 'native_pair_geometry.dart';
 import 'native_visible_text_edges.dart';
@@ -294,6 +295,19 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             if (pairs.length < 8) pairs.add(candidate.value);
             boxes.add(candidate.box);
           }
+        }
+      }
+      // ML Kit may split an explicitly printed '80%' and 'PAMUK' into
+      // separate one-line blocks. Accept only strict, globally unambiguous
+      // same-row geometry as an unverified yellow preview hint.
+      for (final candidate in nativeCrossBlockPairs(
+          imageSize: dimensions, blocks: spatialBlocks)) {
+        if (pairBoxes.containsKey(candidate.value)) {
+          duplicatePair = true;
+        } else {
+          pairBoxes[candidate.value] = candidate.box;
+          if (pairs.length < 8) pairs.add(candidate.value);
+          boxes.add(candidate.box);
         }
       }
     }
