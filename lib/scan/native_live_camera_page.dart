@@ -14,6 +14,7 @@ import 'native_camera_preset_fallback.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
+import 'native_split_missing_percent.dart';
 import 'native_pair_geometry.dart';
 import 'native_visible_text_edges.dart';
 import 'native_pair_overlay.dart';
@@ -268,6 +269,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     // iOS OCR-space orientation still awaits physical device calibration.
     if (Platform.isAndroid && dimensions != null) {
       for (final blockLines in spatialBlocks) {
+        // ML Kit can split a tiny printed '%' away from a number and fiber.
+        // This is a focus warning only; never add an inferred pair.
+        if (nativeSplitMissingPercentHint(
+            imageSize: dimensions, lines: blockLines)) {
+          missingPercent = true;
+        }
         for (final candidate in nativeSpatialPairs(
           imageSize: dimensions, lines: blockLines)) {
           if (pairBoxes.containsKey(candidate.value)) {
