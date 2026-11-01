@@ -100,4 +100,99 @@ void main() {
       [ratio], [fiber],
     ]), isEmpty);
   });
+
+  test('ML Kit vertical percentage and fiber columns recover both printed rows', () {
+    final found = nativeCrossBlockPairs(imageSize: size, blocks: [
+      [
+        ratio,
+        const NativeOcrLine('20%', Rect.fromLTWH(100, 610, 80, 40)),
+      ],
+      [
+        fiber,
+        const NativeOcrLine('POLYESTER', Rect.fromLTWH(210, 612, 200, 40)),
+      ],
+    ]);
+    expect(found.map((p) => p.value), ['80% pamuk', '20% polyester']);
+    expect(found.map((p) => p.box), [
+      const Rect.fromLTRB(100, 500, 370, 542),
+      const Rect.fromLTRB(100, 610, 410, 652),
+    ]);
+  });
+
+  test('a column with missing or extra OCR tokens cannot silently pair rows', () {
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [
+        ratio,
+        const NativeOcrLine('20%', Rect.fromLTWH(100, 610, 80, 40)),
+      ],
+      [fiber],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [ratio],
+      [
+        fiber,
+        const NativeOcrLine('POLYESTER', Rect.fromLTWH(210, 612, 200, 40)),
+      ],
+    ]), isEmpty);
+  });
+
+  test('mixed, overlapping or misaligned OCR blocks are not composition columns', () {
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [
+        ratio,
+        const NativeOcrLine('WASH', Rect.fromLTWH(100, 610, 80, 40)),
+      ],
+      [
+        fiber,
+        const NativeOcrLine('POLYESTER', Rect.fromLTWH(210, 612, 200, 40)),
+      ],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [
+        ratio,
+        const NativeOcrLine('20%', Rect.fromLTWH(100, 520, 80, 40)),
+      ],
+      [
+        fiber,
+        const NativeOcrLine('POLYESTER', Rect.fromLTWH(210, 612, 200, 40)),
+      ],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [
+        ratio,
+        const NativeOcrLine('20%', Rect.fromLTWH(145, 610, 80, 40)),
+      ],
+      [
+        fiber,
+        const NativeOcrLine('POLYESTER', Rect.fromLTWH(210, 612, 200, 40)),
+      ],
+    ]), isEmpty);
+  });
+
+  test('intervening section text blocks invalidate multi-line column matching', () {
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [
+        ratio,
+        const NativeOcrLine('20%', Rect.fromLTWH(100, 610, 80, 40)),
+      ],
+      [
+        fiber,
+        const NativeOcrLine('POLYESTER', Rect.fromLTWH(210, 612, 200, 40)),
+      ],
+      [const NativeOcrLine('ASTAR', Rect.fromLTWH(181, 610, 28, 40))],
+    ]), isEmpty);
+  });
+
+
+  test('incomplete columns do not hide an independent single-line OCR pair', () {
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [ratio],
+      [fiber],
+      [
+        const NativeOcrLine('30%', Rect.fromLTWH(100, 700, 80, 40)),
+        const NativeOcrLine('10%', Rect.fromLTWH(100, 810, 80, 40)),
+      ],
+    ]).map((p) => p.value), ['80% pamuk']);
+  });
+
 }

@@ -29,10 +29,47 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
       b.left >= 0 && b.top >= 0 &&
       b.right <= width && b.bottom <= height;
 
+  // ML Kit also groups vertical percentage and fiber columns into separate
+  // MULTI-line blocks. Recover their printed rows only if each block is a
+  // homogeneous, vertically separated column of isolated literal tokens.
+  // Mixed text, overlapping rows and drifting column origins are ambiguous.
+  bool isolatedColumn(List<NativeOcrLine> lines) {
+    if (lines.length < 2 || lines.length > 8) return false;
+    final allRatios =
+        lines.every((line) => liveIsolatedPercent(line.text) != null);
+    final allFibers =
+        lines.every((line) => liveIsolatedFiber(line.text) != null);
+    if (!allRatios && !allFibers) return false;
+    final ordered = [...lines]
+      ..sort((a, b) => a.box.top.compareTo(b.box.top));
+    final left = ordered.first.box.left;
+    for (var i = 0; i < ordered.length; i++) {
+      final box = ordered[i].box;
+      if (!valid(box) || (box.left - left).abs() > width * .025 ||
+          (i > 0 && box.top < ordered[i - 1].box.bottom)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Keep the pre-existing one-line recovery when a separate multi-line
+  // column is incomplete. Otherwise adding column support could hide a
+  // previously visible, independently unambiguous single-line pair.
+  List<NativeSpatialPair> singleLineFallback() {
+    final singleBlocks = blocks.where((block) => block.length == 1).toList();
+    if (singleBlocks.length < 2) return const [];
+    return nativeCrossBlockPairs(
+        imageSize: imageSize, blocks: singleBlocks);
+  }
+
+  var hasMultiLineColumn = false;
   final entries = <({int block, NativeOcrLine line, bool eligible})>[];
   var scannedLines = 0;
   for (var block = 0; block < blocks.length; block++) {
     final lines = blocks[block];
+    final eligible = lines.length == 1 || isolatedColumn(lines);
+    if (lines.length > 1 && eligible) hasMultiLineColumn = true;
     for (final line in lines) {
       if (++scannedLines > 256) return const [];
       if (!valid(line.box)) {
@@ -41,7 +78,7 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
         if (liveHasPossibleCompositionToken(line.text)) return const [];
         continue;
       }
-      entries.add((block: block, line: line, eligible: lines.length == 1));
+      entries.add((block: block, line: line, eligible: eligible));
     }
   }
 
@@ -55,9 +92,12 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     if (ratio != null) ratios.add((i, ratio));
     if (fiber != null) fibers.add((i, fiber));
   }
-  if (ratios.isEmpty || fibers.isEmpty ||
-      ratios.length > 8 || fibers.length > 8) {
-    return const [];
+  if (ratios.isEmpty || fibers.isEmpty) return const [];
+  if (ratios.length > 8 || fibers.length > 8) {
+    return hasMultiLineColumn ? singleLineFallback() : const [];
+  }
+  if (hasMultiLineColumn && ratios.length != fibers.length) {
+    return singleLineFallback();
   }
 
   bool adjacent(int ratioIndex, int fiberIndex) {
@@ -108,6 +148,11 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     if (!seen.add(value)) return const []; // Duplicate composition row.
     found.add(NativeSpatialPair(value,
         entries[ratioIndex].line.box.expandToInclude(entries[fiberIndex].line.box)));
+  }
+  // For column layouts, a missing/extra row must not be silently paired
+  // with another section. Keep partial columns yellow without inventing data.
+  if (hasMultiLineColumn && found.length != ratios.length) {
+    return singleLineFallback();
   }
   return List.unmodifiable(found);
 }
