@@ -671,3 +671,58 @@ test('tiny matched text requests bounded detail without green or auto-approval',
     assert.equal('rawText' in reading, false);
   }
 });
+
+test('within-block spatial match is rejected when another block has a competing fiber', () => {
+  const s = setup();
+  const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
+  const pamuk = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
+  const keten = line('KETEN', {x0: 186, y0: 302, x1: 301, y1: 337});
+  const data = {blocks: [
+    {paragraphs: [{lines: [ratio, pamuk]}]},
+    {paragraphs: [{lines: [keten]}]}
+  ]};
+  const out = s.api.extract(data, 1200, 675, 1, 100);
+  assert.deepEqual(Array.from(out.cues), [],
+    'a competing fiber in a different OCR block invalidates the earlier pair');
+  assert.equal(out.pairObservations.length, 0);
+  assert.equal(out.pairBoxes.length, 0);
+  assert.equal(out.textPresent, true);
+  assert.equal('verified' in out, false);
+});
+
+test('within-block spatial match is rejected when another block has a competing ratio', () => {
+  const s = setup();
+  const first = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
+  const second = line('20%', {x0: 101, y0: 300, x1: 166, y1: 335});
+  const pamuk = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
+  const out = s.api.extract({blocks: [
+    {paragraphs: [{lines: [first, pamuk]}]},
+    {paragraphs: [{lines: [second]}]}
+  ]}, 1200, 675, 2, 100);
+  assert.equal(out.cues.length, 0, 'one fiber cannot own two plausible percentages');
+  assert.equal(out.pairObservations.length, 0);
+  assert.equal(out.pairBoxes.length, 0);
+});
+
+test('globally unambiguous mixed-block pairs still retain real OCR geometry', () => {
+  const s = setup();
+  const data = {blocks: [
+    {paragraphs: [{lines: [
+      line('80%', {x0: 100, y0: 300, x1: 165, y1: 335}),
+      line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337})
+    ]}]},
+    {paragraphs: [{lines: [
+      line('20%', {x0: 100, y0: 400, x1: 165, y1: 435})
+    ]}]},
+    {paragraphs: [{lines: [
+      line('KETEN', {x0: 185, y0: 402, x1: 300, y1: 437})
+    ]}]}
+  ]};
+  const out = s.api.extract(data, 1200, 675, 3, 100);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
+    [[100, 300, 300, 337], [100, 400, 300, 437]]);
+  assert.equal(out.pairObservations.length, 2);
+  assert.equal('acceptedText' in out, false);
+});
