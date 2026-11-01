@@ -165,7 +165,7 @@ void main() {
   test('malformed percent glyph geometry and unprinted signs fail closed', () {
     const number = NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40));
     const glyph = NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20));
-    for (final invalid in ['80', '0', '120', '80O', '80 %']) {
+    for (final invalid in ['00', '0', '120', '80O', '80 %']) {
       expect(nativeSpatialPairs(imageSize: size, lines: [
         NativeOcrLine(invalid, number.box), glyph, fiber,
       ]), isEmpty, reason: invalid);
