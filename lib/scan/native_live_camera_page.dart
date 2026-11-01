@@ -365,30 +365,29 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           token != _generation ||
           !nativeLiveHintFresh(started, DateTime.now()) ||
           sequence != _sequence) { return; }
-      // Evaluate the actual printed OCR line, not only the bright/dark
-      // background at the center of the camera. The smallest matched line
-      // is the most vulnerable to losing a tiny printed percentage sign.
-      // Use the SAME rotation snapshot as ML Kit; uncalibrated iOS stays on
-      // the conservative center probe. Never turn this into OCR confidence.
-      LiveFrameQuality? pairQuality;
+      // Every matched printed line needs usable local exposure. The smallest
+      // line alone can be legible while another percentage is washed out.
+      // Fail closed on malformed tracked geometry; scene brightness cannot
+      // validate OCR-line quality. iOS remains on conservative scene guidance
+      // until real preview/box orientation is calibrated on a device.
       final tracked = result.trackedBoxes;
-      if (Platform.isAndroid && tracked != null && tracked.isNotEmpty &&
-          frame.planes.isNotEmpty) {
-        final smallest = tracked.values.reduce(
-            (a, b) => a.height <= b.height ? a : b);
-        final plane = frame.planes.first;
-        final samples = sampleNativeOcrPairLuminance(
-          bytes: plane.bytes, width: frame.width, height: frame.height,
-          rowStride: plane.bytesPerRow,
-          pixelStride: plane.bytesPerPixel ?? 1,
-          bgra: false, rotationDegrees: rotationDegrees,
-          normalizedBox: smallest,
-        );
-        if (samples != null) pairQuality = assessLiveLuminance(samples);
+      LiveFrameQuality quality = sceneQuality;
+      if (Platform.isAndroid && tracked != null && tracked.isNotEmpty) {
+        if (frame.planes.isEmpty) {
+          quality = LiveFrameQuality.unknown;
+        } else {
+          final plane = frame.planes.first;
+          quality = assessNativeMatchedPairQuality(
+            bytes: plane.bytes,
+            width: frame.width, height: frame.height,
+            rowStride: plane.bytesPerRow,
+            pixelStride: plane.bytesPerPixel ?? 1,
+            bgra: false,
+            rotationDegrees: rotationDegrees,
+            normalizedBoxes: tracked.values,
+          );
+        }
       }
-      final quality = pairQuality == null ||
-              pairQuality == LiveFrameQuality.unknown
-          ? sceneQuality : pairQuality;
       final fingerprint = [...result.pairs]..sort();
       final key = fingerprint.join('|');
       final drift = _lastCenter != null && result.center != null &&
