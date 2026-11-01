@@ -310,9 +310,9 @@ test('web live OCR recovers literal percent and fiber columns in separate Tesser
     ]}]}
   ]};
   const out = s.api.extract(across, 1200, 675, 1, 100);
-  assert.deepEqual(out.cues.map(p => p.percent + ':' + p.fiber),
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
     ['80:pamuk', '20:keten']);
-  assert.deepEqual(out.pairBoxes.map(b => [b.x0, b.y0, b.x1, b.y1]),
+  assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
     [[100, 300, 300, 337], [100, 400, 300, 437]]);
   assert.equal(out.pairObservations.length, 2);
   assert.ok(out.pairBoxes.every(b => out.boxes.some(x =>
