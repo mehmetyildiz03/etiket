@@ -11,6 +11,7 @@ import 'native_live_timing.dart';
 import 'native_center_refocus.dart';
 import 'native_camera_recovery.dart';
 import 'native_camera_preset_fallback.dart';
+import 'native_camera_zoom.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
@@ -35,7 +36,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   TextRecognizer? _recognizer;
   Timer? _staleTimer;
   bool _starting = true, _reading = false, _capturing = false,
-      _focusing = false, _closed = false, _usingHighStream = false;
+      _focusing = false, _zooming = false, _closed = false,
+      _usingHighStream = false;
+  double _zoomLevel = 1.0;
   int _generation = 0, _sequence = 0, _stableFrames = 0;
   DateTime _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
@@ -111,6 +114,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       recognizer = TextRecognizer(script: TextRecognitionScript.latin);
       _controller = controller;
       _recognizer = recognizer;
+      _zoomLevel = 1.0;
       // A high-resolution STREAM preset may also reduce takePicture() pixels.
       // Never silently treat its still as the original full-detail capture.
       _usingHighStream = openedPreset != null &&
@@ -305,7 +309,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   }
 
   void _onFrame(CameraImage frame) {
-    if (_closed || _reading || _capturing || _focusing || _controller == null ||
+    if (_closed || _reading || _capturing || _focusing || _zooming ||
+        _controller == null ||
         _recognizer == null) { return; }
     final now = DateTime.now();
     if (now.difference(_lastSample).inMilliseconds < 1800) { return; }
@@ -348,7 +353,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       // Reject expired pixels before the spatial matcher and again after it.
       if (!nativeLiveHintFresh(started, DateTime.now())) return;
       final result = _extract(recognized, frame, rotationDegrees!);
-      if (!mounted || _closed || _capturing || _focusing || token != _generation ||
+      if (!mounted || _closed || _capturing || _focusing || _zooming ||
+          token != _generation ||
           !nativeLiveHintFresh(started, DateTime.now()) ||
           sequence != _sequence) { return; }
       final fingerprint = [...result.pairs]..sort();
@@ -419,7 +425,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   Future<void> _focusAt(Offset point) async {
     final camera = _controller;
     if (camera == null || !camera.value.isInitialized || _closed ||
-        _capturing || _focusing) { return; }
+        _capturing || _focusing || _zooming) { return; }
     final token = ++_generation;
     setState(() {
       _focusing = true;
@@ -463,10 +469,56 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     });
   }
 
+  /// Hardware zoom changes the field of view. Invalidate every previous OCR
+  /// observation before changing it; a late callback cannot restore boxes.
+  /// This only helps the user aim at small print, never verifies a ratio.
+  Future<void> _changeZoom(bool zoomIn) async {
+    final camera = _controller;
+    if (camera == null || !camera.value.isInitialized || _closed ||
+        _capturing || _focusing || _zooming) { return; }
+    final token = ++_generation;
+    setState(() {
+      _zooming = true;
+      _pairs = const [];
+      _textPresent = false;
+      _fingerprint = '';
+      _lastCenter = null;
+      _lastPairBoxes = null;
+      _lastOcrImageSize = null;
+      _lastPairRotation = null;
+      _stableFrames = 0;
+      _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _advice = 'Kamera yakınlaştırması ayarlanıyor…';
+    });
+    final outcome = await changeNativeCameraZoom(
+      current: _zoomLevel,
+      zoomIn: zoomIn,
+      getMinZoomLevel: camera.getMinZoomLevel,
+      getMaxZoomLevel: camera.getMaxZoomLevel,
+      setZoomLevel: camera.setZoomLevel,
+    );
+    if (!mounted || _closed || _capturing || token != _generation ||
+        _controller != camera) { return; }
+    setState(() {
+      _zooming = false;
+      _zoomLevel = outcome.zoom;
+      _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _advice = switch (outcome.status) {
+        NativeZoomStatus.changed =>
+          'Yakınlaştırma değişti. Yazıya odakla ve yeni OCR sonucunu bekle.',
+        NativeZoomStatus.unchanged =>
+          'Kamera yakınlaştırma sınırında. Telefonu uygun mesafede tut.',
+        NativeZoomStatus.unavailable =>
+          'Bu cihazda kamera yakınlaştırması kullanılamıyor. '
+          'Mesafeyi değiştir veya sistem kamerasını kullan.',
+      };
+    });
+  }
+
   Future<void> _takePicture() async {
     final camera = _controller;
     if (camera == null || _capturing || _closed || _usingHighStream ||
-        !camera.value.isInitialized) { return; }
+        _focusing || _zooming || !camera.value.isInitialized) { return; }
     setState(() => _capturing = true);
     final captureToken = ++_generation; // Invalidate late preview OCR.
     final outcome = await takeNativeStillWithRecovery<XFile>(
@@ -501,6 +553,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   Future<void> _shutdown() async {
     ++_generation;
     _focusing = false;
+    _zooming = false;
+    _zoomLevel = 1.0;
     _pairs = const [];
     _textPresent = false;
     _fingerprint = '';
@@ -570,7 +624,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                     // to the displayed preview. Until physical iOS preview
                     // calibration, taps are Android-only; the accessible
                     // center-focus button remains available on both.
-                    onTapDown: Platform.isAndroid && !_capturing && !_focusing
+                    onTapDown: Platform.isAndroid && !_capturing && !_focusing && !_zooming
                         ? (details) {
                             final point = nativePreviewTapPoint(
                               details.localPosition,
@@ -616,14 +670,33 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                 'Fotoğraf sonrası gerçek OCR, metin düzeltmesi ve açık onay gerekir.',
                 style: TextStyle(fontSize: 12)),
             const SizedBox(height: 10),
+            Row(children: [
+              Expanded(child: OutlinedButton.icon(
+                onPressed: available && !_capturing && !_focusing && !_zooming
+                    ? () => _changeZoom(false) : null,
+                icon: const Icon(Icons.zoom_out),
+                label: const Text('Uzaklaştır'),
+              )),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text('${_zoomLevel.toStringAsFixed(1)}×',
+                    semanticsLabel: 'Kamera yakınlaştırma düzeyi'),
+              ),
+              Expanded(child: OutlinedButton.icon(
+                onPressed: available && !_capturing && !_focusing && !_zooming
+                    ? () => _changeZoom(true) : null,
+                icon: const Icon(Icons.zoom_in),
+                label: const Text('Yakınlaştır'),
+              )),
+            ]),
             OutlinedButton.icon(
-              onPressed: available && !_capturing && !_focusing
+              onPressed: available && !_capturing && !_focusing && !_zooming
                   ? () => _focusAt(const Offset(0.5, 0.5)) : null,
               icon: const Icon(Icons.center_focus_strong),
               label: Text(_focusing ? 'Odaklanıyor…' : 'Merkeze odakla'),
             ),
             FilledButton.icon(
-              onPressed: available && !_capturing && !_focusing
+              onPressed: available && !_capturing && !_focusing && !_zooming
                   ? _usingHighStream
                       ? () => Navigator.of(context).pop()
                       : _takePicture
