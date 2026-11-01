@@ -111,4 +111,82 @@ void main() {
       const NativeOcrLine('PAMUK', Rect.fromLTWH(210, 612, 160, 40)),
     ]), isEmpty);
   });
+  test('three real ML Kit boxes recover the printed percent glyph on Android', () {
+    const number = NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40));
+    const glyph = NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20));
+    final found = nativeSpatialPairs(imageSize: size,
+      lines: [number, glyph, fiber]);
+    expect(found.map((p) => p.value), ['80% pamuk']);
+    expect(found.single.box, const Rect.fromLTRB(100, 500, 370, 542));
+    // No glyph is not a percentage. The existing focus-only hint remains.
+    expect(nativeSpatialPairs(imageSize: size,
+      lines: [number, fiber]), isEmpty);
+  });
+
+  test('two independent split-glyph rows keep exact printed percentages', () {
+    final found = nativeSpatialPairs(imageSize: size, lines: [
+      const NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40)),
+      const NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20)),
+      fiber,
+      const NativeOcrLine('20', Rect.fromLTWH(100, 610, 80, 40)),
+      const NativeOcrLine('%', Rect.fromLTWH(185, 620, 18, 20)),
+      const NativeOcrLine('POLYESTER', Rect.fromLTWH(210, 612, 200, 40)),
+    ]);
+    expect(found.map((p) => p.value), ['80% pamuk', '20% polyester']);
+  });
+
+  test('split glyph rejects distant, missing, overlapping and competing tokens', () {
+    const number = NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40));
+    const glyph = NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20));
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, const NativeOcrLine('%', Rect.fromLTWH(260, 510, 18, 20)), fiber,
+    ]), isEmpty);
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, const NativeOcrLine('%', Rect.fromLTWH(185, 570, 18, 20)), fiber,
+    ]), isEmpty);
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, glyph, fiber,
+      const NativeOcrLine('KETEN', Rect.fromLTWH(212, 502, 160, 40)),
+    ]), isEmpty);
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, glyph, fiber,
+      const NativeOcrLine('20', Rect.fromLTWH(101, 500, 75, 40)),
+    ]), isEmpty);
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, glyph, fiber,
+      const NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20)),
+    ]), isEmpty);
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, glyph, fiber,
+      const NativeOcrLine('ASTAR', Rect.fromLTWH(204, 500, 5, 40)),
+    ]), isEmpty);
+  });
+
+  test('malformed percent glyph geometry and unprinted signs fail closed', () {
+    const number = NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40));
+    const glyph = NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20));
+    for (final invalid in ['80', '0', '120', '80O', '80 %']) {
+      expect(nativeSpatialPairs(imageSize: size, lines: [
+        NativeOcrLine(invalid, number.box), glyph, fiber,
+      ]), isEmpty, reason: invalid);
+    }
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, const NativeOcrLine('%', Rect.fromLTWH(-1, 510, 18, 20)), fiber,
+    ]), isEmpty);
+    expect(nativeSpatialPairs(imageSize: size, lines: [
+      number, glyph,
+      const NativeOcrLine('PAMUK', Rect.fromLTWH(210, 550, 160, 40)),
+    ]), isEmpty);
+  });
+
+  test('complete literal percentages and split glyph rows coexist', () {
+    final found = nativeSpatialPairs(imageSize: size, lines: [
+      ratio, fiber,
+      const NativeOcrLine('20', Rect.fromLTWH(100, 610, 80, 40)),
+      const NativeOcrLine('%', Rect.fromLTWH(185, 620, 18, 20)),
+      const NativeOcrLine('KETEN', Rect.fromLTWH(210, 612, 160, 40)),
+    ]);
+    expect(found.map((p) => p.value), ['80% pamuk', '20% keten']);
+  });
+
 }
