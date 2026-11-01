@@ -39,21 +39,21 @@ bool nativeSplitMissingPercentHint({
       }
       continue;
     }
-    if (isBare) bare.add(i);
-    if (isFiber) fibers.add(i);
+    if (isBare) { bare.add(i); }
+    if (isFiber) { fibers.add(i); }
   }
   if (bare.isEmpty || fibers.isEmpty ||
-      bare.length > 8 || fibers.length > 8) return false;
+      bare.length > 8 || fibers.length > 8) { return false; }
 
   bool adjacent(int numberIndex, int fiberIndex) {
     final a = lines[numberIndex].box, b = lines[fiberIndex].box;
     final left = a.left < b.left ? a : b;
     final right = a.left < b.left ? b : a;
-    if (left.right >= right.left) return false;
+    if (left.right >= right.left) { return false; }
     final overlap = math.min(a.bottom, b.bottom) - math.max(a.top, b.top);
     if (overlap < .65 * math.min(a.height, b.height) ||
         (a.center.dy - b.center.dy).abs() >
-            .35 * math.max(a.height, b.height)) return false;
+            .35 * math.max(a.height, b.height)) { return false; }
     final gap = right.left - left.right;
     if (gap > math.min(width * .10, math.max(a.height, b.height) * 3)) {
       return false;
@@ -61,23 +61,23 @@ bool nativeSplitMissingPercentHint({
     // A '%' or other visible token between them may be part of the ratio.
     // Do not claim the percent sign is missing in that case.
     for (var i = 0; i < lines.length; i++) {
-      if (i == numberIndex || i == fiberIndex) continue;
+      if (i == numberIndex || i == fiberIndex) { continue; }
       final other = lines[i].box;
-      if (!valid(other)) continue;
-      if (other.overlaps(a) || other.overlaps(b)) return false;
+      if (!valid(other)) { continue; }
+      if (other.overlaps(a) || other.overlaps(b)) { return false; }
       final rowOverlap = math.min(other.bottom, math.min(a.bottom, b.bottom)) -
           math.max(other.top, math.max(a.top, b.top));
       if (rowOverlap > 0 &&
-          other.left < right.left && other.right > left.right) return false;
+          other.left < right.left && other.right > left.right) { return false; }
     }
     return true;
   }
 
   for (final numberIndex in bare) {
     final matchingFibers = fibers.where((i) => adjacent(numberIndex, i)).toList();
-    if (matchingFibers.length != 1) continue;
+    if (matchingFibers.length != 1) { continue; }
     final fiberIndex = matchingFibers.single;
-    if (bare.where((i) => adjacent(i, fiberIndex)).length == 1) return true;
+    if (bare.where((i) => adjacent(i, fiberIndex)).length == 1) { return true; }
   }
   return false;
 }
