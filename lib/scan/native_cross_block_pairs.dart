@@ -53,6 +53,16 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     return true;
   }
 
+  // Keep the pre-existing one-line recovery when a separate multi-line
+  // column is incomplete. Otherwise adding column support could hide a
+  // previously visible, independently unambiguous single-line pair.
+  List<NativeSpatialPair> singleLineFallback() {
+    final singleBlocks = blocks.where((block) => block.length == 1).toList();
+    if (singleBlocks.length < 2) return const [];
+    return nativeCrossBlockPairs(
+        imageSize: imageSize, blocks: singleBlocks);
+  }
+
   var hasMultiLineColumn = false;
   final entries = <({int block, NativeOcrLine line, bool eligible})>[];
   var scannedLines = 0;
@@ -83,9 +93,11 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     if (fiber != null) fibers.add((i, fiber));
   }
   if (ratios.isEmpty || fibers.isEmpty ||
-      ratios.length > 8 || fibers.length > 8 ||
-      (hasMultiLineColumn && ratios.length != fibers.length)) {
+      ratios.length > 8 || fibers.length > 8) {
     return const [];
+  }
+  if (hasMultiLineColumn && ratios.length != fibers.length) {
+    return singleLineFallback();
   }
 
   bool adjacent(int ratioIndex, int fiberIndex) {
@@ -139,6 +151,8 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
   }
   // For column layouts, a missing/extra row must not be silently paired
   // with another section. Keep partial columns yellow without inventing data.
-  if (hasMultiLineColumn && found.length != ratios.length) return const [];
+  if (hasMultiLineColumn && found.length != ratios.length) {
+    return singleLineFallback();
+  }
   return List.unmodifiable(found);
 }
