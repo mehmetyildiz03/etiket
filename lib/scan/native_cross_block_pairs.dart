@@ -56,7 +56,9 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     if (fiber != null) fibers.add((i, fiber));
   }
   if (ratios.isEmpty || fibers.isEmpty ||
-      ratios.length > 8 || fibers.length > 8) return const [];
+      ratios.length > 8 || fibers.length > 8) {
+    return const [];
+  }
 
   bool adjacent(int ratioIndex, int fiberIndex) {
     if (entries[ratioIndex].block == entries[fiberIndex].block) return false;
@@ -68,7 +70,9 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     final overlap = math.min(a.bottom, b.bottom) - math.max(a.top, b.top);
     if (overlap < .75 * math.min(a.height, b.height) ||
         (a.center.dy - b.center.dy).abs() >
-            .25 * math.max(a.height, b.height)) return false;
+            .25 * math.max(a.height, b.height)) {
+      return false;
+    }
     final gap = right.left - left.right;
     if (gap > math.min(width * .04, math.max(a.height, b.height) * 2)) {
       return false;
@@ -83,7 +87,9 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
           math.min(other.bottom, math.min(a.bottom, b.bottom)) -
           math.max(other.top, math.max(a.top, b.top));
       if (rowOverlap > 0 &&
-          other.left < right.left && other.right > left.right) return false;
+          other.left < right.left && other.right > left.right) {
+        return false;
+      }
     }
     return true;
   }
