@@ -297,18 +297,64 @@ test('split token OCR never pairs stacked, distant, competing or intervened text
   }
 });
 
-test('split tokens cannot be joined across OCR blocks or invalid coordinates', () => {
+test('web live OCR recovers literal percent and fiber columns in separate Tesseract blocks', () => {
+  const s = setup();
+  const across = {blocks: [
+    {paragraphs: [{lines: [
+      line('80%', {x0: 100, y0: 300, x1: 165, y1: 335}),
+      line('20%', {x0: 100, y0: 400, x1: 165, y1: 435})
+    ]}]},
+    {paragraphs: [{lines: [
+      line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337}),
+      line('KETEN', {x0: 185, y0: 402, x1: 300, y1: 437})
+    ]}]}
+  ]};
+  const out = s.api.extract(across, 1200, 675, 1, 100);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
+    [[100, 300, 300, 337], [100, 400, 300, 437]]);
+  assert.equal(out.pairObservations.length, 2);
+  assert.ok(out.pairBoxes.every(b => out.boxes.some(x =>
+    x.x0 === b.x0 && x.y0 === b.y0 && x.x1 === b.x1 && x.y1 === b.y1)));
+  assert.equal('verified' in out, false);
+  assert.equal('acceptedText' in out, false);
+  assert.equal('rawText' in out, false);
+});
+
+test('cross-block OCR rejects ambiguous, intervening, missing-percent and unboxed tokens', () => {
   const s = setup();
   const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
   const fiber = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
-  const across = {blocks: [
-    {paragraphs: [{lines: [ratio]}]},
+  const blocks = (...groups) => ({blocks: groups.map(lines =>
+    ({paragraphs: [{lines}]}))});
+  const cases = [
+    blocks([ratio], [fiber, line('KETEN', {x0: 185, y0: 302, x1: 300, y1: 337})]),
+    blocks([ratio], [fiber], [line('OTHER', {x0: 168, y0: 302, x1: 181, y1: 336})]),
+    blocks([line('80', ratio.bbox)], [fiber]),
+    blocks([ratio], [line('PAMUK', {x0: 185, y0: 355, x1: 300, y1: 390})]),
+    blocks([ratio], [line('PAMUK', {x0: -1, y0: 302, x1: 300, y1: 337})]),
+    blocks([ratio], [fiber], [line('20%', null)])
+  ];
+  for (const data of cases) {
+    const out = s.api.extract(data, 1200, 675, 1, 100);
+    assert.equal(out.cues.length, 0, 'unsafe cross-block candidate rejected');
+    assert.equal(out.pairObservations.length, 0);
+  }
+});
+
+test('cross-block OCR cannot bypass bounded global ambiguity inspection', () => {
+  const s = setup();
+  const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
+  const fiber = line('PAMUK', {x0: 185, y0: 302, x1: 300, y1: 337});
+  const care = Array.from({length: 255}, (_, i) =>
+    line('CARE ' + i, {x0: 1, y0: i, x1: 70, y1: i + 1}));
+  const out = s.api.extract({blocks: [
+    {paragraphs: [{lines: [ratio, ...care]}]},
     {paragraphs: [{lines: [fiber]}]}
-  ]};
-  assert.equal(s.api.extract(across, 1200, 675, 1, 100).cues.length, 0);
-  const invalid = result(ratio,
-    line('PAMUK', {x0: -1, y0: 302, x1: 300, y1: 337}));
-  assert.equal(s.api.extract(invalid.data, 1200, 675, 2, 100).cues.length, 0);
+  ]}, 1200, 675, 1, 100);
+  assert.equal(out.cues.length, 0, '257 lines require fail-closed matching');
+  assert.equal(out.pairObservations.length, 0);
 });
 
 test('unboxed unrelated care text does not hide adjacent real composition tokens', () => {
