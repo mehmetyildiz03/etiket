@@ -92,9 +92,9 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     if (ratio != null) ratios.add((i, ratio));
     if (fiber != null) fibers.add((i, fiber));
   }
-  if (ratios.isEmpty || fibers.isEmpty ||
-      ratios.length > 8 || fibers.length > 8) {
-    return const [];
+  if (ratios.isEmpty || fibers.isEmpty) return const [];
+  if (ratios.length > 8 || fibers.length > 8) {
+    return hasMultiLineColumn ? singleLineFallback() : const [];
   }
   if (hasMultiLineColumn && ratios.length != fibers.length) {
     return singleLineFallback();
