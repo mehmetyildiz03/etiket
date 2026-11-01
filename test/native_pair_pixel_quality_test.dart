@@ -104,4 +104,54 @@ void main() {
     expect(sample(const Rect.fromLTRB(.2, .2, .5, .5), stride: 1), isNull);
     expect(sample(const Rect.fromLTRB(.2, .2, .21, .21)), isNull);
   });
+
+  test('a clear small OCR line cannot mask glare on another matched line', () {
+    const width = 128, height = 96;
+    final pixels = Uint8List(width * height)
+      ..fillRange(0, width * height, 245);
+    // First line has clearly contrasting printed strokes; second line is
+    // washed out. The old shortest-ROI-only heuristic would report usable.
+    for (var y = 8; y < 40; y++) {
+      for (var x = 8; x < 48; x++) {
+        if (x.isEven) pixels[y * width + x] = 10;
+      }
+    }
+    const good = Rect.fromLTRB(8 / 128, 8 / 96, 48 / 128, 40 / 96);
+    const washed = Rect.fromLTRB(72 / 128, 8 / 96, 112 / 128, 40 / 96);
+    LiveFrameQuality assess(Iterable<Rect> boxes) =>
+        assessNativeMatchedPairQuality(
+          bytes: pixels, width: width, height: height,
+          rowStride: width, pixelStride: 1, bgra: false,
+          rotationDegrees: 0, normalizedBoxes: boxes,
+        );
+    expect(assess([good]), LiveFrameQuality.usable);
+    expect(assess([good, washed]), LiveFrameQuality.glare);
+    expect(assess([washed, good]), LiveFrameQuality.glare);
+    expect(assess([good, const Rect.fromLTRB(-.1, .1, .2, .2)]),
+        LiveFrameQuality.unknown);
+    expect(assess([]), LiveFrameQuality.unknown);
+    expect(assess(List.filled(9, good)), LiveFrameQuality.unknown);
+  });
+
+  test('opposite exposure faults give generic guidance, not false light advice',
+      () {
+    const width = 128, height = 96;
+    final pixels = Uint8List(width * height)
+      ..fillRange(0, width * height, 245);
+    for (var y = 8; y < 40; y++) {
+      for (var x = 72; x < 112; x++) {
+        pixels[y * width + x] = 10;
+      }
+    }
+    expect(assessNativeMatchedPairQuality(
+      bytes: pixels, width: width, height: height,
+      rowStride: width, pixelStride: 1, bgra: false,
+      rotationDegrees: 0,
+      normalizedBoxes: const [
+        Rect.fromLTRB(8 / 128, 8 / 96, 48 / 128, 40 / 96),
+        Rect.fromLTRB(72 / 128, 8 / 96, 112 / 128, 40 / 96),
+      ],
+    ), LiveFrameQuality.lowDetail);
+  });
+
 }
