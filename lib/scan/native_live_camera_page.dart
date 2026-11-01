@@ -14,6 +14,7 @@ import 'native_camera_preset_fallback.dart';
 import 'native_camera_zoom.dart';
 import 'native_camera_torch.dart';
 import 'native_frame_luminance.dart';
+import 'native_pair_pixel_quality.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
 import 'native_split_missing_percent.dart';
@@ -332,7 +333,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       final camera = _controller;
       final recognizer = _recognizer;
       if (camera == null || recognizer == null) { return; }
-      final quality = _quality(frame);
+      final sceneQuality = _quality(frame);
       final rotationDegrees = _rotationDegrees(camera);
       final input = rotationDegrees == null ? null : _inputImage(frame, rotationDegrees);
       if (input == null) {
@@ -364,6 +365,30 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           token != _generation ||
           !nativeLiveHintFresh(started, DateTime.now()) ||
           sequence != _sequence) { return; }
+      // Evaluate the actual printed OCR line, not only the bright/dark
+      // background at the center of the camera. The smallest matched line
+      // is the most vulnerable to losing a tiny printed percentage sign.
+      // Use the SAME rotation snapshot as ML Kit; uncalibrated iOS stays on
+      // the conservative center probe. Never turn this into OCR confidence.
+      LiveFrameQuality? pairQuality;
+      final tracked = result.trackedBoxes;
+      if (Platform.isAndroid && tracked != null && tracked.isNotEmpty &&
+          frame.planes.isNotEmpty) {
+        final smallest = tracked.values.reduce(
+            (a, b) => a.height <= b.height ? a : b);
+        final plane = frame.planes.first;
+        final samples = sampleNativeOcrPairLuminance(
+          bytes: plane.bytes, width: frame.width, height: frame.height,
+          rowStride: plane.bytesPerRow,
+          pixelStride: plane.bytesPerPixel ?? 1,
+          bgra: false, rotationDegrees: rotationDegrees,
+          normalizedBox: smallest,
+        );
+        if (samples != null) pairQuality = assessLiveLuminance(samples);
+      }
+      final quality = pairQuality == null ||
+              pairQuality == LiveFrameQuality.unknown
+          ? sceneQuality : pairQuality;
       final fingerprint = [...result.pairs]..sort();
       final key = fingerprint.join('|');
       final drift = _lastCenter != null && result.center != null &&
