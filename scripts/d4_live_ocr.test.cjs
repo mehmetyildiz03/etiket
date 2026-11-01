@@ -672,6 +672,83 @@ test('tiny matched text requests bounded detail without green or auto-approval',
   }
 });
 
+test('web live OCR recovers an independently printed percent glyph split from its number', () => {
+  const s = setup();
+  const data = {blocks: [
+    {paragraphs: [{lines: [
+      line('80', {x0: 100, y0: 300, x1: 144, y1: 335}),
+      line('%', {x0: 147, y0: 305, x1: 158, y1: 333})
+    ]}]},
+    {paragraphs: [{lines: [
+      line('PAMUK', {x0: 180, y0: 302, x1: 300, y1: 337}),
+      line('20%', {x0: 100, y0: 400, x1: 165, y1: 435}),
+      line('KETEN', {x0: 185, y0: 402, x1: 300, y1: 437})
+    ]}]}
+  ]};
+  const out = s.api.extract(data, 1200, 675, 1, 100);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['20:keten', '80:pamuk']);
+  assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
+    [[100, 400, 300, 437], [100, 300, 300, 337]]);
+  assert.equal(out.pairObservations.length, 2);
+  assert.equal(out.detailNeeded, false);
+  assert.equal('verified' in out, false);
+  assert.equal('acceptedText' in out, false);
+  assert.equal('rawText' in out, false);
+});
+
+test('split percent glyph cannot invent a percentage from a bare number', () => {
+  const s = setup();
+  const number = line('80', {x0: 100, y0: 300, x1: 144, y1: 335});
+  const fiber = line('PAMUK', {x0: 180, y0: 302, x1: 300, y1: 337});
+  for (const extra of [[],
+    [line('%', {x0: 180, y0: 350, x1: 192, y1: 380})],
+    [line('%', {x0: 180, y0: 305, x1: 192, y1: 333})],
+    [line('%', {x0: -2, y0: 305, x1: 12, y1: 333})]]) {
+    const out = s.api.extract(result(number, ...extra, fiber).data,
+      1200, 675, 1, 90);
+    assert.equal(out.cues.length, 0);
+    assert.equal(out.pairObservations.length, 0);
+  }
+});
+
+test('split percent glyph fails closed on competing numbers or glyphs', () => {
+  const s = setup();
+  const number = line('80', {x0: 100, y0: 300, x1: 144, y1: 335});
+  const mark = line('%', {x0: 147, y0: 305, x1: 158, y1: 333});
+  const fiber = line('PAMUK', {x0: 180, y0: 302, x1: 300, y1: 337});
+  const cases = [
+    [number, mark, line('%', {x0: 148, y0: 305, x1: 159, y1: 333}), fiber],
+    [number, line('20', {x0: 101, y0: 300, x1: 145, y1: 335}), mark, fiber],
+    [number, mark, fiber, line('KETEN', {x0: 181, y0: 302, x1: 301, y1: 337})],
+    [number, mark, line('OTHER', {x0: 160, y0: 303, x1: 176, y1: 333}), fiber]
+  ];
+  for (const lines of cases) {
+    const out = s.api.extract(result(...lines).data, 1200, 675, 1, 90);
+    assert.equal(out.cues.length, 0, lines.map(x => x.text).join(' | '));
+    assert.equal(out.pairObservations.length, 0);
+    assert.equal('verified' in out, false);
+  }
+});
+
+test('two independently printed split glyph rows keep exact geometry', () => {
+  const s = setup();
+  const data = result(
+    line('80', {x0: 100, y0: 300, x1: 144, y1: 335}),
+    line('%', {x0: 147, y0: 305, x1: 158, y1: 333}),
+    line('PAMUK', {x0: 180, y0: 302, x1: 300, y1: 337}),
+    line('20', {x0: 100, y0: 400, x1: 144, y1: 435}),
+    line('%', {x0: 147, y0: 405, x1: 158, y1: 433}),
+    line('KETEN', {x0: 180, y0: 402, x1: 300, y1: 437}));
+  const out = s.api.extract(data.data, 1200, 675, 2, 90);
+  assert.deepEqual(Array.from(out.cues, p => p.percent + ':' + p.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.deepEqual(Array.from(out.pairBoxes, b => [b.x0, b.y0, b.x1, b.y1]),
+    [[100, 300, 300, 337], [100, 400, 300, 437]]);
+  assert.equal(out.pairObservations.length, 2);
+  assert.equal(out.textPresent, true);
+});
+
 test('within-block spatial match is rejected when another block has a competing fiber', () => {
   const s = setup();
   const ratio = line('80%', {x0: 100, y0: 300, x1: 165, y1: 335});
