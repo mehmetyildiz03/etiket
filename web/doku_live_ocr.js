@@ -75,9 +75,10 @@
     return selected.reverse().sort((a, b) => a.start - b.start);
   }
 
-  // Tesseract sometimes separates a printed "80% PAMUK" row into two OCR
-  // lines. Recover only literal, isolated tokens in ONE OCR block and ONE
-  // horizontal row. This is an unverified yellow hint, not an accepted value.
+  // Tesseract sometimes separates a printed "80% PAMUK" row into
+  // isolated OCR tokens, even across blocks. Recover only literal tokens
+  // on the same physical row with globally unique geometry. This remains
+  // an unverified yellow hint, never an accepted value.
   function spatialCandidates(lines, width, height) {
     if (!Number.isFinite(width) || !Number.isFinite(height) ||
         width <= 0 || height <= 0 || width * height > 48000000 ||
