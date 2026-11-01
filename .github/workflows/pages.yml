@@ -10,14 +10,17 @@ on:
 permissions:
   contents: read
 
+# Keep the newest commit deployable even when an older Playwright install hangs.
+# Pull-request runs are isolated by ref; a newer run supersedes stale work.
 concurrency:
   group: doku-pages-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build-web:
     name: Build Flutter Web
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,6 +51,9 @@ jobs:
       - name: Build web for GitHub Pages project path
         run: flutter build web --release --base-href=/etiket/
       - name: Install Chromium for real OCR verification
+        # Bound apt/browser installation; a stalled runner must not hold Pages
+        # deployment for hours. Never bypass the WebKit/Chromium checks.
+        timeout-minutes: 12
         run: tool/web_ocr/node_modules/.bin/playwright install --with-deps chromium webkit
       - name: Read a synthetic label in the compiled browser app
         env:
