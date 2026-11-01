@@ -91,6 +91,11 @@ void main() {
       ]),
       [ratio], [fiber],
     ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [ratio], [fiber],
+      List.generate(257, (i) => NativeOcrLine(
+        'CARE', Rect.fromLTWH(10, 10 + i * 5.0, 60, 4))),
+    ]), isEmpty);
     expect(nativeCrossBlockPairs(imageSize: Size.zero, blocks: [
       [ratio], [fiber],
     ]), isEmpty);
