@@ -78,7 +78,7 @@
   // Tesseract sometimes separates a printed "80% PAMUK" row into two OCR
   // lines. Recover only literal, isolated tokens in ONE OCR block and ONE
   // horizontal row. This is an unverified yellow hint, not an accepted value.
-  function spatialCandidates(lines, width, height, crossBlockOnly = false) {
+  function spatialCandidates(lines, width, height) {
     if (!Number.isFinite(width) || !Number.isFinite(height) ||
         width <= 0 || height <= 0 || width * height > 48000000 ||
         lines.length < 2 || lines.length > 256) return [];
@@ -110,9 +110,6 @@
     if (!ratios.length || !names.length || ratios.length > 8 ||
         names.length > 8) return [];
     function adjacent(ai, bi) {
-      // A cross-block recovery must not re-count two tokens already handled
-      // within one Tesseract block. Never pair without distinct provenance.
-      if (crossBlockOnly && lines[ai].blockIndex === lines[bi].blockIndex) return false;
       const a = lines[ai].box, b = lines[bi].box;
       const left = a.x0 <= b.x0 ? a : b;
       const right = left === a ? b : a;
@@ -168,9 +165,8 @@
     // Keep at most 257 lines: the cross-block matcher rejects >256 rather
     // than silently ignoring a competing token from a dense care label.
     const crossBlockLines = [];
-    for (const [blockIndex, block] of blocks.entries()) {
+    for (const block of blocks) {
       if (remainingLines <= 0) break;
-      const blockLines = [];
       let blockRemaining = Math.min(256, remainingLines);
       for (const paragraph of (block.paragraphs || []).slice(0, 256)) {
         for (const line of (paragraph.lines || []).slice(0, blockRemaining)) {
@@ -190,9 +186,8 @@
           // Only a visible, retained OCR line can receive a matched-pair box.
           const lineBox = validBox ?
             {x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1} : null;
-          blockLines.push({text: value, box: lineBox});
           if (crossBlockLines.length <= 256) {
-            crossBlockLines.push({text: value, box: lineBox, blockIndex});
+            crossBlockLines.push({text: value, box: lineBox});
           }
           // Literal printed pairs only; ambiguous token assignment fails closed.
           const matches = literalPairsFromLine(value);
@@ -252,43 +247,14 @@
         }
         if (blockRemaining <= 0) break;
       }
-      // Spatially split tokens are only advisory; never fill in a missing
-      // percentage or fiber. The union box comes from two real OCR boxes.
-      for (const candidate of spatialCandidates(blockLines, width, height)) {
-        const key = candidate.percent + ':' + candidate.fiber;
-        if (unique.has(key)) {
-          duplicateKeys.add(key);
-          continue;
-        }
-        if (cues.length >= 8) continue;
-        unique.add(key);
-        cues.push({percent: candidate.percent, fiber: candidate.fiber});
-        let retained = boxes.length < 24;
-        if (!retained) {
-          for (let i = boxes.length - 1; i >= 0; i--) {
-            const previous = boxes[i];
-            if (!pairBoxes.some(p => p.x0 === previous.x0 &&
-                p.y0 === previous.y0 && p.x1 === previous.x1 &&
-                p.y1 === previous.y1)) {
-              boxes.splice(i, 1);
-              retained = true;
-              break;
-            }
-          }
-        }
-        if (retained) {
-          boxes.push(candidate.box);
-          pairBoxes.push(candidate.box);
-          pairObservations.push(candidate);
-        }
-      }
     }
-    // Tesseract may put a printed percentage column and a fiber-name column
-    // in DIFFERENT blocks. Join only isolated literal tokens on the same
-    // physical row, with globally unique geometry and no intervening text.
-    // All blocks are checked together for competing candidates; too many
-    // lines fail closed. These remain yellow, unverified preview hints.
-    for (const candidate of spatialCandidates(crossBlockLines, width, height, true)) {
+    // Resolve ALL isolated percentage/fiber tokens in one global geometry
+    // pass. Matching within each block first could falsely retain "80% PAMUK"
+    // when another Tesseract block contains an equally adjacent "KETEN" or
+    // competing ratio. Never count a partial, ambiguous match as a stable cue.
+    // If the bounded global line set is too large, fail closed rather than
+    // accepting a candidate before inspecting competing blocks.
+    for (const candidate of spatialCandidates(crossBlockLines, width, height)) {
       const key = candidate.percent + ':' + candidate.fiber;
       if (unique.has(key)) {
         duplicateKeys.add(key);
