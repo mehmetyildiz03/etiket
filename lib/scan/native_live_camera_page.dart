@@ -12,6 +12,7 @@ import 'native_center_refocus.dart';
 import 'native_camera_recovery.dart';
 import 'native_camera_preset_fallback.dart';
 import 'native_camera_zoom.dart';
+import 'native_camera_torch.dart';
 import 'native_frame_luminance.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
@@ -36,9 +37,11 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   TextRecognizer? _recognizer;
   Timer? _staleTimer;
   bool _starting = true, _reading = false, _capturing = false,
-      _focusing = false, _zooming = false, _closed = false,
+      _focusing = false, _zooming = false, _lighting = false,
+      _closed = false,
       _usingHighStream = false;
   double _zoomLevel = 1.0;
+  bool _torchOn = false;
   int _generation = 0, _sequence = 0, _stableFrames = 0;
   DateTime _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
   DateTime _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
@@ -115,6 +118,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       _controller = controller;
       _recognizer = recognizer;
       _zoomLevel = 1.0;
+      _torchOn = false;
+      _lighting = false;
       // A high-resolution STREAM preset may also reduce takePicture() pixels.
       // Never silently treat its still as the original full-detail capture.
       _usingHighStream = openedPreset != null &&
@@ -310,6 +315,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   void _onFrame(CameraImage frame) {
     if (_closed || _reading || _capturing || _focusing || _zooming ||
+        _lighting ||
         _controller == null ||
         _recognizer == null) { return; }
     final now = DateTime.now();
@@ -354,6 +360,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       if (!nativeLiveHintFresh(started, DateTime.now())) return;
       final result = _extract(recognized, frame, rotationDegrees!);
       if (!mounted || _closed || _capturing || _focusing || _zooming ||
+          _lighting ||
           token != _generation ||
           !nativeLiveHintFresh(started, DateTime.now()) ||
           sequence != _sequence) { return; }
@@ -425,7 +432,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   Future<void> _focusAt(Offset point) async {
     final camera = _controller;
     if (camera == null || !camera.value.isInitialized || _closed ||
-        _capturing || _focusing || _zooming) { return; }
+        _capturing || _focusing || _zooming || _lighting) { return; }
     final token = ++_generation;
     setState(() {
       _focusing = true;
@@ -475,7 +482,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
   Future<void> _changeZoom(bool zoomIn) async {
     final camera = _controller;
     if (camera == null || !camera.value.isInitialized || _closed ||
-        _capturing || _focusing || _zooming) { return; }
+        _capturing || _focusing || _zooming || _lighting) { return; }
     final token = ++_generation;
     setState(() {
       _zooming = true;
@@ -515,10 +522,52 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     });
   }
 
+  /// Explicit hardware illumination for small printed percentages. Any
+  /// change invalidates preview OCR and requires fresh, independent frames.
+  /// Light may improve visibility or cause glare; it never verifies a pair.
+  Future<void> _toggleTorch() async {
+    final camera = _controller;
+    if (camera == null || !camera.value.isInitialized || _closed ||
+        _capturing || _focusing || _zooming || _lighting) { return; }
+    final token = ++_generation;
+    setState(() {
+      _lighting = true;
+      _pairs = const [];
+      _textPresent = false;
+      _fingerprint = '';
+      _lastCenter = null;
+      _lastPairBoxes = null;
+      _lastOcrImageSize = null;
+      _lastPairRotation = null;
+      _stableFrames = 0;
+      _lastResultSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _advice = 'Kamera ışığı ayarlanıyor…';
+    });
+    final outcome = await changeNativeCameraTorch(
+      currentlyEnabled: _torchOn,
+      setTorchEnabled: (enabled) => camera.setFlashMode(
+          enabled ? FlashMode.torch : FlashMode.off),
+    );
+    if (!mounted || _closed || _capturing || token != _generation ||
+        _controller != camera) { return; }
+    setState(() {
+      _lighting = false;
+      _torchOn = outcome.enabled;
+      _lastSample = DateTime.fromMillisecondsSinceEpoch(0);
+      _advice = outcome.status == NativeTorchStatus.changed
+          ? (_torchOn
+              ? 'Kamera ışığı açıldı. Parlama varsa ışığı kapat veya açıyı değiştir; yeni OCR sonucunu bekle.'
+              : 'Kamera ışığı kapatıldı. Etiketi sabitle ve yeni OCR sonucunu bekle.')
+          : (_torchOn
+              ? 'Kamera ışığı kapatılamadı. Geri dönerek kamerayı kapat veya sistem kamerasını kullan.'
+              : 'Bu cihazda kamera ışığı açılamadı. Ortam ışığını artır veya sistem kamerasını kullan.');
+    });
+  }
+
   Future<void> _takePicture() async {
     final camera = _controller;
     if (camera == null || _capturing || _closed || _usingHighStream ||
-        _focusing || _zooming || !camera.value.isInitialized) { return; }
+        _focusing || _zooming || _lighting || !camera.value.isInitialized) { return; }
     setState(() => _capturing = true);
     final captureToken = ++_generation; // Invalidate late preview OCR.
     final outcome = await takeNativeStillWithRecovery<XFile>(
@@ -554,6 +603,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     ++_generation;
     _focusing = false;
     _zooming = false;
+    _lighting = false;
+    _torchOn = false;
     _zoomLevel = 1.0;
     _pairs = const [];
     _textPresent = false;
@@ -568,6 +619,12 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     _controller = null;
     _recognizer = null;
     _usingHighStream = false;
+    try {
+      // Best-effort light-off even if an in-flight request was cancelled.
+      if (camera != null && camera.value.isInitialized) {
+        await camera.setFlashMode(FlashMode.off);
+      }
+    } catch (_) { /* Unsupported or already disposed camera. */ }
     try {
       if (camera?.value.isStreamingImages ?? false) { await camera!.stopImageStream(); }
     } catch (_) { /* Camera may have already stopped. */ }
@@ -624,7 +681,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                     // to the displayed preview. Until physical iOS preview
                     // calibration, taps are Android-only; the accessible
                     // center-focus button remains available on both.
-                    onTapDown: Platform.isAndroid && !_capturing && !_focusing && !_zooming
+                    onTapDown: Platform.isAndroid && !_capturing && !_focusing && !_zooming && !_lighting
                         ? (details) {
                             final point = nativePreviewTapPoint(
                               details.localPosition,
@@ -672,7 +729,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             const SizedBox(height: 10),
             Row(children: [
               Expanded(child: OutlinedButton.icon(
-                onPressed: available && !_capturing && !_focusing && !_zooming
+                onPressed: available && !_capturing && !_focusing && !_zooming && !_lighting
                     ? () => _changeZoom(false) : null,
                 icon: const Icon(Icons.zoom_out),
                 label: const Text('Uzaklaştır'),
@@ -683,20 +740,32 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
                     semanticsLabel: 'Kamera yakınlaştırma düzeyi'),
               ),
               Expanded(child: OutlinedButton.icon(
-                onPressed: available && !_capturing && !_focusing && !_zooming
+                onPressed: available && !_capturing && !_focusing && !_zooming && !_lighting
                     ? () => _changeZoom(true) : null,
                 icon: const Icon(Icons.zoom_in),
                 label: const Text('Yakınlaştır'),
               )),
             ]),
-            OutlinedButton.icon(
-              onPressed: available && !_capturing && !_focusing && !_zooming
-                  ? () => _focusAt(const Offset(0.5, 0.5)) : null,
-              icon: const Icon(Icons.center_focus_strong),
-              label: Text(_focusing ? 'Odaklanıyor…' : 'Merkeze odakla'),
-            ),
+            Row(children: [
+              Expanded(child: OutlinedButton.icon(
+                onPressed: available && !_capturing && !_focusing &&
+                        !_zooming && !_lighting
+                    ? () => _focusAt(const Offset(0.5, 0.5)) : null,
+                icon: const Icon(Icons.center_focus_strong),
+                label: Text(_focusing ? 'Odaklanıyor…' : 'Odakla'),
+              )),
+              const SizedBox(width: 8),
+              Expanded(child: OutlinedButton.icon(
+                onPressed: available && !_capturing && !_focusing &&
+                        !_zooming && !_lighting
+                    ? _toggleTorch : null,
+                icon: Icon(_torchOn ? Icons.flash_off : Icons.flash_on),
+                label: Text(_lighting ? 'Işık ayarlanıyor…'
+                    : _torchOn ? 'Işığı kapat' : 'Işığı aç'),
+              )),
+            ]),
             FilledButton.icon(
-              onPressed: available && !_capturing && !_focusing && !_zooming
+              onPressed: available && !_capturing && !_focusing && !_zooming && !_lighting
                   ? _usingHighStream
                       ? () => Navigator.of(context).pop()
                       : _takePicture
