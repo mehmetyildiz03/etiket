@@ -50,7 +50,7 @@ List<NativeSpatialPair> nativeSpatialPairs({
       // compete with the candidate, so its geometry still fails closed.
       if (liveHasPossibleCompositionToken(lines[i].text) ||
           _barePrintedNumber.hasMatch(lines[i].text.trim()) ||
-          lines[i].text.trim() == '%') return const [];
+          lines[i].text.trim() == '%') { return const []; }
       ignored.add(i);
       continue;
     }
@@ -110,7 +110,7 @@ List<NativeSpatialPair> nativeSpatialPairs({
     final n = lines[numberIndex].box;
     final g = lines[glyphIndex].box;
     final f = lines[fiberIndex].box;
-    if (n.right >= g.left || g.right >= f.left) return false;
+    if (n.right >= g.left || g.right >= f.left) { return false; }
     bool sameRow(Rect a, Rect b) {
       final overlap = math.min(a.bottom, b.bottom) -
           math.max(a.top, b.top);
@@ -122,10 +122,10 @@ List<NativeSpatialPair> nativeSpatialPairs({
         g.left - n.right > math.min(width * .025,
             math.max(n.height, g.height) * .9) ||
         f.left - g.right > math.min(width * .10,
-            math.max(n.height, f.height) * 3)) return false;
+            math.max(n.height, f.height) * 3)) { return false; }
     for (var i = 0; i < lines.length; i++) {
       if (i == numberIndex || i == glyphIndex || i == fiberIndex ||
-          ignored.contains(i)) continue;
+          ignored.contains(i)) { continue; }
       final other = lines[i].box;
       if (other.overlaps(n) || other.overlaps(g) || other.overlaps(f)) {
         return false;
@@ -133,7 +133,7 @@ List<NativeSpatialPair> nativeSpatialPairs({
       final rowOverlap = math.min(other.bottom, math.min(n.bottom, f.bottom)) -
           math.max(other.top, math.max(n.top, f.top));
       if (rowOverlap > 0 && other.left < f.left &&
-          other.right > n.right) return false;
+          other.right > n.right) { return false; }
     }
     return true;
   }
