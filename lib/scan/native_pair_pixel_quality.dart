@@ -2,6 +2,8 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui';
 
+import 'live_frame_quality.dart';
+
 /// Samples only the REAL camera pixels underneath an Android ML Kit OCR
 /// percentage-fiber line. The box is normalized in the ROTATED OCR image,
 /// not the preview widget. All four rotations are mapped back to the source
@@ -77,4 +79,53 @@ Uint8List? sampleNativeOcrPairLuminance({
     }
   }
   return samples;
+}
+
+
+/// Evaluate every literal, geometrically tracked percentage-fiber OCR line,
+/// not only the shortest one. A readable small line must not conceal a
+/// washed-out or dark second line elsewhere on the label.
+///
+/// The first eight lines are bounded by the live overlay matcher. Any invalid
+/// ROI fails closed: central scene brightness cannot substitute for pixels
+/// from a known printed line. Mixed exposure problems use generic low-detail
+/// guidance rather than incorrectly requesting only more/less light.
+/// No frame bytes or text are retained; this never authorizes green/approval.
+LiveFrameQuality assessNativeMatchedPairQuality({
+  required Uint8List bytes,
+  required int width,
+  required int height,
+  required int rowStride,
+  required int pixelStride,
+  required bool bgra,
+  required int rotationDegrees,
+  required Iterable<Rect> normalizedBoxes,
+}) {
+  var count = 0;
+  LiveFrameQuality? problem;
+  for (final box in normalizedBoxes) {
+    count++;
+    if (count > 8) return LiveFrameQuality.unknown;
+    final samples = sampleNativeOcrPairLuminance(
+      bytes: bytes,
+      width: width,
+      height: height,
+      rowStride: rowStride,
+      pixelStride: pixelStride,
+      bgra: bgra,
+      rotationDegrees: rotationDegrees,
+      normalizedBox: box,
+    );
+    if (samples == null) return LiveFrameQuality.unknown;
+    final quality = assessLiveLuminance(samples);
+    if (quality == LiveFrameQuality.unknown) return LiveFrameQuality.unknown;
+    if (quality == LiveFrameQuality.usable) continue;
+    if (problem != null && problem != quality) {
+      problem = LiveFrameQuality.lowDetail;
+    } else {
+      problem = quality;
+    }
+  }
+  if (count == 0) return LiveFrameQuality.unknown;
+  return problem ?? LiveFrameQuality.usable;
 }
