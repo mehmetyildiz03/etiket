@@ -74,11 +74,12 @@
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
         clear();
         return {cues: [], boxes: [], pairBoxes: [], textPresent: false, stableFrames: 0,
-          moved: false, freshFrame: false, detailNeeded: false, stale: true, level: 'gray', sequence: -1};
+          moved: false, freshFrame: false, detailNeeded: false, stale: true, level: 'gray', sequence: -1, sampledAt: null};
       }
       return {cues: observation.cues, boxes: observation.boxes,
         pairBoxes: observation.pairBoxes,
         width: observation.width, height: observation.height, sequence: lastSequence,
+        sampledAt: lastTime,
         textPresent: observation.textPresent, stableFrames, moved,
         detailNeeded: observation.detailNeeded, freshFrame: observation.freshFrame,
         stale: false, level: observation.textPresent ? 'yellow' : 'gray'};

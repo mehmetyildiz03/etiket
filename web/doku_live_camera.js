@@ -68,6 +68,22 @@
     }
   }
 
+  // A displayed OCR box may remain valid for 6s, but the phone may move
+  // between that sampled frame and today's video pixels. Restrict region-based
+  // exposure guidance to recently sampled geometry; otherwise use scene-only
+  // advice. Never infer OCR confidence or accept a pair from luminance.
+  const MAX_PAIR_PIXEL_AGE_MS = 1200;
+
+  function lineExposureAdvice(hints) {
+    if (!Array.isArray(hints) || !hints.length) return null;
+    if (hints.includes('veryDark') && hints.includes('veryBright'))
+      return 'Etikette hem gölge hem parlama var; ışığı eşitle ve yansımayı azalt.';
+    if (hints.includes('veryDark')) return 'Etiketin karanlık kalan satırını aydınlat.';
+    if (hints.includes('veryBright')) return 'Parlayan etiket satırındaki yansımayı azalt.';
+    if (hints.includes('lowDetail')) return 'Okunamayan etiket satırına yaklaş ve odakla.';
+    return null;
+  }
+
   function sampleQuality(video, canvas, reading = null) {
     if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
     const scale = 160 / Math.max(video.videoWidth, video.videoHeight);
@@ -97,7 +113,11 @@
     // dark background. OCR rectangles are unverified and used for advice only.
     // Stale, invalid and tiny regions are ignored; no pixels are persisted.
     let textMetrics = null;
+    let textLineHints = [];
+    const age = reading && Number.isFinite(reading.sampledAt)
+      ? Date.now() - reading.sampledAt : Infinity;
     if (reading && reading.stale === false &&
+        age >= 0 && age <= MAX_PAIR_PIXEL_AGE_MS &&
         matchesVideoGeometry(video, reading)) {
       const source = Array.isArray(reading.pairBoxes) && reading.pairBoxes.length
         ? reading.pairBoxes : reading.boxes;
@@ -132,6 +152,11 @@
             sampleWidth: rw, sampleHeight: rh});
         }
         if (lineMetrics.length) {
+          // Median is useful for aggregate diagnostics but can hide one
+          // overexposed percentage row beside an otherwise readable row.
+          // Retain only categorical per-line advice, never pixels or text.
+          textLineHints = lineMetrics.map(m => root.dokuCaptureGuidance?.evaluate?.(m))
+            .filter(h => h === 'veryDark' || h === 'veryBright' || h === 'lowDetail');
           const median = key => {
             const values = lineMetrics.map(m => m[key]).sort((a, b) => a - b);
             const mid = Math.floor(values.length / 2);
@@ -149,7 +174,7 @@
     // Numeric hints only; neither the text region nor frame verifies OCR.
     return {meanLuminance: total / (w * h), dynamicRange: max - min,
       edgeEnergy: edges / (2 * w * h), sampleWidth: w, sampleHeight: h,
-      textMetrics};
+      textMetrics, textLineHints};
   }
 
   function open() {
@@ -194,6 +219,8 @@
       status.style.cssText = 'margin:0;text-align:center;max-width:560px;font-size:14px';
       status.textContent = 'Kamera hazırlanıyor… Canlı OCR henüz etkin değil; çekimden sonra metni doğrula.';
       const adviceFor = (metrics, reading) => {
+        const lineAdvice = lineExposureAdvice(metrics?.textLineHints);
+        if (lineAdvice) return lineAdvice;
         const hint = root.dokuCaptureGuidance?.evaluate?.(metrics?.textMetrics || metrics);
         if (hint === 'veryDark') return 'Işığı artır.';
         if (hint === 'veryBright') return 'Parlamayı azalt.';
@@ -702,5 +729,5 @@
     });
   }
   return Object.freeze({get available() { return available(); }, open,
-    cancel() { active?.cancel(); }, sampleQuality});
+    cancel() { active?.cancel(); }, sampleQuality, lineExposureAdvice});
 });
