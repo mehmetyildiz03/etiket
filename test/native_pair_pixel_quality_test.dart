@@ -13,7 +13,7 @@ void main() {
     // Small real printed strokes away from the center grid. A whole-scene
     // brightness probe can call this glare even though the OCR line is legible.
     for (var y = 36; y < 60; y++) {
-      for (var x = 70; x < 80; x++) {
+      for (var x = 80; x < 90; x++) {
         pixels[y * width + x] = 10;
       }
     }
@@ -24,7 +24,7 @@ void main() {
       bytes: pixels, width: width, height: height,
       rowStride: width, pixelStride: 1, bgra: false,
       rotationDegrees: 0,
-      normalizedBox: const Rect.fromLTRB(65 / 96, 32 / 96, 85 / 96, 64 / 96),
+      normalizedBox: const Rect.fromLTRB(76 / 96, 32 / 96, 94 / 96, 64 / 96),
     )!;
     expect(assessLiveLuminance(center), LiveFrameQuality.glare);
     expect(assessLiveLuminance(pair), LiveFrameQuality.usable);
