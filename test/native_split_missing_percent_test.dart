@@ -160,6 +160,12 @@ void main() {
     );
     expect(regions, const [Rect.fromLTRB(68, 8, 116, 40)]);
     final pixels = Uint8List(128 * 96)..fillRange(0, 128 * 96, 245);
+    // The printed complete pair has real light/dark stroke contrast.
+    for (var y = 54; y < 84; y++) {
+      for (var x = 8; x < 56; x++) {
+        if (x.isEven) pixels[y * 128 + x] = 10;
+      }
+    }
     for (var y = 8; y < 40; y++) {
       for (var x = 64; x < 120; x++) {
         pixels[y * 128 + x] = 10;
