@@ -17,6 +17,7 @@ import 'native_camera_torch.dart';
 import 'native_frame_luminance.dart';
 import 'native_pair_pixel_quality.dart';
 import 'native_frame_snapshot.dart';
+import 'native_ocr_byte_snapshot.dart';
 import 'native_live_line_quality.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
@@ -210,9 +211,19 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           (Platform.isIOS && detected != InputImageFormat.bgra8888)) {
         return null;
       }
-      bytes = frame.planes.first.bytes;
-      format = detected;
+      // Freeze the exact OCR input before yielding to native ML Kit. The
+      // camera plugin can recycle a single-plane NV21/BGRA buffer while
+      // asynchronous recognition is in flight; Y-only exposure snapshots
+      // cannot protect the recognized characters themselves.
       bytesPerRow = frame.planes.first.bytesPerRow;
+      final frozen = snapshotNativeOcrBytes(
+        bytes: frame.planes.first.bytes,
+        width: frame.width, height: frame.height,
+        rowStride: bytesPerRow, bgra: Platform.isIOS,
+      );
+      if (frozen == null) return null;
+      bytes = frozen;
+      format = detected;
     }
 
     final rotation = InputImageRotationValue.fromRawValue(rotationDegrees);
