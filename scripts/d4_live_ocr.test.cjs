@@ -1010,3 +1010,53 @@ test('pending ROI never crosses a camera stream replacement', async () => {
     'old camera OCR boxes must not select a crop on another video stream');
   scanner.stop();
 });
+
+
+test('same-block sibling OCR tokens cannot make a rival inline pair stable', () => {
+  const s = setup();
+  const first = line('80% PAMUK', {x0: 100, y0: 300, x1: 320, y1: 335});
+  for (const rival of ['KETEN', '20%', '20', '%', 'WASH KETEN']) {
+    const out = s.api.extract(result(first,
+      line(rival, {x0: 325, y0: 302, x1: 430, y1: 337})).data,
+    1200, 675, 1, 100);
+    assert.equal(out.cues.length, 0, rival);
+    assert.equal(out.pairObservations.length, 0, rival);
+    assert.equal(out.pairBoxes.length, 0, rival);
+    assert.equal(out.detailNeeded, true, 'retry real camera pixels, not an inferred pair');
+    assert.equal(out.textPresent, true);
+    assert.equal('acceptedText' in out, false);
+    assert.equal('verified' in out, false);
+  }
+});
+
+test('unlocated same-block competing fiber fails closed, unrelated care remains', () => {
+  const s = setup();
+  const first = line('80% PAMUK', {x0: 100, y0: 300, x1: 320, y1: 335});
+  const unsafe = s.api.extract(result(first, line('KETEN', null)).data,
+    1200, 675, 1, 100);
+  assert.equal(unsafe.cues.length, 0);
+  assert.equal(unsafe.pairObservations.length, 0);
+  assert.equal(unsafe.detailNeeded, true);
+  const safe = s.api.extract(result(first, line('WASH CARE', null)).data,
+    1200, 675, 2, 100);
+  assert.deepEqual(Array.from(safe.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk']);
+  assert.equal(safe.pairObservations.length, 1);
+});
+
+test('same-block independent printed rows and complete adjacent pairs survive', () => {
+  const s = setup();
+  const first = line('80% PAMUK', {x0: 100, y0: 300, x1: 320, y1: 335});
+  const separate = s.api.extract(result(first,
+    line('KETEN', {x0: 325, y0: 410, x1: 430, y1: 445})).data,
+  1200, 675, 1, 100);
+  assert.deepEqual(Array.from(separate.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk']);
+  const complete = s.api.extract(result(first,
+    line('20% KETEN', {x0: 400, y0: 302, x1: 640, y1: 337})).data,
+  1200, 675, 2, 100);
+  assert.deepEqual(Array.from(complete.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.equal(complete.pairObservations.length, 2);
+  assert.equal(complete.detailNeeded, false);
+});
