@@ -280,6 +280,11 @@
             (reading.moved ? ' Kamerayı sabit tut.' : '') +
             ' Etiketin tamamı henüz doğrulanmadı. ' + advice +
             ' Fotoğraf sonrası kontrol ve açık onay gerekir.';
+        } else if (reading.roiOnly === true) {
+          message = reading.textPresent
+            ? 'Sarı — bölgesel ayrıntı okumasında yazı var, yüzde–elyaf eşleşmesi belirsiz. '
+            : 'Gri — yalnız bölgesel ayrıntı okumasında yazı bulunamadı. ';
+          message += 'Tüm etiket değerlendirilmedi. ' + advice;
         } else if (reading.textPresent) {
           message = 'Sarı — yazı var, güvenilir yüzde–elyaf çifti yok. ' + advice;
         } else {
