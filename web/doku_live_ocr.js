@@ -220,7 +220,7 @@
   }
 
   function extract(data, width, height, sequence, durationMs) {
-    const boxes = [], pairBoxes = [], cues = [], pairObservations = [];
+    const boxes = [], pairBoxes = [], cues = [], pairObservations = [], detailBoxes = [];
     const unique = new Set(), duplicateKeys = new Set(), inlineCandidates = [];
     let textPresent = false, detailNeeded = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
@@ -245,7 +245,8 @@
           // A partly read composition line can coexist with a correct pair.
           // Do not let that first pair suppress a higher-detail retry for the
           // still-unreadable small percentage. Never infer the missing '%'.
-          if (missingPercent.test(value)) detailNeeded = true;
+          const missingPrintedMark = missingPercent.test(value);
+          if (missingPrintedMark) detailNeeded = true;
           const bb = line.bbox;
           const validBox = bb && [bb.x0, bb.y0, bb.x1, bb.y1].every(Number.isFinite) &&
             bb.x0 >= 0 && bb.y0 >= 0 && bb.x1 > bb.x0 && bb.y1 > bb.y0 &&
@@ -261,9 +262,10 @@
 
           // Even a recognized pair can be tiny at preview resolution. Use
           // source camera pixels for an occasional retry, never interpolation.
-          if (lineBox && matches.length &&
-              lineBox.y1 - lineBox.y0 < Math.max(12, height * .022)) {
+          if (lineBox && (missingPrintedMark || (matches.length &&
+              lineBox.y1 - lineBox.y0 < Math.max(12, height * .022)))) {
             detailNeeded = true;
+            if (detailBoxes.length < 4) detailBoxes.push(lineBox);
           }
           {
             let lineHasPair = false;
@@ -377,7 +379,7 @@
     // yellow partial text only, and the next OCR may retry with source pixels.
     return {boxes, pairBoxes: safePairBoxes, cues: cues.filter(safeKey),
       pairObservations: safeObservations,
-      detailNeeded, textPresent, width, height, sequence, durationMs};
+      detailNeeded, detailBoxes, textPresent, width, height, sequence, durationMs};
   }
 
   function create(onResult, onError) {
@@ -420,7 +422,55 @@
     // Retry small printed percentages with more of the CAMERA'S OWN pixels,
     // not interpolation. Every third inconclusive frame may use <=2MP;
     // normal frames remain <=1.2MP to bound CPU, memory and battery load.
-    let inconclusivePasses = 0;
+    let inconclusivePasses = 0, pendingDetailRoi = null;
+    // The high-detail full-frame retry may still lose a tiny printed '%'.
+    // A single next-frame ROI read uses the camera's OWN pixels without
+    // interpolation. Its result is explicitly partial: never count it as
+    // independent full-frame stability or promote it to green/accepted data.
+    function nativeDetailRoi(video, pending, now) {
+      if (!pending || now - pending.at > 5000 || now < pending.at ||
+          !Number.isFinite(video.videoWidth) || !Number.isFinite(video.videoHeight) ||
+          Math.max(video.videoWidth, video.videoHeight) <= 1200 ||
+          video.videoHeight <= 0 ||
+          Math.abs((pending.width / pending.height) /
+            (video.videoWidth / video.videoHeight) - 1) > .025) return null;
+      const b = pending.box, vw = video.videoWidth, vh = video.videoHeight;
+      const x0 = b.x0 / pending.width * vw, x1 = b.x1 / pending.width * vw;
+      const y0 = b.y0 / pending.height * vh, y1 = b.y1 / pending.height * vh;
+      if (![x0, x1, y0, y1].every(Number.isFinite) ||
+          x0 < 0 || y0 < 0 || x1 > vw || y1 > vh || x1 <= x0 || y1 <= y0)
+        return null;
+      // Wide margins preserve nearby rival tokens; crop only a single known
+      // incomplete line. Multiple candidates require another full-frame pass.
+      const padX = Math.max((x1 - x0) * .75, (y1 - y0) * 3);
+      const padY = Math.max((y1 - y0) * 2, vh * .025);
+      const sx = Math.max(0, Math.floor(x0 - padX));
+      const sy = Math.max(0, Math.floor(y0 - padY));
+      const sw = Math.min(vw, Math.ceil(x1 + padX)) - sx;
+      const sh = Math.min(vh, Math.ceil(y1 + padY)) - sy;
+      if (sw < 160 || sh < 80 || sw > vw * .8 || sh > vh * .75) return null;
+      const scale = Math.min(1, 2000 / Math.max(sw, sh),
+        Math.sqrt(2000000 / (sw * sh)));
+      return {sx, sy, sw, sh,
+        width: Math.max(1, Math.floor(sw * scale)),
+        height: Math.max(1, Math.floor(sh * scale)), vw, vh};
+    }
+    function remapRoiReading(reading, roi) {
+      const map = b => ({x0: roi.sx + b.x0 * roi.sw / roi.width,
+        y0: roi.sy + b.y0 * roi.sh / roi.height,
+        x1: roi.sx + b.x1 * roi.sw / roi.width,
+        y1: roi.sy + b.y1 * roi.sh / roi.height});
+      reading.boxes = reading.boxes.map(map);
+      reading.pairBoxes = reading.pairBoxes.map(map);
+      reading.pairObservations = reading.pairObservations.map(p =>
+        ({percent: p.percent, fiber: p.fiber, box: map(p.box)}));
+      reading.detailBoxes = reading.detailBoxes.map(map);
+      reading.width = roi.vw;
+      reading.height = roi.vh;
+      reading.roiOnly = true;
+      reading.freshFrame = false;
+      return reading;
+    }
     const base = new URL('ocr/', root.document.baseURI);
     async function engine() {
       if (worker) return worker;
@@ -447,6 +497,8 @@
           Date.now() - lastStarted < 2000) return false;
       if (trackedVideo !== video) {
         resetFrameTracking(); // A new camera element has an independent clock.
+        pendingDetailRoi = null; // Old camera geometry cannot crop a new stream.
+        inconclusivePasses = 0;
         trackedVideo = video;
       }
       // OCR sequence numbers prove processing order, NOT independent video frames.
@@ -484,25 +536,38 @@
         // supplies a larger native video frame. After two OCR passes without
         // a retained literal percent+fiber box, try ONE bounded detail pass.
         // Do not upscale, change PSM, infer missing text, or treat it as proof.
-        const detail = inconclusivePasses >= 2 && id % 3 === 0 &&
+        const roi = nativeDetailRoi(video, pendingDetailRoi, started);
+        pendingDetailRoi = null; // A stale crop must never be replayed.
+        const detail = !roi && inconclusivePasses >= 2 && id % 3 === 0 &&
           Math.max(video.videoWidth, video.videoHeight) > 1200;
         const longSide = detail ? 1600 : 1200;
         const pixelBudget = detail ? 2000000 : 1200000;
         const scale = Math.min(1, longSide / Math.max(video.videoWidth, video.videoHeight),
           Math.sqrt(pixelBudget / (video.videoWidth * video.videoHeight)));
-        const width = Math.max(1, Math.round(video.videoWidth * scale));
-        const height = Math.max(1, Math.round(video.videoHeight * scale));
+        const width = roi?.width ?? Math.max(1, Math.round(video.videoWidth * scale));
+        const height = roi?.height ?? Math.max(1, Math.round(video.videoHeight * scale));
         canvas = root.document.createElement('canvas');
         canvas.width = width; canvas.height = height;
         const context = canvas.getContext('2d');
         if (!context) throw Error('canvas');
-        context.drawImage(video, 0, 0, width, height);
+        if (roi) context.drawImage(video, roi.sx, roi.sy, roi.sw, roi.sh,
+          0, 0, width, height);
+        else context.drawImage(video, 0, 0, width, height);
         const current = await engine();
         if (!current || closed) return true;
         const output = await current.recognize(canvas, {}, {text: true, blocks: true});
         if (!closed) {
           const reading = extract(output?.data, width, height, id, Date.now() - started);
           reading.freshFrame = freshFrame; // No raw frame/time metadata leaves the worker.
+          if (roi) remapRoiReading(reading, roi);
+          // Only a failed HIGH-DETAIL full-frame OCR with one known printed
+          // line may schedule one ROI pass. Never derive a crop from a prior
+          // ROI, ambiguous multiple lines, or an unlocated OCR word.
+          if (detail && reading.detailNeeded && reading.detailBoxes.length === 1 &&
+              reading.durationMs <= 3000) {
+            pendingDetailRoi = {box: reading.detailBoxes[0],
+              width, height, at: started};
+          }
           inconclusivePasses = reading.pairObservations.length && !reading.detailNeeded
             ? 0 : Math.min(3, inconclusivePasses + 1);
           onResult(reading); // Still only unverified yellow/gray camera hints.
@@ -520,6 +585,7 @@
     }
     function stop() {
       closed = true;
+      pendingDetailRoi = null;
       resetFrameTracking();
       if (canvas) { canvas.width = canvas.height = 0; canvas = null; }
       if (worker) { const old = worker; worker = null; Promise.resolve(old.terminate()).catch(() => {}); }

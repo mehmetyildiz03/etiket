@@ -269,15 +269,22 @@
           message = 'Gri — ' + advice + ' Canlı OCR kullanılamıyor; fotoğraf sonrası doğrula.';
         } else if (reading.cues.length) {
           const pairs = reading.cues.map(cue => cue.percent + '% ' + cue.fiber).join(', ');
-          const repeat = reading.freshFrame !== true
-            ? ' Tek kare adayı; bağımsız yeni kamera karesi doğrulanamadı, tutarlılık ölçülmüyor.'
-            : reading.stableFrames >= 2
+          const repeat = reading.roiOnly === true
+            ? ' Yakın ayrıntı okuması: yalnız bir satır incelendi; tüm etiket ve kare tutarlılığı doğrulanmadı.'
+            : reading.freshFrame !== true
+              ? ' Tek kare adayı; bağımsız yeni kamera karesi doğrulanamadı, tutarlılık ölçülmüyor.'
+              : reading.stableFrames >= 2
               ? ' ' + reading.stableFrames + ' ayrı OCR karesinde tutarlı göründü; doğrulanmadı.'
               : ' Tek kare adayı; henüz tutarlılık ölçülmedi.';
           message = 'Sarı — doğrulanmamış OCR adayları: ' + pairs + '.' + repeat +
             (reading.moved ? ' Kamerayı sabit tut.' : '') +
             ' Etiketin tamamı henüz doğrulanmadı. ' + advice +
             ' Fotoğraf sonrası kontrol ve açık onay gerekir.';
+        } else if (reading.roiOnly === true) {
+          message = reading.textPresent
+            ? 'Sarı — bölgesel ayrıntı okumasında yazı var, yüzde–elyaf eşleşmesi belirsiz. '
+            : 'Gri — yalnız bölgesel ayrıntı okumasında yazı bulunamadı. ';
+          message += 'Tüm etiket değerlendirilmedi. ' + advice;
         } else if (reading.textPresent) {
           message = 'Sarı — yazı var, güvenilir yüzde–elyaf çifti yok. ' + advice;
         } else {

@@ -12,8 +12,9 @@ const result = (...lines) => ({data: {text: 'not exposed to camera',
   blocks: [{paragraphs: [{lines}]}]}});
 function setup({recognize, clock} = {}) {
   let terminated = 0, calls = 0, options = null, setParams = null;
+  const draws = [];
   const canvas = {width: 0, height: 0,
-    getContext: () => ({drawImage() {}})};
+    getContext: () => ({drawImage(...args) {draws.push(args);}})};
   const context = vm.createContext({
     URL, Date: clock || Date, Number, Math, Promise, Worker: function Worker() {},
     isSecureContext: true,
@@ -39,7 +40,7 @@ function setup({recognize, clock} = {}) {
   vm.runInContext(source, context);
   return {api: context.dokuLiveOcr, get calls() {return calls;},
     get terminated() {return terminated;}, get options() {return options;},
-    get setParams() {return setParams;}};
+    get setParams() {return setParams;}, draws};
 }
 const video = {readyState: 4, videoWidth: 1920, videoHeight: 1080};
 
@@ -926,5 +927,86 @@ test('decoded frames still advance OCR when a presented-frame callback is delaye
   now += 2100;
   assert.equal(await scanner.sample(stream), false,
     'both unchanged clocks block a duplicate OCR pass');
+  scanner.stop();
+});
+
+
+test('failed full-frame detail OCR retries one printed line using native ROI pixels', async () => {
+  let now = 10000, pass = 0;
+  const Clock = class extends Date { static now() { return now; } };
+  const readings = [];
+  const s = setup({clock: Clock, recognize: canvas => {
+    pass++;
+    if (pass === 4) {
+      assert.ok(canvas.width < 1200, 'crop uses original source pixels, not an upscaled frame');
+      return result(line('20% KETEN', {x0: 30, y0: 25, x1: 160, y1: 65}));
+    }
+    const box = pass === 3
+      ? {x0: 135, y0: 200, x1: 425, y1: 247}
+      : {x0: 100, y0: 150, x1: 320, y1: 185};
+    return result(line('20 KETEN', box));
+  }});
+  const scanner = s.api.create(reading => readings.push(reading));
+  for (let i = 0; i < 5; i++) {
+    assert.equal(await scanner.sample(video), true);
+    now += 2100;
+  }
+  assert.equal(s.draws[0].length, 5);
+  assert.equal(s.draws[2].length, 5, 'first retry examines full high-detail frame');
+  assert.equal(s.draws[3].length, 9, 'next pass crops real video source pixels');
+  assert.equal(s.draws[3][0], video);
+  assert.ok(s.draws[3][3] < video.videoWidth);
+  assert.ok(s.draws[3][4] < video.videoHeight);
+  assert.equal(s.draws[4].length, 5, 'one-shot crop cannot trap later samples');
+  const recovered = readings[3];
+  assert.deepEqual(Array.from(recovered.cues, p => p.percent + ':' + p.fiber),
+    ['20:keten']);
+  assert.equal(recovered.roiOnly, true);
+  assert.equal(recovered.freshFrame, false,
+    'cropped evidence cannot increase full-label temporal stability');
+  assert.equal(recovered.width, video.videoWidth);
+  assert.equal(recovered.height, video.videoHeight);
+  const b = recovered.pairBoxes[0];
+  assert.ok(b.x0 >= s.draws[3][1] && b.x1 <= s.draws[3][1] + s.draws[3][3]);
+  assert.ok(b.y0 >= s.draws[3][2] && b.y1 <= s.draws[3][2] + s.draws[3][4]);
+  assert.equal(recovered.pairObservations[0].box.x0, b.x0);
+  assert.equal('verified' in recovered, false);
+  assert.equal('acceptedText' in recovered, false);
+  scanner.stop();
+});
+
+test('expired high-detail geometry cannot crop a later camera frame', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock, recognize: canvas =>
+    result(line('20 KETEN', {x0: 100, y0: 150,
+      x1: Math.min(canvas.width - 1, 320), y1: 185}))});
+  const scanner = s.api.create(() => {});
+  for (let i = 0; i < 3; i++) {
+    assert.equal(await scanner.sample(video), true);
+    now += 2100;
+  }
+  now += 6000;
+  assert.equal(await scanner.sample(video), true);
+  assert.equal(s.draws[3].length, 5,
+    'stale coordinates must fall back to the entire current frame');
+  scanner.stop();
+});
+
+
+test('pending ROI never crosses a camera stream replacement', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock, recognize: () =>
+    result(line('20 KETEN', {x0: 100, y0: 150, x1: 320, y1: 185}))});
+  const scanner = s.api.create(() => {});
+  for (let i = 0; i < 3; i++) {
+    assert.equal(await scanner.sample(video), true);
+    now += 2100;
+  }
+  const otherCamera = {...video};
+  assert.equal(await scanner.sample(otherCamera), true);
+  assert.equal(s.draws[3].length, 5,
+    'old camera OCR boxes must not select a crop on another video stream');
   scanner.stop();
 });

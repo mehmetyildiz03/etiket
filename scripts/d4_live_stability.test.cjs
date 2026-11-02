@@ -273,3 +273,18 @@ test('partial-percent hint alone never becomes a pair or green', () => {
   assert.deepEqual(reading.cues, []);
   assert.equal(reading.stableFrames, 0);
 });
+
+
+test('native-pixel regional OCR stays yellow and never adds full-frame stability', () => {
+  const s = create();
+  assert.equal(s.observe(sample(1), 1000).stableFrames, 1);
+  assert.equal(s.observe(sample(2), 3000).stableFrames, 2);
+  const regional = s.observe({...sample(3), roiOnly: true}, 5000);
+  assert.equal(regional.level, 'yellow');
+  assert.equal(regional.roiOnly, true);
+  assert.equal(regional.freshFrame, false);
+  assert.equal(regional.stableFrames, 0);
+  assert.equal(s.observe(sample(4), 7000).stableFrames, 1,
+    'next full camera frame must establish a new stability streak');
+  assert.equal(s.view(14000).roiOnly, false);
+});
