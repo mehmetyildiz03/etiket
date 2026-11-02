@@ -223,6 +223,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       );
       if (frozen == null) return null;
       bytes = frozen;
+      // iOS BGRA padding is removed in the local OCR snapshot. ML Kit
+      // metadata must describe the new packed buffer, not the camera stride.
+      if (Platform.isIOS) bytesPerRow = frame.width * 4;
       format = detected;
     }
 
