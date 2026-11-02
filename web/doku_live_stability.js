@@ -162,7 +162,13 @@
       // Without an independently advancing decoded/presented-frame clock,
       // candidates remain yellow but cannot accumulate temporal stability.
       const independentFrame = next.freshFrame === true && next.roiOnly !== true;
-      const nextFingerprint = independentFrame && completePairs && bounds ?
+      // A complete pair on one line cannot establish readable-label stability
+      // while another line has a missing/tiny printed percent sign. Native
+      // camera already fails closed on this signal. Keep the visible literal
+      // pair yellow, but require fresh full-frame OCR without unresolved
+      // detail before counting any consecutive frames.
+      const nextFingerprint = independentFrame && completePairs && bounds &&
+        next.detailNeeded !== true ?
         cues.map(c => `${c.percent}:${c.fiber.toLocaleLowerCase('tr')}`)
           .sort().join('|') : '';
       const samePairGeometry = pairGeometryAgrees(pairGeometry, currentGeometry);
