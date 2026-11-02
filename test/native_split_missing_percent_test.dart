@@ -76,7 +76,7 @@ void main() {
     const width = 128, height = 96;
     const good = Rect.fromLTRB(8 / 128, 8 / 96, 48 / 128, 40 / 96);
     final split = nativeSplitMissingPercentRegions(
-      imageSize: const Size(width.toDouble(), height.toDouble()),
+      imageSize: const Size(128, 96),
       lines: const [
         NativeOcrLine('20', Rect.fromLTRB(68, 8, 84, 40)),
         NativeOcrLine('KETEN', Rect.fromLTRB(87, 8, 116, 40)),
