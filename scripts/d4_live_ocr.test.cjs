@@ -992,3 +992,21 @@ test('expired high-detail geometry cannot crop a later camera frame', async () =
     'stale coordinates must fall back to the entire current frame');
   scanner.stop();
 });
+
+
+test('pending ROI never crosses a camera stream replacement', async () => {
+  let now = 10000;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock, recognize: () =>
+    result(line('20 KETEN', {x0: 100, y0: 150, x1: 320, y1: 185}))});
+  const scanner = s.api.create(() => {});
+  for (let i = 0; i < 3; i++) {
+    assert.equal(await scanner.sample(video), true);
+    now += 2100;
+  }
+  const otherCamera = {...video};
+  assert.equal(await scanner.sample(otherCamera), true);
+  assert.equal(s.draws[3].length, 5,
+    'old camera OCR boxes must not select a crop on another video stream');
+  scanner.stop();
+});
