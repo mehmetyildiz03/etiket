@@ -62,6 +62,8 @@ Uint8List? nativeOcrLumaView(Uint8List frozenNv21, {
   if (width <= 0 || height <= 0 || width.isOdd || height.isOdd ||
       width * height > 12000000) return null;
   final pixels = width * height;
-  if (frozenNv21.length < pixels + pixels ~/ 2) return null;
+  if (frozenNv21.length < pixels + pixels ~/ 2) {
+    return null;
+  }
   return Uint8List.sublistView(frozenNv21, 0, pixels);
 }
