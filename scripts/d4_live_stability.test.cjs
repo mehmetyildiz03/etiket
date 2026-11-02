@@ -311,3 +311,15 @@ test('missing or tiny percentage on another line breaks live pair stability', ()
   assert.equal(s.view(9000).level, 'yellow',
     'stable readability remains unverified, never automatic green');
 });
+
+test('same-frame quality hints are bounded and expire with OCR observations', () => {
+  const s = create();
+  const first = s.observe({...sample(1), sameFrameLineHints: ['veryDark']}, 1000);
+  assert.deepEqual(first.sameFrameLineHints, ['veryDark']);
+  first.sameFrameLineHints.push('veryBright');
+  assert.deepEqual(s.view(1001).sameFrameLineHints, ['veryDark'],
+    'returned arrays cannot mutate stored quality evidence');
+  assert.equal(s.view(7001).sameFrameLineHints, null);
+  const invalid = s.observe({...sample(2), sameFrameLineHints: ['approved']}, 8000);
+  assert.equal(invalid.sameFrameLineHints, null);
+});
