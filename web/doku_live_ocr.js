@@ -450,35 +450,31 @@
         trackedVideo = video;
       }
       // OCR sequence numbers prove processing order, NOT independent video frames.
-      // Only a strictly advancing browser frame clock can support a stability claim.
-      let freshFrame = false;
+      // Camera video can expose BOTH decoded and presented-frame counters.
+      // Some browsers leave totalVideoFrames frozen while rVFC still reports
+      // real presented frames. Use either independently advancing clock, not
+      // elapsed time, to recover OCR without re-reading a frozen preview.
+      const hasPresentedClock = watchNextPresentedFrame(video);
       let decodedFrame = null;
       try {
         const count = video.getVideoPlaybackQuality?.()?.totalVideoFrames;
         if (Number.isSafeInteger(count) && count > 0) decodedFrame = count;
       } catch (_) { /* Browser does not expose decoded-frame statistics. */ }
-      if (decodedFrame !== null) {
-        // A camera track renegotiation may reset its counter; equality alone
-        // proves that no additional decoded frame has arrived.
-        if (lastDecodedFrame !== null && decodedFrame === lastDecodedFrame) return false;
-        freshFrame = lastDecodedFrame !== null && decodedFrame > lastDecodedFrame;
-        // Counter rollback (track renegotiation) allows OCR, but cannot prove
-        // an independent frame until the counter advances again.
-        lastDecodedFrame = decodedFrame;
-      } else if (watchNextPresentedFrame(video)) {
-        // The first observation is advisory. Every later one needs a new
-        // presented frame, not just an elapsed throttle interval.
-        if (lastSampledPresentedFrames !== null &&
-            lastSampledPresentedFrames === presentedFrames) return false;
-        freshFrame = lastSampledPresentedFrames !== null &&
-          presentedFrames > lastSampledPresentedFrames;
-        lastSampledPresentedFrames = presentedFrames;
-      } else {
-        // Older WebKit and unsupported camera mocks keep the existing local
-        // gray/yellow fallback. This path never authorizes green.
-        lastDecodedFrame = null;
-        lastSampledPresentedFrames = null;
-      }
+      const decodedAdvanced = decodedFrame !== null &&
+        lastDecodedFrame !== null && decodedFrame > lastDecodedFrame;
+      const presentedAdvanced = hasPresentedClock &&
+        lastSampledPresentedFrames !== null &&
+        presentedFrames > lastSampledPresentedFrames;
+      if (decodedFrame !== null && lastDecodedFrame === decodedFrame &&
+          !presentedAdvanced) return false;
+      if (decodedFrame === null && hasPresentedClock &&
+          lastSampledPresentedFrames !== null && !presentedAdvanced) return false;
+      // A counter rollback is not evidence of a new frame unless the
+      // independent presented-frame clock actually advanced.
+      const freshFrame = decodedAdvanced || presentedAdvanced;
+      lastDecodedFrame = decodedFrame;
+      lastSampledPresentedFrames = hasPresentedClock ? presentedFrames : null;
+      // Without either clock, OCR stays advisory-only and never green.
       busy = true;
       lastStarted = Date.now();
       const id = ++sequence;
