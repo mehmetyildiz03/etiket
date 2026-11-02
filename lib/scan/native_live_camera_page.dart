@@ -18,6 +18,7 @@ import 'native_frame_luminance.dart';
 import 'native_pair_pixel_quality.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
+import 'native_inline_pair_conflicts.dart';
 import 'native_cross_block_pairs.dart';
 import 'native_split_missing_percent.dart';
 import 'native_pair_geometry.dart';
@@ -259,17 +260,22 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         // Do not manufacture a pair or let this signal authorize green.
         if (liveMissingPercentNearFiber(line.text)) missingPercent = true;
         if (line.text.trim().isNotEmpty) visibleTextBoxes.add(line.boundingBox);
-        final matches = livePairsFromLine(line.text);
-        if (matches.isEmpty) continue;
-        for (final pair in matches) {
-          if (!pairs.contains(pair) && pairs.length < 8) pairs.add(pair);
-          if (pairBoxes.containsKey(pair)) {
-            duplicatePair = true;
-          } else {
-            pairBoxes[pair] = line.boundingBox;
+        // iOS OCR-box orientation is not yet calibrated on a physical
+        // device. Keep its existing unverified text-only candidate path.
+        // Android waits until ALL blocks are visible to reject rivals.
+        if (!Platform.isAndroid) {
+          final matches = livePairsFromLine(line.text);
+          if (matches.isEmpty) continue;
+          for (final pair in matches) {
+            if (!pairs.contains(pair) && pairs.length < 8) pairs.add(pair);
+            if (pairBoxes.containsKey(pair)) {
+              duplicatePair = true;
+            } else {
+              pairBoxes[pair] = line.boundingBox;
+            }
           }
+          boxes.add(line.boundingBox);
         }
-        boxes.add(line.boundingBox);
       }
       spatialBlocks.add(blockLines);
     }
@@ -283,6 +289,19 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     // These are transient yellow candidates, never automatically accepted.
     // iOS OCR-space orientation still awaits physical device calibration.
     if (Platform.isAndroid && dimensions != null) {
+      // A complete pair in one ML Kit block may be contradicted by a nearby
+      // isolated fiber or percentage in another block. Inspect all blocks
+      // before exposing a yellow candidate or counting stable frames.
+      for (final candidate in nativeUnambiguousInlinePairs(
+          imageSize: dimensions, blocks: spatialBlocks)) {
+        if (pairBoxes.containsKey(candidate.value)) {
+          duplicatePair = true;
+        } else {
+          pairBoxes[candidate.value] = candidate.box;
+          if (pairs.length < 8) pairs.add(candidate.value);
+          boxes.add(candidate.box);
+        }
+      }
       for (final blockLines in spatialBlocks) {
         // ML Kit can split a tiny printed '%' away from a number and fiber.
         // This is a focus warning only; never add an inferred pair.
