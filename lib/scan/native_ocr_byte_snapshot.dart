@@ -1,15 +1,14 @@
 import 'dart:typed_data';
 
-/// Freeze one camera-plugin byte buffer before asynchronous ML Kit OCR.
+/// Freeze only the actual camera pixels before asynchronous ML Kit OCR.
 ///
-/// Camera plugins may recycle their frame buffers while OCR is pending. A
-/// transient independent copy makes the OCR bytes belong to the same sampled
-/// frame as the exposure snapshot and the tracked boxes. This is not a
-/// correctness/approval signal and must never be persisted or uploaded.
+/// Camera plugins can recycle their frame buffers while recognition is
+/// pending. Android NV21 is already tightly packed; iOS BGRA may include
+/// per-row padding which ML Kit must not mistake for visible pixels.
 ///
-/// Reject malformed geometry and excessively large allocations. Android
-/// single-plane NV21 must be tightly packed; three-plane YUV is converted by
-/// yuv420ToNv21 before reaching this helper.
+/// The result is a new, tightly packed local buffer. The caller MUST pass
+/// bytesPerRow = width * 4 for BGRA and width for NV21. Nothing is persisted
+/// or uploaded. Invalid geometry fails closed; at most 48 MiB is allocated.
 Uint8List? snapshotNativeOcrBytes({
   required Uint8List bytes,
   required int width,
@@ -18,21 +17,34 @@ Uint8List? snapshotNativeOcrBytes({
   required bool bgra,
 }) {
   if (width <= 0 || height <= 0 || width * height > 12000000 ||
-      rowStride <= 0 || bytes.length > 48 * 1024 * 1024) {
+      rowStride <= 0 || bytes.length > 64 * 1024 * 1024) {
     return null;
   }
+
   if (bgra) {
     final rowBytes = width * 4;
-    if (rowStride < rowBytes ||
-        (height - 1) * rowStride + rowBytes > bytes.length) {
+    final packedLength = rowBytes * height;
+    final needed = (height - 1) * rowStride + rowBytes;
+    if (rowStride < rowBytes || needed > bytes.length ||
+        packedLength > 48 * 1024 * 1024) {
       return null;
     }
-  } else {
-    // ML Kit's NV21 bridge requires complete, contiguous Y + interleaved VU.
-    if (width.isOdd || height.isOdd || rowStride != width ||
-        width * height * 3 ~/ 2 > bytes.length) {
-      return null;
+    final frozen = Uint8List(packedLength);
+    if (rowStride == rowBytes) {
+      frozen.setRange(0, packedLength, bytes);
+    } else {
+      for (var row = 0; row < height; row++) {
+        final target = row * rowBytes;
+        frozen.setRange(target, target + rowBytes, bytes, row * rowStride);
+      }
     }
+    return frozen;
   }
-  return Uint8List.fromList(bytes);
+
+  // ML Kit's NV21 bridge requires complete, contiguous Y + interleaved VU.
+  if (width.isOdd || height.isOdd || rowStride != width) return null;
+  final needed = width * height * 3 ~/ 2;
+  if (needed > bytes.length) return null;
+  // Do not copy trailing camera-plugin bytes into the OCR input.
+  return Uint8List(needed)..setRange(0, needed, bytes);
 }
