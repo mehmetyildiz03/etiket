@@ -875,3 +875,56 @@ test('web inline pairs cannot skip 257-line cross-block ambiguity inspection', (
   assert.equal(out.pairObservations.length, 0);
   assert.equal(out.detailNeeded, true);
 });
+
+
+test('a frozen decoded counter does not block advancing real presented camera frames', async () => {
+  let now = 10000, callback = null, nextId = 0;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock});
+  const readings = [];
+  const scanner = s.api.create(reading => readings.push(reading));
+  const stream = {...video,
+    getVideoPlaybackQuality: () => ({totalVideoFrames: 27}),
+    requestVideoFrameCallback: cb => { callback = cb; return ++nextId; },
+    cancelVideoFrameCallback: () => {}};
+  assert.equal(await scanner.sample(stream), true);
+  assert.equal(readings[0].freshFrame, false, 'first sample has no prior evidence');
+  now += 2100;
+  assert.equal(await scanner.sample(stream), false,
+    'two frozen clocks must not trigger duplicate OCR');
+  assert.equal(s.calls, 1);
+  callback(); // Browser presents a genuinely new camera frame.
+  assert.equal(await scanner.sample(stream), true,
+    'presented-frame clock recovers OCR even when decoded count is frozen');
+  assert.equal(s.calls, 2);
+  assert.equal(readings[1].freshFrame, true);
+  assert.equal('verified' in readings[1], false);
+  assert.equal('acceptedText' in readings[1], false);
+  now += 2100;
+  assert.equal(await scanner.sample(stream), false,
+    'no third read without another real frame');
+  scanner.stop();
+});
+
+test('decoded frames still advance OCR when a presented-frame callback is delayed', async () => {
+  let now = 10000, decoded = 31, callback = null;
+  const Clock = class extends Date { static now() { return now; } };
+  const s = setup({clock: Clock});
+  const readings = [];
+  const scanner = s.api.create(reading => readings.push(reading));
+  const stream = {...video,
+    getVideoPlaybackQuality: () => ({totalVideoFrames: decoded}),
+    requestVideoFrameCallback: cb => { callback = cb; return 42; },
+    cancelVideoFrameCallback: () => {}};
+  assert.equal(await scanner.sample(stream), true);
+  assert.equal(typeof callback, 'function');
+  now += 2100;
+  decoded++;
+  assert.equal(await scanner.sample(stream), true,
+    'one stalled callback must not block advancing decoded frames');
+  assert.equal(readings[1].freshFrame, true);
+  now += 2100;
+  assert.equal(await scanner.sample(stream), false,
+    'both unchanged clocks block a duplicate OCR pass');
+  scanner.stop();
+});
