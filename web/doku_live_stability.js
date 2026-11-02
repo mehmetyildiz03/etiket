@@ -84,7 +84,8 @@
         textPresent: observation.textPresent, stableFrames, moved,
         detailNeeded: observation.detailNeeded, freshFrame: observation.freshFrame,
         roiOnly: observation.roiOnly,
-        sameFrameLineHints: observation.sameFrameLineHints,
+        sameFrameLineHints: observation.sameFrameLineHints === null ? null :
+          [...observation.sameFrameLineHints],
         stale: false, level: observation.textPresent ? 'yellow' : 'gray'};
     }
     function observe(next, now) {
