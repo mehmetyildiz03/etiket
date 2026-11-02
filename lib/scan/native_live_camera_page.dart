@@ -16,7 +16,6 @@ import 'native_camera_zoom.dart';
 import 'native_camera_torch.dart';
 import 'native_frame_luminance.dart';
 import 'native_pair_pixel_quality.dart';
-import 'native_frame_snapshot.dart';
 import 'native_ocr_byte_snapshot.dart';
 import 'native_live_line_quality.dart';
 import 'live_pair_hints.dart';
@@ -176,7 +175,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             ? (sensor + device) % 360 : (sensor - device + 360) % 360;
   }
 
-  InputImage? _inputImage(CameraImage frame, int rotationDegrees) {
+  ({InputImage image, Uint8List? luma})? _inputImage(
+      CameraImage frame, int rotationDegrees) {
     if (frame.width <= 0 || frame.height <= 0) return null;
 
     // CameraX may deliver three YUV_420_888 planes even if NV21 was
@@ -231,12 +231,23 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
     final rotation = InputImageRotationValue.fromRawValue(rotationDegrees);
     if (rotation == null) return null;
-    return InputImage.fromBytes(
-      bytes: bytes,
-      metadata: InputImageMetadata(
-        size: Size(frame.width.toDouble(), frame.height.toDouble()),
-        rotation: rotation, format: format, bytesPerRow: bytesPerRow,
+    // The Android NV21 OCR input is already an independent camera-frame
+    // snapshot. Reuse its Y plane for matched-line exposure instead of
+    // allocating/copying a second full-resolution luminance buffer. Both
+    // recognition and pixel advice now inspect the same frozen frame.
+    final luma = Platform.isAndroid
+        ? nativeOcrLumaView(bytes, width: frame.width, height: frame.height)
+        : null;
+    if (Platform.isAndroid && luma == null) return null;
+    return (
+      image: InputImage.fromBytes(
+        bytes: bytes,
+        metadata: InputImageMetadata(
+          size: Size(frame.width.toDouble(), frame.height.toDouble()),
+          rotation: rotation, format: format, bytesPerRow: bytesPerRow,
+        ),
       ),
+      luma: luma,
     );
   }
 
@@ -428,8 +439,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       if (camera == null || recognizer == null) { return; }
       final sceneQuality = _quality(frame);
       final rotationDegrees = _rotationDegrees(camera);
-      final input = rotationDegrees == null ? null : _inputImage(frame, rotationDegrees);
-      if (input == null) {
+      final prepared = rotationDegrees == null
+          ? null : _inputImage(frame, rotationDegrees);
+      if (prepared == null) {
         if (mounted && token == _generation) {
           setState(() {
             _advice = 'Bu kameranın kare biçimi desteklenmiyor. Sistem kamerasını kullan.';
@@ -445,19 +457,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         }
         return;
       }
-      // Camera-plugin plane memory may be recycled while native OCR awaits.
-      // Freeze only this sampled frame's Y pixels before yielding. This is
-      // temporary local exposure evidence, never OCR correctness or approval.
-      final plane = frame.planes.isNotEmpty ? frame.planes.first : null;
-      final lumaSnapshot = Platform.isAndroid && plane != null
-          ? snapshotNativeLumaPlane(
-              bytes: plane.bytes,
-              width: frame.width, height: frame.height,
-              rowStride: plane.bytesPerRow,
-              pixelStride: plane.bytesPerPixel ?? 1,
-            )
-          : null;
-      final recognized = await recognizer.processImage(input);
+      // A zero-copy Y view of the frozen OCR NV21 bytes survives the
+      // asynchronous recognizer call. No later camera-plugin buffer is read.
+      final lumaSnapshot = prepared.luma;
+      final recognized = await recognizer.processImage(prepared.image);
       // A rotated phone makes old bounding boxes unsafe for framing hints.
       // Discard the entire stale result; the next sampled frame will retry.
       if (_rotationDegrees(camera) != rotationDegrees) return;
@@ -488,14 +491,14 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           incompleteLineBoxes: result.incompleteLineBoxes,
           missingPercent: result.missingPercent,
         );
-        if (lumaSnapshot == null || plane == null || regions == null) {
+        if (lumaSnapshot == null || regions == null) {
           quality = LiveFrameQuality.unknown;
         } else {
           quality = assessNativeMatchedPairQuality(
             bytes: lumaSnapshot,
             width: frame.width, height: frame.height,
-            // The frozen Y plane is tightly packed, independent of the
-            // camera's padded/pixel-strided source buffer.
+            // The OCR NV21 Y plane is tightly packed and frozen, independent
+            // of the camera's padded/pixel-strided source buffer.
             rowStride: frame.width,
             pixelStride: 1,
             bgra: false,
