@@ -314,11 +314,20 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         }
       }
       for (final blockLines in spatialBlocks) {
-        // ML Kit can split a tiny printed '%' away from a number and fiber.
-        // This is a focus warning only; never add an inferred pair.
-        if (nativeSplitMissingPercentHint(
-            imageSize: dimensions, lines: blockLines)) {
+        // A bare number and fiber can occupy separate ML Kit OCR lines.
+        // Keep the actual union box for LOCAL Y-plane exposure guidance;
+        // never infer a '%' or promote the pair to an accepted value.
+        final splitRegions = nativeSplitMissingPercentRegions(
+            imageSize: dimensions, lines: blockLines);
+        if (splitRegions.isNotEmpty) {
           missingPercent = true;
+          // Overflow intentionally triggers the existing >8 ROI fail-closed
+          // path instead of measuring only the clearest incomplete lines.
+          for (final box in splitRegions) {
+            if (incompleteLineBoxes.length < 9) {
+              incompleteLineBoxes.add(box);
+            }
+          }
         }
       }
       // A same-block split pair is unsafe if a competing ratio/fiber or
