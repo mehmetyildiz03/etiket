@@ -74,7 +74,7 @@
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
         clear();
         return {cues: [], boxes: [], pairBoxes: [], textPresent: false, stableFrames: 0,
-          moved: false, freshFrame: false, detailNeeded: false, stale: true, level: 'gray', sequence: -1, sampledAt: null};
+          moved: false, freshFrame: false, detailNeeded: false, roiOnly: false, stale: true, level: 'gray', sequence: -1, sampledAt: null};
       }
       return {cues: observation.cues, boxes: observation.boxes,
         pairBoxes: observation.pairBoxes,
@@ -82,6 +82,7 @@
         sampledAt: lastTime,
         textPresent: observation.textPresent, stableFrames, moved,
         detailNeeded: observation.detailNeeded, freshFrame: observation.freshFrame,
+        roiOnly: observation.roiOnly,
         stale: false, level: observation.textPresent ? 'yellow' : 'gray'};
     }
     function observe(next, now) {
@@ -160,7 +161,7 @@
       // Even perfectly matching OCR boxes can be from one frozen camera frame.
       // Without an independently advancing decoded/presented-frame clock,
       // candidates remain yellow but cannot accumulate temporal stability.
-      const independentFrame = next.freshFrame === true;
+      const independentFrame = next.freshFrame === true && next.roiOnly !== true;
       const nextFingerprint = independentFrame && completePairs && bounds ?
         cues.map(c => `${c.percent}:${c.fiber.toLocaleLowerCase('tr')}`)
           .sort().join('|') : '';
@@ -181,6 +182,7 @@
         // A missing or tiny printed percent mark is a reason to refocus,
         // never evidence for an inferred ratio or an accepted/green pair.
         detailNeeded: next.detailNeeded === true,
+        roiOnly: next.roiOnly === true,
         freshFrame: independentFrame};
       return view(now);
     }
