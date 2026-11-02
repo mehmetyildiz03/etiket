@@ -17,11 +17,15 @@ void main() {
     expect(luma, orderedEquals([12, 13, 14, 15, 16, 17, 18, 19]));
     expect(luma.length, 8);
     // The luminance view shares the independent OCR snapshot allocation.
-    expect(identical(luma.buffer, frozen.buffer), isTrue);
     cameraBytes.fillRange(0, cameraBytes.length, 255);
     expect(luma.first, 12);
     expect(frozen.first, 12);
     expect(frozen.length, 12);
+    // Mutating the view changes the frozen OCR buffer, not camera memory:
+    // no second Y-plane allocation was made. Production code never writes it.
+    luma[0] = 77;
+    expect(frozen[0], 77);
+    expect(cameraBytes[0], 255);
   });
 
   test('incomplete or invalid NV21 cannot provide exposure evidence', () {
