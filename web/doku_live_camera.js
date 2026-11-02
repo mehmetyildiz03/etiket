@@ -237,9 +237,21 @@
       status.style.cssText = 'margin:0;text-align:center;max-width:560px;font-size:14px';
       status.textContent = 'Kamera hazırlanıyor… Canlı OCR henüz etkin değil; çekimden sonra metni doğrula.';
       const adviceFor = (metrics, reading) => {
-        const lineAdvice = lineExposureAdvice(metrics?.textLineHints);
+        // Same-frame hints came from the frozen OCR canvas, not today's
+        // potentially moved camera view. Ignore stale line geometry; never
+        // treat these exposure categories as text correctness or approval.
+        const sameFrameFresh = reading && !reading.stale &&
+          Array.isArray(reading.sameFrameLineHints) &&
+          Number.isFinite(reading.sampledAt) &&
+          Date.now() - reading.sampledAt >= 0 &&
+          Date.now() - reading.sampledAt <= MAX_PAIR_PIXEL_AGE_MS;
+        const lineAdvice = lineExposureAdvice(sameFrameFresh
+          ? reading.sameFrameLineHints : metrics?.textLineHints);
         if (lineAdvice) return lineAdvice;
-        const hint = root.dokuCaptureGuidance?.evaluate?.(metrics?.textMetrics || metrics);
+        // A clear OCR line must not inherit a false glare warning from the
+        // bright garment/background of a different video frame.
+        const hint = sameFrameFresh ? null :
+          root.dokuCaptureGuidance?.evaluate?.(metrics?.textMetrics || metrics);
         if (hint === 'veryDark') return 'Işığı artır.';
         if (hint === 'veryBright') return 'Parlamayı azalt.';
         if (hint === 'lowDetail') return 'Etiketi yaklaştır ve odakla.';
@@ -738,7 +750,10 @@
         interval = root.setInterval(() => {
           if (done || capturing || focusing || torchBusy || zoomBusy) return;
           try {
-            lastMetrics = sampleQuality(video, canvas, stability?.view(Date.now()));
+            // Never sample a MOVING video under OLD OCR rectangles, even
+            // when WebKit cannot read the OCR canvas. No same-frame pixels
+            // means generic scene-only guidance, not guessed line exposure.
+            lastMetrics = sampleQuality(video, canvas);
             renderStatus();
             // At most one local OCR pass in flight; the scanner drops stale
             // timer ticks and uses a separate bounded 1200px frame.

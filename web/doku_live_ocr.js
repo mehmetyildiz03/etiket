@@ -387,6 +387,71 @@
       detailNeeded, detailBoxes, textPresent, width, height, sequence, durationMs};
   }
 
+
+  // The OCR canvas is a frozen sample of the ACTUAL frame sent to Tesseract.
+  // Derive bounded per-line exposure hints from that canvas AFTER recognition,
+  // rather than sampling a later moving video frame under older OCR boxes.
+  // Only categorical advice leaves this function; never pixels or raw text.
+  function sameFrameLineHints(canvas, reading) {
+    const width = canvas?.width, height = canvas?.height;
+    const boxes = reading?.boxes;
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) ||
+        width <= 0 || height <= 0 || width * height > 2000000 ||
+        !Array.isArray(boxes) || !boxes.length || boxes.length > 24 ||
+        typeof root.dokuCaptureGuidance?.evaluate !== 'function') return null;
+    const valid = boxes.every(b => b &&
+      [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) &&
+      b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
+      b.x1 <= width && b.y1 <= height);
+    if (!valid) return null;
+    let pixels;
+    try {
+      pixels = canvas.getContext('2d', {willReadFrequently: true})
+        ?.getImageData?.(0, 0, width, height)?.data;
+    } catch (_) { return null; }
+    if (!pixels || pixels.length !== width * height * 4) return null;
+    const hints = [];
+    let measured = 0;
+    for (const b of boxes) {
+      const left = Math.max(0, Math.floor(b.x0) - 5);
+      const top = Math.max(0, Math.floor(b.y0) - 5);
+      const right = Math.min(width, Math.ceil(b.x1) + 5);
+      const bottom = Math.min(height, Math.ceil(b.y1) + 5);
+      const sw = Math.min(64, right - left), sh = Math.min(64, bottom - top);
+      if (sw < 16 || sh < 16) continue;
+      let sum = 0, lo = 255, hi = 0, edges = 0;
+      const previous = new Uint8Array(sw);
+      for (let y = 0; y < sh; y++) {
+        const py = Math.min(bottom - 1, top +
+          Math.floor((y + .5) * (bottom - top) / sh));
+        let leftLuma = 0;
+        for (let x = 0; x < sw; x++) {
+          const px = Math.min(right - 1, left +
+            Math.floor((x + .5) * (right - left) / sw));
+          const index = (py * width + px) * 4;
+          const luma = Math.round(.299 * pixels[index] +
+            .587 * pixels[index + 1] + .114 * pixels[index + 2]);
+          sum += luma;
+          lo = Math.min(lo, luma);
+          hi = Math.max(hi, luma);
+          if (x) edges += Math.abs(luma - leftLuma);
+          if (y) edges += Math.abs(luma - previous[x]);
+          previous[x] = luma;
+          leftLuma = luma;
+        }
+      }
+      measured++;
+      const hint = root.dokuCaptureGuidance.evaluate({
+        meanLuminance: sum / (sw * sh), dynamicRange: hi - lo,
+        edgeEnergy: edges / (2 * sw * sh),
+        sampleWidth: sw, sampleHeight: sh
+      });
+      if (hint === 'veryDark' || hint === 'veryBright' || hint === 'lowDetail')
+        hints.push(hint);
+    }
+    return measured ? hints : null;
+  }
+
   function create(onResult, onError) {
     if (!available()) return null;
     let closed = false, busy = false, failed = false, worker = null;
@@ -564,6 +629,8 @@
         if (!closed) {
           const reading = extract(output?.data, width, height, id, Date.now() - started);
           reading.freshFrame = freshFrame; // No raw frame/time metadata leaves the worker.
+          const frameHints = sameFrameLineHints(canvas, reading);
+          if (frameHints !== null) reading.sameFrameLineHints = frameHints;
           if (roi) remapRoiReading(reading, roi);
           // Only a failed HIGH-DETAIL full-frame OCR with one known printed
           // line may schedule one ROI pass. Never derive a crop from a prior
@@ -599,5 +666,6 @@
     }
     return Object.freeze({sample, stop});
   }
-  return Object.freeze({get available() { return available(); }, create, extract});
+  return Object.freeze({get available() { return available(); }, create, extract,
+    sameFrameLineHints});
 });

@@ -1227,3 +1227,25 @@ test('large printed lines keep low-cost sampling and extremely tiny lines fail c
   assert.equal(microscopic.textMetrics, null,
     'subpixel-thin OCR geometry must not be treated as measured readable text');
 });
+
+test('Web live light advice uses the OCR frame, not a later moving video frame', async () => {
+  const s = setup({withOcr: true});
+  const pending = s.api.open();
+  await Promise.resolve(); await Promise.resolve();
+  const status = s.nodes[0].children[2];
+  const box = {x0: 50, y0: 70, x1: 250, y1: 120};
+  s.emitOcr({sequence: 1, width: 1200, height: 675,
+    boxes: [box], pairBoxes: [box], durationMs: 100,
+    pairObservations: [{percent: 80, fiber: 'pamuk', box}],
+    cues: [{percent: 80, fiber: 'pamuk'}], textPresent: true,
+    sameFrameLineHints: ['veryDark']});
+  assert.match(status.textContent, /karanlık kalan satırını aydınlat/,
+    'old OCR geometry must use pixels from its own frozen canvas');
+  s.advance(1300);
+  s.timer();
+  assert.doesNotMatch(status.textContent, /karanlık kalan satırını aydınlat/,
+    'an old frame must not keep driving current camera exposure advice');
+  assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
+  s.api.cancel();
+  assert.equal(await pending, null);
+});
