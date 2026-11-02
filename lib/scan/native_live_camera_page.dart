@@ -330,6 +330,21 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           }
         }
       }
+      // The number and fiber can also be in distinct single-line ML Kit
+      // blocks. Use all blocks to veto ambiguous geometry, and measure only
+      // the real union pixels for local light advice. Never invent '%'.
+      final crossBlockMissing = nativeCrossBlockMissingPercentRegions(
+          imageSize: dimensions, blocks: spatialBlocks);
+      if (crossBlockMissing.isNotEmpty) {
+        missingPercent = true;
+        for (final box in crossBlockMissing) {
+          // Deliberately overflow the ROI budget instead of measuring only
+          // the clearest rows and accidentally reporting usable exposure.
+          if (incompleteLineBoxes.length < 9) {
+            incompleteLineBoxes.add(box);
+          }
+        }
+      }
       // A same-block split pair is unsafe if a competing ratio/fiber or
       // intervening OCR word appears in ANOTHER block on the same row.
       // Inspect all blocks before counting a yellow candidate as stable.
