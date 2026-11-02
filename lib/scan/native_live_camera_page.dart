@@ -480,8 +480,10 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           quality = assessNativeMatchedPairQuality(
             bytes: lumaSnapshot,
             width: frame.width, height: frame.height,
-            rowStride: plane.bytesPerRow,
-            pixelStride: plane.bytesPerPixel ?? 1,
+            // The frozen Y plane is tightly packed, independent of the
+            // camera's padded/pixel-strided source buffer.
+            rowStride: frame.width,
+            pixelStride: 1,
             bgra: false,
             rotationDegrees: rotationDegrees,
             normalizedBoxes: regions,
