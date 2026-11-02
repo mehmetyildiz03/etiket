@@ -74,7 +74,8 @@
       if (!Number.isFinite(now) || now - lastTime > STALE_MS || now < lastTime) {
         clear();
         return {cues: [], boxes: [], pairBoxes: [], textPresent: false, stableFrames: 0,
-          moved: false, freshFrame: false, detailNeeded: false, roiOnly: false, stale: true, level: 'gray', sequence: -1, sampledAt: null};
+          moved: false, freshFrame: false, detailNeeded: false, roiOnly: false, stale: true, level: 'gray', sequence: -1, sampledAt: null,
+          sameFrameLineHints: null};
       }
       return {cues: observation.cues, boxes: observation.boxes,
         pairBoxes: observation.pairBoxes,
@@ -83,6 +84,7 @@
         textPresent: observation.textPresent, stableFrames, moved,
         detailNeeded: observation.detailNeeded, freshFrame: observation.freshFrame,
         roiOnly: observation.roiOnly,
+        sameFrameLineHints: observation.sameFrameLineHints,
         stale: false, level: observation.textPresent ? 'yellow' : 'gray'};
     }
     function observe(next, now) {
@@ -189,7 +191,12 @@
         // never evidence for an inferred ratio or an accepted/green pair.
         detailNeeded: next.detailNeeded === true,
         roiOnly: next.roiOnly === true,
-        freshFrame: independentFrame};
+        freshFrame: independentFrame,
+        sameFrameLineHints: Array.isArray(next.sameFrameLineHints) &&
+          next.sameFrameLineHints.length <= 24 &&
+          next.sameFrameLineHints.every(h =>
+            h === 'veryDark' || h === 'veryBright' || h === 'lowDetail')
+          ? [...next.sameFrameLineHints] : null};
       return view(now);
     }
     return Object.freeze({observe, view, clear});
