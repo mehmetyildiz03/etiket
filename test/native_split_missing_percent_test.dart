@@ -146,4 +146,79 @@ void main() {
       ],
     ), isEmpty);
   });
+
+  test('different ML Kit blocks expose the missing-percent pixel region', () {
+    const frame = Size(128, 96);
+    final regions = nativeCrossBlockMissingPercentRegions(
+      imageSize: frame,
+      blocks: const [
+        [NativeOcrLine('20', Rect.fromLTRB(68, 8, 84, 40))],
+        [NativeOcrLine('KETEN', Rect.fromLTRB(87, 8, 116, 40))],
+        [NativeOcrLine('80%', Rect.fromLTRB(8, 54, 25, 84))],
+        [NativeOcrLine('PAMUK', Rect.fromLTRB(28, 54, 56, 84))],
+      ],
+    );
+    expect(regions, const [Rect.fromLTRB(68, 8, 116, 40)]);
+    final pixels = Uint8List(128 * 96)..fillRange(0, 128 * 96, 245);
+    // The printed complete pair has real light/dark stroke contrast.
+    for (var y = 54; y < 84; y++) {
+      for (var x = 8; x < 56; x++) {
+        if (x.isEven) pixels[y * 128 + x] = 10;
+      }
+    }
+    for (var y = 8; y < 40; y++) {
+      for (var x = 64; x < 120; x++) {
+        pixels[y * 128 + x] = 10;
+      }
+    }
+    final normalized = nativeLiveQualityRegions(
+      imageSize: frame,
+      matchedBoxes: const {
+        '80:pamuk': Rect.fromLTRB(8 / 128, 54 / 96, 56 / 128, 84 / 96),
+      },
+      incompleteLineBoxes: regions,
+      missingPercent: true,
+    );
+    expect(normalized, hasLength(2));
+    expect(assessNativeMatchedPairQuality(
+      bytes: pixels, width: 128, height: 96,
+      rowStride: 128, pixelStride: 1, bgra: false,
+      rotationDegrees: 0, normalizedBoxes: normalized!,
+    ), LiveFrameQuality.dark);
+    // The split line is not a printed ratio, so it cannot become a pair.
+    expect(nativeSpatialPairs(imageSize: frame, lines: const [
+      NativeOcrLine('20', Rect.fromLTRB(68, 8, 84, 40)),
+      NativeOcrLine('KETEN', Rect.fromLTRB(87, 8, 116, 40)),
+    ]), isEmpty);
+  });
+
+  test('cross-block hints reject glyphs, rivals and mixed block layouts', () {
+    final number = [bare];
+    final isolatedFiber = [fiber];
+    expect(nativeCrossBlockMissingPercentRegions(
+      imageSize: size, blocks: [number, isolatedFiber]),
+      [bare.box.expandToInclude(fiber.box)]);
+    expect(nativeCrossBlockMissingPercentRegions(
+      imageSize: size, blocks: [
+        number, isolatedFiber,
+        [const NativeOcrLine('%', Rect.fromLTWH(184, 500, 20, 40))],
+      ]), isEmpty);
+    expect(nativeCrossBlockMissingPercentRegions(
+      imageSize: size, blocks: [
+        number, isolatedFiber,
+        [const NativeOcrLine('KETEN', Rect.fromLTWH(215, 502, 150, 40))],
+      ]), isEmpty);
+    expect(nativeCrossBlockMissingPercentRegions(
+      imageSize: size, blocks: [
+        [bare, const NativeOcrLine('WASH', Rect.fromLTWH(20, 800, 70, 30))],
+        isolatedFiber,
+      ]), isEmpty);
+    expect(nativeCrossBlockMissingPercentRegions(
+      imageSize: size, blocks: [
+        number,
+        [const NativeOcrLine('KETEN', Rect.fromLTWH(-1, 502, 160, 40))],
+        isolatedFiber,
+      ]), isEmpty);
+  });
+
 }

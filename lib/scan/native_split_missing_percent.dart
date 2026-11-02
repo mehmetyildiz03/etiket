@@ -96,3 +96,48 @@ bool nativeSplitMissingPercentHint({
   required List<NativeOcrLine> lines,
 }) => nativeSplitMissingPercentRegions(
   imageSize: imageSize, lines: lines).isNotEmpty;
+
+
+/// ML Kit can put an isolated bare number and fiber in DIFFERENT blocks.
+/// Use every block as a geometry veto, but target only isolated single-line
+/// blocks. This is exposure guidance for a missing printed percent glyph:
+/// it does not manufacture a ratio or contribute to stable/green readiness.
+List<Rect> nativeCrossBlockMissingPercentRegions({
+  required Size imageSize,
+  required List<List<NativeOcrLine>> blocks,
+}) {
+  if (blocks.length < 2 || blocks.length > 128) return const [];
+  final lines = <NativeOcrLine>[];
+  final origins = <int>[];
+  for (var block = 0; block < blocks.length; block++) {
+    for (final line in blocks[block]) {
+      if (lines.length >= 256) return const [];
+      lines.add(line);
+      origins.add(block);
+    }
+  }
+  // The existing same-row matcher rejects overlapping, intervening,
+  // unboxed and competing OCR tokens across ALL blocks.
+  final regions = nativeSplitMissingPercentRegions(
+      imageSize: imageSize, lines: lines);
+  final crossBlock = <Rect>[];
+  for (final region in regions) {
+    var matches = 0;
+    var isolatedAcrossBlocks = false;
+    for (var i = 0; i < lines.length; i++) {
+      if (!_bareRatio.hasMatch(lines[i].text)) continue;
+      for (var j = 0; j < lines.length; j++) {
+        if (liveIsolatedFiber(lines[j].text) == null) continue;
+        if (lines[i].box.expandToInclude(lines[j].box) != region) continue;
+        matches++;
+        isolatedAcrossBlocks = origins[i] != origins[j] &&
+            blocks[origins[i]].length == 1 &&
+            blocks[origins[j]].length == 1;
+      }
+    }
+    // Duplicate geometry must not be treated as a reliable exposure target.
+    if (matches != 1) return const [];
+    if (isolatedAcrossBlocks) crossBlock.add(region);
+  }
+  return List<Rect>.unmodifiable(crossBlock);
+}
