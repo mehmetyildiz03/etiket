@@ -186,9 +186,42 @@
     return found;
   }
 
+
+  // Cross-BLOCK ambiguity for already printed inline pairs. A rival token
+  // at the same physical row must not make a wrong pair look stable.
+  // A suspicious line requests a higher-detail LOCAL OCR retry; never guess.
+  function inlineCrossBlockConflict(candidate, lines, width) {
+    const fiberToken = new RegExp('(?:^|[^\\p{L}])(?:' + fibers + ')(?![\\p{L}])', 'iu');
+    const ratioToken = /(?:%\s*(?:100|[1-9]?[0-9])|(?:100|[1-9]?[0-9])\s*%)/u;
+    const bareToken = /^(?:100|[1-9]?[0-9]|%)$/u;
+    const a = candidate.box;
+    for (const other of lines) {
+      if (other.blockIndex === candidate.blockIndex) continue;
+      const text = other.text.trim();
+      if (!fiberToken.test(text) && !ratioToken.test(text) &&
+          !bareToken.test(text)) continue;
+      const b = other.box;
+      // A possible competing composition token with unknown position is
+      // unsafe, not evidence that it belongs to another label row.
+      if (!b) return true;
+      const ah = a.y1 - a.y0, bh = b.y1 - b.y0;
+      const verticalOverlap = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+      if (verticalOverlap < .5 * Math.min(ah, bh) ||
+          Math.abs((a.y0 + a.y1 - b.y0 - b.y1) / 2) >
+            .5 * Math.max(ah, bh)) continue;
+      const overlaps = a.x0 < b.x1 && a.x1 > b.x0 &&
+        a.y0 < b.y1 && a.y1 > b.y0;
+      // Two complete, nonoverlapping printed pairs may share one row.
+      if (!overlaps && literalPairsFromLine(text).length > 0) continue;
+      const gap = Math.max(0, a.x0 - b.x1, b.x0 - a.x1);
+      if (gap <= Math.min(width * .05, Math.max(ah, bh) * 2)) return true;
+    }
+    return false;
+  }
+
   function extract(data, width, height, sequence, durationMs) {
     const boxes = [], pairBoxes = [], cues = [], pairObservations = [];
-    const unique = new Set(), duplicateKeys = new Set();
+    const unique = new Set(), duplicateKeys = new Set(), inlineCandidates = [];
     let textPresent = false, detailNeeded = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
     // A dense care label can have composition AFTER 30 Tesseract lines or
@@ -199,7 +232,7 @@
     // Keep at most 257 lines: the cross-block matcher rejects >256 rather
     // than silently ignoring a competing token from a dense care label.
     const crossBlockLines = [];
-    for (const block of blocks) {
+    for (const [blockIndex, block] of blocks.entries()) {
       if (remainingLines <= 0) break;
       let blockRemaining = Math.min(256, remainingLines);
       for (const paragraph of (block.paragraphs || []).slice(0, 256)) {
@@ -221,7 +254,7 @@
           const lineBox = validBox ?
             {x0: bb.x0, y0: bb.y0, x1: bb.x1, y1: bb.y1} : null;
           if (crossBlockLines.length <= 256) {
-            crossBlockLines.push({text: value, box: lineBox});
+            crossBlockLines.push({text: value, box: lineBox, blockIndex});
           }
           // Literal printed pairs only; ambiguous token assignment fails closed.
           const matches = literalPairsFromLine(value);
@@ -237,6 +270,7 @@
             const linePairs = [];
             for (const {percent, fiber} of matches) {
               lineHasPair = true;
+              if (lineBox) inlineCandidates.push({percent, fiber, box: lineBox, blockIndex});
               const key = percent + ':' + fiber;
               if (unique.has(key)) {
                 // Two lines claiming the same pair cannot be tracked uniquely.
@@ -316,14 +350,33 @@
         pairObservations.push(candidate);
       }
     }
-    // Tesseract's raw text is intentionally not returned to the camera UI.
-    // Every observation is tied to a literal matched OCR line. A duplicate
-    // key or a non-retained/invalid line has no usable temporal geometry.
-    // No raw text, photo or video frame is returned.
-    return {boxes, pairBoxes, cues,
-      pairObservations: pairObservations.filter(p =>
-        !duplicateKeys.has(p.percent + ':' + p.fiber)),
-      // Boolean advisory only; no raw OCR, pixels or user data leave the worker.
+    // Inline pairs also need GLOBAL cross-block conflict inspection. Without
+    // this, "80% PAMUK" in one Tesseract block and rival "KETEN" in another
+    // could be shown as a stable match. If inspection is truncated, fail closed.
+    const incompleteInspection = (Array.isArray(data?.blocks) &&
+      data.blocks.length > blocks.length) || remainingLines <= 0 ||
+      crossBlockLines.length > 256;
+    const unsafeInlineKeys = new Set();
+    for (const candidate of inlineCandidates) {
+      if (incompleteInspection ||
+          inlineCrossBlockConflict(candidate, crossBlockLines, width)) {
+        unsafeInlineKeys.add(candidate.percent + ':' + candidate.fiber);
+      }
+    }
+    if (unsafeInlineKeys.size) detailNeeded = true;
+    const safeKey = p => !unsafeInlineKeys.has(p.percent + ':' + p.fiber);
+    const safeObservations = pairObservations.filter(p =>
+      safeKey(p) && !duplicateKeys.has(p.percent + ':' + p.fiber));
+    const safePairBoxes = pairBoxes.filter(b =>
+      !inlineCandidates.some(p => !safeKey(p) &&
+        p.box.x0 === b.x0 && p.box.y0 === b.y0 &&
+        p.box.x1 === b.x1 && p.box.y1 === b.y1) ||
+      safeObservations.some(p => p.box.x0 === b.x0 && p.box.y0 === b.y0 &&
+        p.box.x1 === b.x1 && p.box.y1 === b.y1));
+    // No raw OCR, photo or video frame is returned. The conflicting hint is
+    // yellow partial text only, and the next OCR may retry with source pixels.
+    return {boxes, pairBoxes: safePairBoxes, cues: cues.filter(safeKey),
+      pairObservations: safeObservations,
       detailNeeded, textPresent, width, height, sequence, durationMs};
   }
 
