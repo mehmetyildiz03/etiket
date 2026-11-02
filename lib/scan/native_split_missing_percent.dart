@@ -7,17 +7,17 @@ import 'native_spatial_pairs.dart';
 final _bareRatio = RegExp(r'^\s*(?:100|[1-9][0-9]?)\s*$');
 
 /// Advisory ONLY: ML Kit sometimes puts a bare number and a fiber in
-/// different OCR lines within one block. If they occupy one unambiguous row,
-/// request closer focus to check for a tiny missed '%' glyph. This NEVER
-/// creates a percentage-fiber pair, changes OCR text, or enables green.
-bool nativeSplitMissingPercentHint({
+/// different OCR lines within one block. Return the actual bounding rectangles
+/// of unambiguous same-row suspects for local Y-plane light/detail guidance.
+/// No printed '%' is inferred, no OCR text changes, and green is never enabled.
+List<Rect> nativeSplitMissingPercentRegions({
   required Size imageSize,
   required List<NativeOcrLine> lines,
 }) {
   final width = imageSize.width, height = imageSize.height;
   if (!width.isFinite || !height.isFinite || width <= 0 || height <= 0 ||
       width * height > 48000000 || lines.length < 2 || lines.length > 256) {
-    return false;
+    return const [];
   }
 
   bool valid(Rect b) =>
@@ -35,7 +35,7 @@ bool nativeSplitMissingPercentHint({
     if (!valid(line.box)) {
       // A missing box on a competing composition token is ambiguous.
       if (isBare || isFiber || liveHasPossibleCompositionToken(line.text)) {
-        return false;
+        return const [];
       }
       continue;
     }
@@ -43,7 +43,7 @@ bool nativeSplitMissingPercentHint({
     if (isFiber) { fibers.add(i); }
   }
   if (bare.isEmpty || fibers.isEmpty ||
-      bare.length > 8 || fibers.length > 8) { return false; }
+      bare.length > 8 || fibers.length > 8) { return const []; }
 
   bool adjacent(int numberIndex, int fiberIndex) {
     final a = lines[numberIndex].box, b = lines[fiberIndex].box;
@@ -73,11 +73,26 @@ bool nativeSplitMissingPercentHint({
     return true;
   }
 
+  final regions = <Rect>[];
+  final usedFibers = <int>{};
   for (final numberIndex in bare) {
     final matchingFibers = fibers.where((i) => adjacent(numberIndex, i)).toList();
     if (matchingFibers.length != 1) { continue; }
     final fiberIndex = matchingFibers.single;
-    if (bare.where((i) => adjacent(i, fiberIndex)).length == 1) { return true; }
+    if (bare.where((i) => adjacent(i, fiberIndex)).length != 1) { continue; }
+    // A region is only a focus/exposure target, not an inferred percentage.
+    // Reused or excessive targets are ambiguous and fail closed.
+    if (!usedFibers.add(fiberIndex)) return const [];
+    regions.add(lines[numberIndex].box.expandToInclude(lines[fiberIndex].box));
+    if (regions.length > 8) return const [];
   }
-  return false;
+  return List<Rect>.unmodifiable(regions);
 }
+
+/// Preserve the existing advisory API; a split number/fiber never becomes
+/// a literal percentage or authorizes a green/approved camera result.
+bool nativeSplitMissingPercentHint({
+  required Size imageSize,
+  required List<NativeOcrLine> lines,
+}) => nativeSplitMissingPercentRegions(
+  imageSize: imageSize, lines: lines).isNotEmpty;
