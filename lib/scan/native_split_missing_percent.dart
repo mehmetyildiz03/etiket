@@ -96,4 +96,3 @@ bool nativeSplitMissingPercentHint({
   required List<NativeOcrLine> lines,
 }) => nativeSplitMissingPercentRegions(
   imageSize: imageSize, lines: lines).isNotEmpty;
-}
