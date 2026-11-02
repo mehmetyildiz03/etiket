@@ -86,7 +86,27 @@
 
   function sampleQuality(video, canvas, reading = null) {
     if (!video.videoWidth || !video.videoHeight || video.readyState < 2) return null;
-    const scale = 160 / Math.max(video.videoWidth, video.videoHeight);
+    // The default 160px luminance sample is cheap, but can shrink a real
+    // small percentage line below the 16px ROI threshold (including padding).
+    // Only fresh, in-bounds OCR geometry may trigger a bounded 320px sample.
+    // This improves line-specific focus/light advice without upscaling the
+    // OCR itself, retaining pixels, or granting a green/verified result.
+    const age = reading && Number.isFinite(reading.sampledAt)
+      ? Date.now() - reading.sampledAt : Infinity;
+    const freshGeometry = reading && reading.stale === false &&
+      age >= 0 && age <= MAX_PAIR_PIXEL_AGE_MS &&
+      matchesVideoGeometry(video, reading);
+    const source = freshGeometry
+      ? (Array.isArray(reading.pairBoxes) && reading.pairBoxes.length
+        ? reading.pairBoxes : reading.boxes) : null;
+    const valid = Array.isArray(source) ? source.slice(0, 24).filter(b => b &&
+      [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) &&
+      b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
+      b.x1 <= reading.width && b.y1 <= reading.height) : [];
+    const needsDetail = valid.some(b =>
+      (b.y1 - b.y0) * 160 / Math.max(reading.width, reading.height) < 6);
+    const sampleLongSide = needsDetail ? 320 : 160;
+    const scale = sampleLongSide / Math.max(video.videoWidth, video.videoHeight);
     const w = Math.max(16, Math.round(video.videoWidth * scale));
     const h = Math.max(16, Math.round(video.videoHeight * scale));
     canvas.width = w; canvas.height = h;
@@ -114,18 +134,7 @@
     // Stale, invalid and tiny regions are ignored; no pixels are persisted.
     let textMetrics = null;
     let textLineHints = [];
-    const age = reading && Number.isFinite(reading.sampledAt)
-      ? Date.now() - reading.sampledAt : Infinity;
-    if (reading && reading.stale === false &&
-        age >= 0 && age <= MAX_PAIR_PIXEL_AGE_MS &&
-        matchesVideoGeometry(video, reading)) {
-      const source = Array.isArray(reading.pairBoxes) && reading.pairBoxes.length
-        ? reading.pairBoxes : reading.boxes;
-      const valid = Array.isArray(source) ? source.filter(b => b &&
-        [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) &&
-        b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
-        b.x1 <= reading.width && b.y1 <= reading.height).slice(0, 24) : [];
-      if (valid.length) {
+    if (valid.length) {
         // A union rectangle spanning separated OCR lines can include mostly
         // background/garment. It can misreport the text as dark or blurred
         // even when each visible line is well lit. Measure each real line
@@ -169,7 +178,6 @@
             sampleWidth: Math.round(median('sampleWidth')),
             sampleHeight: Math.round(median('sampleHeight'))};
         }
-      }
     }
     // Numeric hints only; neither the text region nor frame verifies OCR.
     return {meanLuminance: total / (w * h), dynamicRange: max - min,
