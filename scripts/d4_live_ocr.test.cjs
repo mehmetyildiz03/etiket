@@ -803,3 +803,75 @@ test('globally unambiguous mixed-block pairs still retain real OCR geometry', ()
   assert.equal(out.pairObservations.length, 2);
   assert.equal('acceptedText' in out, false);
 });
+
+
+test('web inline pair is rejected when another OCR block has a same-row rival', () => {
+  const s = setup();
+  const first = line('80% PAMUK', {x0: 100, y0: 300, x1: 320, y1: 335});
+  for (const rival of ['KETEN', 'WASH KETEN', '20%', '20', '%']) {
+    const data = {blocks: [
+      {paragraphs: [{lines: [first]}]},
+      {paragraphs: [{lines: [line(rival,
+        {x0: 325, y0: 302, x1: 430, y1: 337})]}]}
+    ]};
+    const out = s.api.extract(data, 1200, 675, 1, 100);
+    assert.equal(out.cues.length, 0, rival);
+    assert.equal(out.pairObservations.length, 0, rival);
+    assert.equal(out.pairBoxes.length, 0, rival);
+    assert.equal(out.detailNeeded, true,
+      'ambiguous printed tokens request a bounded source-pixel retry');
+    assert.equal(out.textPresent, true);
+    assert.equal('acceptedText' in out, false);
+  }
+});
+
+test('web inline conflict check preserves independent printed rows and pairs', () => {
+  const s = setup();
+  const first = line('80% PAMUK', {x0: 100, y0: 300, x1: 320, y1: 335});
+  const blocks = (...groups) => ({blocks: groups.map(lines =>
+    ({paragraphs: [{lines}]}))});
+  const differentRow = s.api.extract(blocks([first], [
+    line('KETEN', {x0: 325, y0: 410, x1: 430, y1: 445})
+  ]), 1200, 675, 1, 100);
+  assert.deepEqual(Array.from(differentRow.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk']);
+  const twoPairs = s.api.extract(blocks([first], [
+    line('20% KETEN', {x0: 400, y0: 302, x1: 640, y1: 337})
+  ]), 1200, 675, 2, 100);
+  assert.deepEqual(Array.from(twoPairs.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk', '20:keten']);
+  assert.equal(twoPairs.pairObservations.length, 2);
+  assert.equal(twoPairs.detailNeeded, false);
+});
+
+test('web inline conflict with unlocated rival fails closed, not unrelated care', () => {
+  const s = setup();
+  const first = line('80% PAMUK', {x0: 100, y0: 300, x1: 320, y1: 335});
+  const blocks = (...groups) => ({blocks: groups.map(lines =>
+    ({paragraphs: [{lines}]}))});
+  const unsafe = s.api.extract(blocks([first], [line('KETEN', null)]),
+    1200, 675, 1, 100);
+  assert.equal(unsafe.cues.length, 0);
+  assert.equal(unsafe.pairObservations.length, 0);
+  assert.equal(unsafe.detailNeeded, true);
+  const safe = s.api.extract(blocks([first], [line('WASH CARE', null)]),
+    1200, 675, 2, 100);
+  assert.deepEqual(Array.from(safe.cues, c => c.percent + ':' + c.fiber),
+    ['80:pamuk']);
+});
+
+test('web inline pairs cannot skip 257-line cross-block ambiguity inspection', () => {
+  const s = setup();
+  const care = Array.from({length: 256}, (_, i) =>
+    line('CARE ' + i, {x0: 1, y0: i * 2, x1: 80, y1: i * 2 + 1}));
+  const data = {blocks: [
+    {paragraphs: [{lines: care}]},
+    {paragraphs: [{lines: [
+      line('80% PAMUK', {x0: 100, y0: 550, x1: 310, y1: 580})
+    ]}]}
+  ]};
+  const out = s.api.extract(data, 1200, 675, 1, 100);
+  assert.equal(out.cues.length, 0);
+  assert.equal(out.pairObservations.length, 0);
+  assert.equal(out.detailNeeded, true);
+});
