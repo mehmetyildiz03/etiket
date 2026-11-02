@@ -31,16 +31,65 @@ void main() {
     expect(quality(cameraBuffer), LiveFrameQuality.glare);
   });
 
-  test('padded and strided luma copies only the required Y bytes', () {
-    final cameraBuffer = Uint8List(24)..fillRange(0, 24, 42);
+  test('padded and pixel-strided camera planes pack only actual Y pixels', () {
+    final cameraBuffer = Uint8List(24)..fillRange(0, 24, 255);
+    for (var row = 0; row < 3; row++) {
+      for (var column = 0; column < 4; column++) {
+        cameraBuffer[row * 8 + column * 2] = 10 + row * 4 + column;
+      }
+    }
     final frozen = snapshotNativeLumaPlane(
       bytes: cameraBuffer, width: 4, height: 3,
       rowStride: 8, pixelStride: 2,
     );
     expect(frozen, isNotNull);
-    expect(frozen, hasLength(23));
+    expect(frozen, hasLength(12)); // Not 23 bytes of padded camera data.
+    expect(frozen, orderedEquals(List<int>.generate(12, (i) => i + 10)));
     cameraBuffer[22] = 99;
-    expect(frozen![22], 42);
+    expect(frozen![11], 21);
+  });
+
+  test('rotated OCR ROI reads compact Y, not bright padding', () {
+    const width = 64, height = 64, stride = 160;
+    final source = Uint8List(stride * height)
+      ..fillRange(0, stride * height, 245);
+    for (var row = 0; row < height; row++) {
+      for (var col = 0; col < width; col++) {
+        source[row * stride + col * 2] = 12;
+      }
+    }
+    final frozen = snapshotNativeLumaPlane(
+      bytes: source, width: width, height: height,
+      rowStride: stride, pixelStride: 2,
+    );
+    expect(frozen, hasLength(width * height));
+    LiveFrameQuality measure(Uint8List bytes, int rowStride, int pixelStride) =>
+        assessNativeMatchedPairQuality(
+          bytes: bytes, width: width, height: height,
+          rowStride: rowStride, pixelStride: pixelStride,
+          bgra: false, rotationDegrees: 90,
+          normalizedBoxes: const [Rect.fromLTRB(.2, .2, .8, .8)],
+        );
+    expect(measure(source, stride, 2), LiveFrameQuality.dark);
+    expect(measure(frozen!, width, 1), LiveFrameQuality.dark);
+    source.fillRange(0, source.length, 245);
+    expect(measure(frozen, width, 1), LiveFrameQuality.dark);
+  });
+
+  test('source padding over 16 MiB does not inflate frozen frame', () {
+    const stride = 9 * 1024 * 1024;
+    final source = Uint8List(stride * 2 + 4);
+    source[0] = 11;
+    source[stride] = 22;
+    source[2 * stride] = 33;
+    final frozen = snapshotNativeLumaPlane(
+      bytes: source, width: 4, height: 3,
+      rowStride: stride, pixelStride: 1,
+    );
+    expect(frozen, hasLength(12));
+    expect(frozen![0], 11);
+    expect(frozen[4], 22);
+    expect(frozen[8], 33);
   });
 
   test('truncated, malformed and oversized planes fail closed', () {
