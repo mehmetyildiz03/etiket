@@ -23,6 +23,7 @@ function setup({recognize, clock} = {}) {
         assert.equal(type, 'canvas');
         return {...canvas};
       }},
+    dokuCaptureGuidance: require('../web/doku_capture_guidance.js'),
     Tesseract: {createWorker: async (langs, oem, opts) => {
       assert.equal(langs.join(','), 'tur,eng');
       assert.equal(oem, 1);
@@ -1065,4 +1066,46 @@ test('same-block independent printed rows and complete adjacent pairs survive', 
     ['80:pamuk', '20:keten']);
   assert.equal(complete.pairObservations.length, 2);
   assert.equal(complete.detailNeeded, false);
+});
+
+test('same OCR canvas pixels reveal a dark unreadable row beside a clear pair', () => {
+  const s = setup();
+  const width = 128, height = 96;
+  const pixels = new Uint8ClampedArray(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const dark = x >= 72 && x < 120 && y >= 8 && y < 40;
+      const value = dark ? 12 : x >= 8 && x < 56 && y >= 8 && y < 40 && x % 2 ? 10 : 245;
+      const offset = (y * width + x) * 4;
+      pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = value;
+      pixels[offset + 3] = 255;
+    }
+  }
+  const canvas = {width, height, getContext: () => ({
+    getImageData: () => ({data: pixels})
+  })};
+  const reading = {boxes: [
+    {x0: 8, y0: 8, x1: 56, y1: 40},
+    {x0: 72, y0: 8, x1: 120, y1: 40}
+  ]};
+  const hints = s.api.sameFrameLineHints(canvas, reading);
+  assert.deepEqual(Array.from(hints), ['veryDark']);
+  assert.equal('pixels' in reading, false);
+  assert.equal(s.api.sameFrameLineHints(canvas, {boxes: [
+    {x0: -1, y0: 8, x1: 56, y1: 40}]}), null);
+  assert.equal(s.api.sameFrameLineHints({...canvas, width: 3000000}, reading), null);
+});
+
+test('same-frame exposure helper never exposes raw OCR, pixels or EXIF', () => {
+  const s = setup();
+  const canvas = {width: 64, height: 64, getContext: () => ({
+    getImageData: () => ({data: new Uint8ClampedArray(64 * 64 * 4).fill(12)})
+  })};
+  const hints = s.api.sameFrameLineHints(canvas, {boxes: [
+    {x0: 8, y0: 8, x1: 48, y1: 48}]});
+  assert.deepEqual(Array.from(hints), ['veryDark']);
+  assert.ok(hints.every(x => typeof x === 'string'));
+  assert.equal(s.api.sameFrameLineHints(canvas, {boxes: []}), null);
+  assert.equal(s.api.sameFrameLineHints(canvas, {boxes: Array(25).fill(
+    {x0: 8, y0: 8, x1: 48, y1: 48})}), null);
 });
