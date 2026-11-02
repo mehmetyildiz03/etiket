@@ -16,22 +16,30 @@ List<Rect>? nativeLiveQualityRegions({
   if (imageSize == null || !imageSize.width.isFinite ||
       !imageSize.height.isFinite || imageSize.width <= 0 ||
       imageSize.height <= 0 ||
-      imageSize.width * imageSize.height > 48000000) return null;
+      imageSize.width * imageSize.height > 48000000) {
+    return null;
+  }
 
   final regions = <Rect>[];
-  if (matchedBoxes != null) regions.addAll(matchedBoxes.values);
+  if (matchedBoxes != null) {
+    regions.addAll(matchedBoxes.values);
+  }
 
   if (missingPercent) {
     // A split '%' without usable coordinates is still a reason for a detail
     // retry, but it is NOT evidence that the matched line represents it.
-    if (incompleteLineBoxes.isEmpty) return null;
+    if (incompleteLineBoxes.isEmpty) {
+      return null;
+    }
     for (final box in incompleteLineBoxes) {
       if (!box.left.isFinite || !box.top.isFinite ||
           !box.right.isFinite || !box.bottom.isFinite ||
           box.width <= 0 || box.height <= 0 ||
           box.left < 0 || box.top < 0 ||
           box.right > imageSize.width ||
-          box.bottom > imageSize.height) return null;
+          box.bottom > imageSize.height) {
+        return null;
+      }
       regions.add(Rect.fromLTRB(
         box.left / imageSize.width, box.top / imageSize.height,
         box.right / imageSize.width, box.bottom / imageSize.height,
@@ -39,13 +47,17 @@ List<Rect>? nativeLiveQualityRegions({
     }
   }
 
-  if (regions.isEmpty || regions.length > 8) return null;
+  if (regions.isEmpty || regions.length > 8) {
+    return null;
+  }
   for (final box in regions) {
     if (!box.left.isFinite || !box.top.isFinite ||
         !box.right.isFinite || !box.bottom.isFinite ||
         box.width <= 0 || box.height <= 0 ||
         box.left < 0 || box.top < 0 ||
-        box.right > 1 || box.bottom > 1) return null;
+        box.right > 1 || box.bottom > 1) {
+      return null;
+    }
   }
   return List<Rect>.unmodifiable(regions);
 }
