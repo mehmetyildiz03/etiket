@@ -96,9 +96,19 @@
     const freshGeometry = reading && reading.stale === false &&
       age >= 0 && age <= MAX_PAIR_PIXEL_AGE_MS &&
       matchesVideoGeometry(video, reading);
+    // A correctly read pair must not hide an unreadable percentage row.
+    // Include ALL retained text-line boxes in local exposure/focus advice,
+    // including lines where the '%' was missed. Pair boxes are a subset of
+    // text boxes in a real stability observation. If they disagree, fail
+    // closed to pair-only geometry instead of trusting an unrelated region.
+    const pairSource = Array.isArray(reading?.pairBoxes) ? reading.pairBoxes : [];
+    const textSource = Array.isArray(reading?.boxes) && reading.boxes.length
+      ? reading.boxes : null;
+    const mismatched = textSource && pairSource.some(p =>
+      !textSource.some(b => b && p && b.x0 === p.x0 && b.y0 === p.y0 &&
+        b.x1 === p.x1 && b.y1 === p.y1));
     const source = freshGeometry
-      ? (Array.isArray(reading.pairBoxes) && reading.pairBoxes.length
-        ? reading.pairBoxes : reading.boxes) : null;
+      ? (mismatched ? pairSource : textSource || pairSource) : null;
     const valid = Array.isArray(source) ? source.slice(0, 24).filter(b => b &&
       [b.x0, b.y0, b.x1, b.y1].every(Number.isFinite) &&
       b.x0 >= 0 && b.y0 >= 0 && b.x1 > b.x0 && b.y1 > b.y0 &&
