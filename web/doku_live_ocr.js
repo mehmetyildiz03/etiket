@@ -187,16 +187,19 @@
   }
 
 
-  // Cross-BLOCK ambiguity for already printed inline pairs. A rival token
-  // at the same physical row must not make a wrong pair look stable.
+  // Ambiguity among OCR lines, including siblings in the SAME block. A rival
+  // token at the same physical row must not make a wrong pair look stable.
   // A suspicious line requests a higher-detail LOCAL OCR retry; never guess.
   function inlineCrossBlockConflict(candidate, lines, width) {
     const fiberToken = new RegExp('(?:^|[^\\p{L}])(?:' + fibers + ')(?![\\p{L}])', 'iu');
     const ratioToken = /(?:%\s*(?:100|[1-9]?[0-9])|(?:100|[1-9]?[0-9])\s*%)/u;
     const bareToken = /^(?:100|[1-9]?[0-9]|%)$/u;
     const a = candidate.box;
-    for (const other of lines) {
-      if (other.blockIndex === candidate.blockIndex) continue;
+    for (const [index, other] of lines.entries()) {
+      // Skip only the exact OCR line containing the literal candidate.
+      // Tesseract can put a competing word/percent in a sibling line of
+      // the SAME block; skipping that entire block is unsafe.
+      if (index === candidate.lineIndex) continue;
       const text = other.text.trim();
       if (!fiberToken.test(text) && !ratioToken.test(text) &&
           !bareToken.test(text)) continue;
@@ -272,7 +275,8 @@
             const linePairs = [];
             for (const {percent, fiber} of matches) {
               lineHasPair = true;
-              if (lineBox) inlineCandidates.push({percent, fiber, box: lineBox, blockIndex});
+              if (lineBox) inlineCandidates.push({percent, fiber, box: lineBox,
+                lineIndex: crossBlockLines.length - 1});
               const key = percent + ':' + fiber;
               if (unique.has(key)) {
                 // Two lines claiming the same pair cannot be tracked uniquely.
@@ -352,9 +356,10 @@
         pairObservations.push(candidate);
       }
     }
-    // Inline pairs also need GLOBAL cross-block conflict inspection. Without
-    // this, "80% PAMUK" in one Tesseract block and rival "KETEN" in another
-    // could be shown as a stable match. If inspection is truncated, fail closed.
+    // Inline pairs need GLOBAL line-level conflict inspection. Tesseract may
+    // place a rival "KETEN" or "20%" beside "80% PAMUK" in the SAME block
+    // as a different line, not only in another block. If inspection is
+    // truncated, fail closed.
     const incompleteInspection = (Array.isArray(data?.blocks) &&
       data.blocks.length > blocks.length) || remainingLines <= 0 ||
       crossBlockLines.length > 256;
