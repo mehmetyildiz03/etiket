@@ -83,7 +83,10 @@ List<NativeSpatialPair> nativeUnambiguousSpatialPairs({
           }
         }
       }
-      if (ambiguous || !seen.add(candidate.value)) continue;
+      if (ambiguous) continue;
+      // Repeated identical printed values in different rows are not a
+      // unique spatial observation and must not increase frame stability.
+      if (!seen.add(candidate.value)) return const [];
       if (result.length >= 8) return const [];
       result.add(candidate);
     }
