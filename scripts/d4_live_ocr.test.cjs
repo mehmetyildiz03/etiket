@@ -46,9 +46,14 @@ const video = {readyState: 4, videoWidth: 1920, videoHeight: 1080};
 
 test('same-line literal fiber+percentage cues only, no invented pairs', () => {
   const s = setup();
-  const data = result(line('80% PAMUK'), line('20% polyester'),
-    line('100%'), line('KETEN'), line('40% wash'),
-    line('Keten %60'), line('yün 120%'), line('100% 100%'));
+  // Tesseract's separate physical rows need separate OCR rectangles.
+  // Reusing the exact same box for eight rows would be unsafe geometry.
+  const data = result(...[
+    '80% PAMUK', '20% polyester', '100%', 'KETEN',
+    '40% wash', 'Keten %60', 'yün 120%', '100% 100%'
+  ].map((text, i) => line(text, {
+    x0: 12, y0: 16 + i * 65, x1: 220, y1: 45 + i * 65
+  })));
   const out = s.api.extract(data.data, 1200, 675, 4, 90);
   assert.equal(out.cues.length, 3);
   assert.equal(out.cues[0].percent, 80);
@@ -211,12 +216,13 @@ test('dense labels prioritize a real composition line but never an invalid box',
   lines.push(line('80% PAMUK', {x0: 10, y0: 380, x1: 150, y1: 400}));
   lines.push(line('20% KETEN', {x0: -10, y0: 400, x1: 150, y1: 430}));
   const out = s.api.extract(result(...lines).data, 1200, 675, 1, 80);
-  assert.equal(out.cues.length, 2, 'invalid geometry may still be an unverified text cue');
+  assert.equal(out.cues.length, 1, 'unlocated rival text remains an unverified cue');
   assert.equal(out.boxes.length, 24, 'bounded overlay budget');
-  assert.equal(out.pairBoxes.length, 1, 'retain real composition over unrelated care text');
-  assert.equal(out.pairBoxes[0].y0, 380);
-  assert.equal(out.pairObservations.length, 1, 'invalid second pair cannot gain stability');
-  assert.equal(out.pairObservations[0].fiber, 'pamuk');
+  assert.equal(out.pairBoxes.length, 0,
+    'a same-block unlocated competing pair cannot leave a stable matched box');
+  assert.equal(out.pairObservations.length, 0,
+    'invalid second pair cannot make the first pair look spatially stable');
+  assert.equal(out.detailNeeded, true, 'request another bounded real-pixel read');
   assert.equal('verified' in out, false);
 });
 
