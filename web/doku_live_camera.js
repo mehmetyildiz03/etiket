@@ -237,7 +237,16 @@
       status.style.cssText = 'margin:0;text-align:center;max-width:560px;font-size:14px';
       status.textContent = 'Kamera hazırlanıyor… Canlı OCR henüz etkin değil; çekimden sonra metni doğrula.';
       const adviceFor = (metrics, reading) => {
-        const lineAdvice = lineExposureAdvice(metrics?.textLineHints);
+        // Same-frame hints came from the frozen OCR canvas, not today's
+        // potentially moved camera view. Ignore stale line geometry; never
+        // treat these exposure categories as text correctness or approval.
+        const sameFrameFresh = reading && !reading.stale &&
+          Array.isArray(reading.sameFrameLineHints) &&
+          Number.isFinite(reading.sampledAt) &&
+          Date.now() - reading.sampledAt >= 0 &&
+          Date.now() - reading.sampledAt <= MAX_PAIR_PIXEL_AGE_MS;
+        const lineAdvice = lineExposureAdvice(sameFrameFresh
+          ? reading.sameFrameLineHints : metrics?.textLineHints);
         if (lineAdvice) return lineAdvice;
         const hint = root.dokuCaptureGuidance?.evaluate?.(metrics?.textMetrics || metrics);
         if (hint === 'veryDark') return 'Işığı artır.';
@@ -738,7 +747,11 @@
         interval = root.setInterval(() => {
           if (done || capturing || focusing || torchBusy || zoomBusy) return;
           try {
-            lastMetrics = sampleQuality(video, canvas, stability?.view(Date.now()));
+            const reading = stability?.view(Date.now());
+            // When same-frame evidence exists, do not remeasure a moving
+            // video frame with older OCR coordinates. Scene-only fallback.
+            lastMetrics = sampleQuality(video, canvas,
+              Array.isArray(reading?.sameFrameLineHints) ? null : reading);
             renderStatus();
             // At most one local OCR pass in flight; the scanner drops stale
             // timer ticks and uses a separate bounded 1200px frame.
