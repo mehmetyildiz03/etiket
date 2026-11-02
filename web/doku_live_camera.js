@@ -248,7 +248,10 @@
         const lineAdvice = lineExposureAdvice(sameFrameFresh
           ? reading.sameFrameLineHints : metrics?.textLineHints);
         if (lineAdvice) return lineAdvice;
-        const hint = root.dokuCaptureGuidance?.evaluate?.(metrics?.textMetrics || metrics);
+        // A clear OCR line must not inherit a false glare warning from the
+        // bright garment/background of a different video frame.
+        const hint = sameFrameFresh ? null :
+          root.dokuCaptureGuidance?.evaluate?.(metrics?.textMetrics || metrics);
         if (hint === 'veryDark') return 'Işığı artır.';
         if (hint === 'veryBright') return 'Parlamayı azalt.';
         if (hint === 'lowDetail') return 'Etiketi yaklaştır ve odakla.';
@@ -747,11 +750,10 @@
         interval = root.setInterval(() => {
           if (done || capturing || focusing || torchBusy || zoomBusy) return;
           try {
-            const reading = stability?.view(Date.now());
-            // When same-frame evidence exists, do not remeasure a moving
-            // video frame with older OCR coordinates. Scene-only fallback.
-            lastMetrics = sampleQuality(video, canvas,
-              Array.isArray(reading?.sameFrameLineHints) ? null : reading);
+            // Never sample a MOVING video under OLD OCR rectangles, even
+            // when WebKit cannot read the OCR canvas. No same-frame pixels
+            // means generic scene-only guidance, not guessed line exposure.
+            lastMetrics = sampleQuality(video, canvas);
             renderStatus();
             // At most one local OCR pass in flight; the scanner drops stale
             // timer ticks and uses a separate bounded 1200px frame.
