@@ -1145,6 +1145,48 @@ test('exposure hints never imply OCR approval or a percentage', () => {
   }
 });
 
+test('unreadable percentage row gets real-pixel light advice beside a clear pair', () => {
+  const s = setup();
+  s.context.dokuCaptureGuidance.evaluate =
+    require('../web/doku_capture_guidance.js').evaluate;
+  const canvas = {width: 0, height: 0, getContext() {
+    return {drawImage() {}, getImageData(_x, _y, w, h) {
+      const data = new Uint8ClampedArray(w * h * 4);
+      for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+        // A clearly read 80% PAMUK row is normally exposed; the separate
+        // "20 KETEN" row has no printed percent recovered by OCR and is dark.
+        const unreadable = x >= 203 && x < 277 && y >= 35 && y < 53;
+        const value = unreadable ? 8 : 120;
+        const p = (y * w + x) * 4;
+        data[p] = data[p + 1] = data[p + 2] = value;
+        data[p + 3] = 255;
+      }
+      return {data};
+    }};
+  }};
+  const matched = {x0: 120, y0: 150, x1: 360, y1: 270};
+  const partial = {x0: 780, y0: 150, x1: 1020, y1: 180};
+  const reading = {stale: false, sampledAt: 1000, width: 1200, height: 675,
+    boxes: [matched, partial], pairBoxes: [matched], detailNeeded: true};
+  const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
+  const metrics = s.api.sampleQuality(video, canvas, reading);
+  assert.equal(metrics.sampleWidth, 320,
+    'small unreadable row, not only matched pairs, drives bounded sampling');
+  assert.ok(metrics.textLineHints.includes('veryDark'),
+    'dark partial row must not disappear behind a well-exposed matched row');
+  assert.match(s.api.lineExposureAdvice(metrics.textLineHints), /karanlık/);
+  const matchedOnly = s.api.sampleQuality(video, canvas,
+    {...reading, boxes: [matched]});
+  assert.equal(matchedOnly.sampleWidth, 160);
+  assert.equal(matchedOnly.textLineHints.includes('veryDark'), false,
+    'the exposed matched row alone must not report the dark missing-percent row');
+  assert.equal('rawText' in metrics, false);
+  assert.equal('cues' in metrics, false, 'pixel advice never approves OCR');
+  s.advance(1300);
+  assert.equal(s.api.sampleQuality(video, canvas, reading).textMetrics, null,
+    'old text geometry cannot inspect newer camera pixels');
+});
+
 test('small fresh percentage-line geometry gets bounded higher-detail pixel advice', () => {
   const s = setup();
   const canvas = s.context.document.createElement('canvas');
