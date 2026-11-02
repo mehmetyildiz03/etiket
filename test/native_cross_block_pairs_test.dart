@@ -195,4 +195,84 @@ void main() {
     ]).map((p) => p.value), ['80% pamuk']);
   });
 
+
+  test('three independently printed ML Kit blocks recover a split percent', () {
+    const number = NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40));
+    const glyph = NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20));
+    final found = nativeCrossBlockPairs(imageSize: size, blocks: [
+      [number], [glyph], [fiber],
+    ]);
+    expect(found.map((p) => p.value), ['80% pamuk']);
+    expect(found.single.box, const Rect.fromLTRB(100, 500, 370, 542));
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [number], [fiber],
+    ]), isEmpty, reason: 'an absent printed percent cannot be inferred');
+  });
+
+  test('two split percent rows keep their own printed glyphs and fibers', () {
+    final found = nativeCrossBlockPairs(imageSize: size, blocks: [
+      [const NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40))],
+      [const NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20))],
+      [fiber],
+      [const NativeOcrLine('20', Rect.fromLTWH(100, 610, 80, 40))],
+      [const NativeOcrLine('%', Rect.fromLTWH(185, 620, 18, 20))],
+      [const NativeOcrLine('KETEN', Rect.fromLTWH(210, 612, 160, 40))],
+    ]);
+    expect(found.map((p) => p.value), ['80% pamuk', '20% keten']);
+  });
+
+  test('split glyph blocks reject competing, distant and unboxed tokens', () {
+    const number = NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40));
+    const glyph = NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20));
+    final valid = [[number], [glyph], [fiber]];
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      ...valid,
+      [const NativeOcrLine('KETEN', Rect.fromLTWH(212, 502, 160, 40))],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      ...valid,
+      [const NativeOcrLine('20', Rect.fromLTWH(101, 500, 75, 40))],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      ...valid,
+      [const NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20))],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [number],
+      [const NativeOcrLine('%', Rect.fromLTWH(260, 510, 18, 20))],
+      [fiber],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [number], [glyph], [fiber],
+      [const NativeOcrLine('ASTAR', Rect.fromLTWH(204, 500, 5, 40))],
+    ]), isEmpty);
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [number], [const NativeOcrLine('%', Rect.fromLTWH(-1, 510, 18, 20))],
+      [fiber],
+    ]), isEmpty);
+  });
+
+  test('cross-block glyph recovery rejects unprinted or malformed numbers', () {
+    const glyph = NativeOcrLine('%', Rect.fromLTWH(185, 510, 18, 20));
+    for (final bad in ['00', '0', '120', '80O', '80 %']) {
+      expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+        [NativeOcrLine(bad, const Rect.fromLTWH(100, 500, 80, 40))],
+        [glyph], [fiber],
+      ]), isEmpty, reason: bad);
+    }
+    expect(nativeCrossBlockPairs(imageSize: size, blocks: [
+      [const NativeOcrLine('80', Rect.fromLTWH(100, 500, 80, 40)), glyph],
+      [fiber],
+    ]), isEmpty, reason: 'mixed multi-line block cannot be split across blocks');
+  });
+
+  test('literal and three-block split percentage rows coexist', () {
+    final found = nativeCrossBlockPairs(imageSize: size, blocks: [
+      [ratio], [fiber],
+      [const NativeOcrLine('20', Rect.fromLTWH(100, 610, 80, 40))],
+      [const NativeOcrLine('%', Rect.fromLTWH(185, 620, 18, 20))],
+      [const NativeOcrLine('KETEN', Rect.fromLTWH(210, 612, 160, 40))],
+    ]);
+    expect(found.map((p) => p.value), ['80% pamuk', '20% keten']);
+  });
 }
