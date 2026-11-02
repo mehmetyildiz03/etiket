@@ -269,9 +269,11 @@
           message = 'Gri — ' + advice + ' Canlı OCR kullanılamıyor; fotoğraf sonrası doğrula.';
         } else if (reading.cues.length) {
           const pairs = reading.cues.map(cue => cue.percent + '% ' + cue.fiber).join(', ');
-          const repeat = reading.freshFrame !== true
-            ? ' Tek kare adayı; bağımsız yeni kamera karesi doğrulanamadı, tutarlılık ölçülmüyor.'
-            : reading.stableFrames >= 2
+          const repeat = reading.roiOnly === true
+            ? ' Yakın ayrıntı okuması: yalnız bir satır incelendi; tüm etiket ve kare tutarlılığı doğrulanmadı.'
+            : reading.freshFrame !== true
+              ? ' Tek kare adayı; bağımsız yeni kamera karesi doğrulanamadı, tutarlılık ölçülmüyor.'
+              : reading.stableFrames >= 2
               ? ' ' + reading.stableFrames + ' ayrı OCR karesinde tutarlı göründü; doğrulanmadı.'
               : ' Tek kare adayı; henüz tutarlılık ölçülmedi.';
           message = 'Sarı — doğrulanmamış OCR adayları: ' + pairs + '.' + repeat +
