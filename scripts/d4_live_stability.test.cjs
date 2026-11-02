@@ -288,3 +288,26 @@ test('native-pixel regional OCR stays yellow and never adds full-frame stability
     'next full camera frame must establish a new stability streak');
   assert.equal(s.view(14000).roiOnly, false);
 });
+
+test('missing or tiny percentage on another line breaks live pair stability', () => {
+  const s = create();
+  assert.equal(s.observe(sample(1), 1000).stableFrames, 1);
+  // A real printed 80% PAMUK candidate can coexist with a partial
+  // "20 KETEN" line. Its unresolved percent mark must not allow a stable
+  // full-label claim, even after several distinct camera frames.
+  for (const [sequence, now] of [[2, 3000], [3, 5000]]) {
+    const partial = s.observe({...sample(sequence), detailNeeded: true}, now);
+    assert.equal(partial.level, 'yellow');
+    assert.equal(partial.cues[0].percent, 80,
+      'literal candidate stays visible without inferred missing percent');
+    assert.equal(partial.detailNeeded, true);
+    assert.equal(partial.stableFrames, 0,
+      'unresolved percent must break consecutive-frame stability');
+  }
+  assert.equal(s.observe(sample(4), 7000).stableFrames, 1,
+    'after the missing mark clears, a fresh sequence starts at one');
+  assert.equal(s.observe(sample(5), 9000).stableFrames, 2,
+    'two newly sampled complete frames may report advisory stability');
+  assert.equal(s.view(9000).level, 'yellow',
+    'stable readability remains unverified, never automatic green');
+});
