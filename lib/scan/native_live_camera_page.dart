@@ -18,6 +18,7 @@ import 'native_frame_luminance.dart';
 import 'native_pair_pixel_quality.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
+import 'native_spatial_pair_conflicts.dart';
 import 'native_inline_pair_conflicts.dart';
 import 'native_cross_block_pairs.dart';
 import 'native_split_missing_percent.dart';
@@ -309,15 +310,18 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             imageSize: dimensions, lines: blockLines)) {
           missingPercent = true;
         }
-        for (final candidate in nativeSpatialPairs(
-          imageSize: dimensions, lines: blockLines)) {
-          if (pairBoxes.containsKey(candidate.value)) {
-            duplicatePair = true;
-          } else {
-            pairBoxes[candidate.value] = candidate.box;
-            if (pairs.length < 8) pairs.add(candidate.value);
-            boxes.add(candidate.box);
-          }
+      }
+      // A same-block split pair is unsafe if a competing ratio/fiber or
+      // intervening OCR word appears in ANOTHER block on the same row.
+      // Inspect all blocks before counting a yellow candidate as stable.
+      for (final candidate in nativeUnambiguousSpatialPairs(
+          imageSize: dimensions, blocks: spatialBlocks)) {
+        if (pairBoxes.containsKey(candidate.value)) {
+          duplicatePair = true;
+        } else {
+          pairBoxes[candidate.value] = candidate.box;
+          if (pairs.length < 8) pairs.add(candidate.value);
+          boxes.add(candidate.box);
         }
       }
       // ML Kit may split an explicitly printed '80%' and 'PAMUK' into
