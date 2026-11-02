@@ -4,6 +4,8 @@ import 'dart:ui';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
 
+final _barePrintedNumber = RegExp(r'^(?:100|[1-9][0-9]?)$');
+
 /// Conservatively recovers *printed* percentage/fiber tokens that ML Kit
 /// places in separate single-line text blocks on the same physical row.
 ///
@@ -75,7 +77,11 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
       if (!valid(line.box)) {
         // Unknown geometry of a possible competing composition token cannot
         // be silently ignored when pairing two other blocks.
-        if (liveHasPossibleCompositionToken(line.text)) return const [];
+        if (liveHasPossibleCompositionToken(line.text) ||
+            _barePrintedNumber.hasMatch(line.text.trim()) ||
+            line.text.trim() == '%') {
+          return const [];
+        }
         continue;
       }
       entries.add((block: block, line: line, eligible: eligible));
@@ -84,6 +90,8 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
 
   final ratios = <(int, String)>[];
   final fibers = <(int, String)>[];
+  final bareNumbers = <(int, String)>[];
+  final percentGlyphs = <int>[];
   for (var i = 0; i < entries.length; i++) {
     if (!entries[i].eligible) continue;
     final text = entries[i].line.text;
@@ -91,9 +99,20 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     final fiber = liveIsolatedFiber(text);
     if (ratio != null) ratios.add((i, ratio));
     if (fiber != null) fibers.add((i, fiber));
+    // Split glyphs may be paired only from distinct, isolated one-line blocks.
+    // Mixed/multiline blocks are too ambiguous for three-way recovery.
+    if (blocks[entries[i].block].length == 1) {
+      final token = text.trim();
+      if (_barePrintedNumber.hasMatch(token)) bareNumbers.add((i, token));
+      if (token == '%') percentGlyphs.add(i);
+    }
   }
-  if (ratios.isEmpty || fibers.isEmpty) return const [];
-  if (ratios.length > 8 || fibers.length > 8) {
+  if (fibers.isEmpty ||
+      (ratios.isEmpty && (bareNumbers.isEmpty || percentGlyphs.isEmpty))) {
+    return const [];
+  }
+  if (ratios.length > 8 || fibers.length > 8 ||
+      bareNumbers.length > 8 || percentGlyphs.length > 8) {
     return hasMultiLineColumn ? singleLineFallback() : const [];
   }
   if (hasMultiLineColumn && ratios.length != fibers.length) {
@@ -134,8 +153,52 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     return true;
   }
 
+  // Recover only a REAL printed number + percent glyph + fiber in three
+  // separate ML Kit blocks. This remains a transient yellow OCR hint.
+  bool splitAdjacent(int numberIndex, int glyphIndex, int fiberIndex) {
+    final nBlock = entries[numberIndex].block;
+    final gBlock = entries[glyphIndex].block;
+    final fBlock = entries[fiberIndex].block;
+    if (nBlock == gBlock || nBlock == fBlock || gBlock == fBlock) {
+      return false;
+    }
+    final n = entries[numberIndex].line.box;
+    final g = entries[glyphIndex].line.box;
+    final f = entries[fiberIndex].line.box;
+    if (n.right >= g.left || g.right >= f.left) return false;
+    bool sameRow(Rect a, Rect b) {
+      final overlap = math.min(a.bottom, b.bottom) -
+          math.max(a.top, b.top);
+      return overlap >= .65 * math.min(a.height, b.height) &&
+          (a.center.dy - b.center.dy).abs() <=
+              .45 * math.max(a.height, b.height);
+    }
+    if (!sameRow(n, g) || !sameRow(g, f) || !sameRow(n, f) ||
+        g.left - n.right > math.min(width * .025,
+            math.max(n.height, g.height) * .9) ||
+        f.left - g.right > math.min(width * .04,
+            math.max(n.height, f.height) * 2)) {
+      return false;
+    }
+    for (var i = 0; i < entries.length; i++) {
+      if (i == numberIndex || i == glyphIndex || i == fiberIndex) continue;
+      final other = entries[i].line.box;
+      if (other.overlaps(n) || other.overlaps(g) || other.overlaps(f)) {
+        return false;
+      }
+      final rowOverlap =
+          math.min(other.bottom, math.min(n.bottom, f.bottom)) -
+          math.max(other.top, math.max(n.top, f.top));
+      if (rowOverlap > 0 && other.left < f.left && other.right > n.right) {
+        return false;
+      }
+    }
+    return true;
+  }
+
   final found = <NativeSpatialPair>[];
   final seen = <String>{};
+  final usedFibers = <int>{};
   for (final (ratioIndex, percent) in ratios) {
     final matches = fibers.where((f) => adjacent(ratioIndex, f.$1)).toList();
     if (matches.length > 1) return const []; // Competing fibers.
@@ -146,8 +209,34 @@ List<NativeSpatialPair> nativeCrossBlockPairs({
     }
     final value = '$percent% $fiber';
     if (!seen.add(value)) return const []; // Duplicate composition row.
+    usedFibers.add(fiberIndex);
     found.add(NativeSpatialPair(value,
         entries[ratioIndex].line.box.expandToInclude(entries[fiberIndex].line.box)));
+  }
+  final usedGlyphs = <int>{};
+  for (final (numberIndex, number) in bareNumbers) {
+    final matches = <(int, int, String)>[];
+    for (final glyphIndex in percentGlyphs) {
+      for (final (fiberIndex, fiber) in fibers) {
+        if (splitAdjacent(numberIndex, glyphIndex, fiberIndex)) {
+          matches.add((glyphIndex, fiberIndex, fiber));
+        }
+      }
+    }
+    if (matches.length > 1) return const []; // Competing printed tokens.
+    if (matches.isEmpty) continue;
+    final (glyphIndex, fiberIndex, fiber) = matches.single;
+    if (bareNumbers.where((n) =>
+            splitAdjacent(n.$1, glyphIndex, fiberIndex)).length != 1 ||
+        !usedGlyphs.add(glyphIndex) || !usedFibers.add(fiberIndex)) {
+      return const []; // Competing number or reused glyph/fiber.
+    }
+    final value = '$number% $fiber';
+    if (!seen.add(value)) return const []; // Duplicate row.
+    found.add(NativeSpatialPair(value,
+        entries[numberIndex].line.box
+            .expandToInclude(entries[glyphIndex].line.box)
+            .expandToInclude(entries[fiberIndex].line.box)));
   }
   // For column layouts, a missing/extra row must not be silently paired
   // with another section. Keep partial columns yellow without inventing data.
