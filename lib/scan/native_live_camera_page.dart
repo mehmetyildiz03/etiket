@@ -16,6 +16,7 @@ import 'native_camera_zoom.dart';
 import 'native_camera_torch.dart';
 import 'native_frame_luminance.dart';
 import 'native_pair_pixel_quality.dart';
+import 'native_live_line_quality.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
 import 'native_spatial_pair_conflicts.dart';
@@ -243,12 +244,13 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
 
   ({List<String> pairs, Offset? center, NativeFramingHint framing,
       Map<String, Rect>? trackedBoxes, Size? imageSize, bool textNearEdge,
-      bool missingPercent})
+      bool missingPercent, List<Rect> incompleteLineBoxes})
       _extract(RecognizedText recognized, CameraImage frame,
           int rotationDegrees) {
     final pairs = <String>[];
     final boxes = <Rect>[];
     final visibleTextBoxes = <Rect>[];
+    final incompleteLineBoxes = <Rect>[];
     final spatialBlocks = <List<NativeOcrLine>>[];
     final pairBoxes = <String, Rect>{};
     var duplicatePair = false;
@@ -259,7 +261,15 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         blockLines.add(NativeOcrLine(line.text, line.boundingBox));
         // Advisory only: a bare number near a fiber may be a missed tiny '%'.
         // Do not manufacture a pair or let this signal authorize green.
-        if (liveMissingPercentNearFiber(line.text)) missingPercent = true;
+        if (liveMissingPercentNearFiber(line.text)) {
+          missingPercent = true;
+          // This printed row may be the ONLY unreadable percent line. Keep
+          // its actual ML Kit rectangle for local Y-plane exposure advice.
+          // Store at most nine: the quality helper rejects >8 total ROIs.
+          if (incompleteLineBoxes.length < 9) {
+            incompleteLineBoxes.add(line.boundingBox);
+          }
+        }
         if (line.text.trim().isNotEmpty) visibleTextBoxes.add(line.boundingBox);
         // iOS OCR-box orientation is not yet calibrated on a physical
         // device. Keep its existing unverified text-only candidate path.
@@ -352,7 +362,8 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
     return (pairs: pairs, center: geometry.center,
         framing: Platform.isAndroid ? geometry.hint : NativeFramingHint.unknown,
         trackedBoxes: trackedBoxes, imageSize: dimensions,
-        textNearEdge: textNearEdge, missingPercent: missingPercent);
+        textNearEdge: textNearEdge, missingPercent: missingPercent,
+        incompleteLineBoxes: incompleteLineBoxes);
   }
 
   void _onFrame(CameraImage frame) {
@@ -415,8 +426,18 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       // until real preview/box orientation is calibrated on a device.
       final tracked = result.trackedBoxes;
       LiveFrameQuality quality = sceneQuality;
-      if (Platform.isAndroid && tracked != null && tracked.isNotEmpty) {
-        if (frame.planes.isEmpty) {
+      if (Platform.isAndroid &&
+          ((tracked != null && tracked.isNotEmpty) || result.missingPercent)) {
+        // A clear "80% PAMUK" must not mask a dark "20 KETEN" whose printed
+        // '%' was missed. Measure BOTH actual OCR-line pixel regions, not
+        // the garment background or only the successful matched line.
+        final regions = nativeLiveQualityRegions(
+          imageSize: result.imageSize,
+          matchedBoxes: tracked,
+          incompleteLineBoxes: result.incompleteLineBoxes,
+          missingPercent: result.missingPercent,
+        );
+        if (frame.planes.isEmpty || regions == null) {
           quality = LiveFrameQuality.unknown;
         } else {
           final plane = frame.planes.first;
@@ -427,7 +448,7 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
             pixelStride: plane.bytesPerPixel ?? 1,
             bgra: false,
             rotationDegrees: rotationDegrees,
-            normalizedBoxes: tracked.values,
+            normalizedBoxes: regions,
           );
         }
       }
@@ -449,7 +470,9 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
       setState(() {
         _pairs = result.pairs;
         _textPresent = recognized.text.trim().isNotEmpty;
-        _advice = quality != LiveFrameQuality.usable
+        _advice = result.missingPercent && quality == LiveFrameQuality.unknown
+            ? 'Yüzde işareti eksik okunuyor; yaklaş, sabitle ve yeniden odakla.'
+            : quality != LiveFrameQuality.usable
             ? liveQualityAdvice(quality)
             : nextStableFrames >= 2 && result.textNearEdge
                 ? 'Görünen yazı kadrajın kenarında. Biraz uzaklaş ve etiketi ortala.'
