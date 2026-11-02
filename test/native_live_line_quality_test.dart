@@ -33,7 +33,7 @@ void main() {
         );
 
     final firstOnly = nativeLiveQualityRegions(
-      imageSize: const Size(width.toDouble(), height.toDouble()),
+      imageSize: const Size(128, 96),
       matchedBoxes: const {'80:pamuk': matched},
       incompleteLineBoxes: const [incomplete],
       missingPercent: false,
@@ -42,7 +42,7 @@ void main() {
     expect(quality(firstOnly), LiveFrameQuality.usable);
 
     final both = nativeLiveQualityRegions(
-      imageSize: const Size(width.toDouble(), height.toDouble()),
+      imageSize: const Size(128, 96),
       matchedBoxes: const {'80:pamuk': matched},
       incompleteLineBoxes: const [incomplete],
       missingPercent: true,
