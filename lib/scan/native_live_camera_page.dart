@@ -16,6 +16,7 @@ import 'native_camera_zoom.dart';
 import 'native_camera_torch.dart';
 import 'native_frame_luminance.dart';
 import 'native_pair_pixel_quality.dart';
+import 'native_frame_snapshot.dart';
 import 'native_live_line_quality.dart';
 import 'live_pair_hints.dart';
 import 'native_spatial_pairs.dart';
@@ -430,6 +431,18 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
         }
         return;
       }
+      // Camera-plugin plane memory may be recycled while native OCR awaits.
+      // Freeze only this sampled frame's Y pixels before yielding. This is
+      // temporary local exposure evidence, never OCR correctness or approval.
+      final plane = frame.planes.isNotEmpty ? frame.planes.first : null;
+      final lumaSnapshot = Platform.isAndroid && plane != null
+          ? snapshotNativeLumaPlane(
+              bytes: plane.bytes,
+              width: frame.width, height: frame.height,
+              rowStride: plane.bytesPerRow,
+              pixelStride: plane.bytesPerPixel ?? 1,
+            )
+          : null;
       final recognized = await recognizer.processImage(input);
       // A rotated phone makes old bounding boxes unsafe for framing hints.
       // Discard the entire stale result; the next sampled frame will retry.
@@ -461,12 +474,11 @@ class _NativeLiveCameraPageState extends State<NativeLiveCameraPage>
           incompleteLineBoxes: result.incompleteLineBoxes,
           missingPercent: result.missingPercent,
         );
-        if (frame.planes.isEmpty || regions == null) {
+        if (lumaSnapshot == null || plane == null || regions == null) {
           quality = LiveFrameQuality.unknown;
         } else {
-          final plane = frame.planes.first;
           quality = assessNativeMatchedPairQuality(
-            bytes: plane.bytes,
+            bytes: lumaSnapshot,
             width: frame.width, height: frame.height,
             rowStride: plane.bytesPerRow,
             pixelStride: plane.bytesPerPixel ?? 1,
