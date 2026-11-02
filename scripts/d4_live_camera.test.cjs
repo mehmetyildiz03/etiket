@@ -1178,7 +1178,8 @@ test('unreadable percentage row gets real-pixel light advice beside a clear pair
   const matchedOnly = s.api.sampleQuality(video, canvas,
     {...reading, boxes: [matched]});
   assert.equal(matchedOnly.sampleWidth, 160);
-  assert.equal(matchedOnly.textLineHints.length, 0);
+  assert.equal(matchedOnly.textLineHints.includes('veryDark'), false,
+    'the exposed matched row alone must not report the dark missing-percent row');
   assert.equal('rawText' in metrics, false);
   assert.equal('cues' in metrics, false, 'pixel advice never approves OCR');
   s.advance(1300);
