@@ -1074,7 +1074,7 @@ test('same OCR canvas pixels reveal a dark unreadable row beside a clear pair', 
   const pixels = new Uint8ClampedArray(width * height * 4);
   for (let y = 0; y < height; y++) {
     for (let x = 0; x < width; x++) {
-      const dark = x >= 72 && x < 120 && y >= 8 && y < 40;
+      const dark = x >= 67 && x < 125 && y >= 3 && y < 45;
       const value = dark ? 12 : x >= 8 && x < 56 && y >= 8 && y < 40 && x % 2 ? 10 : 245;
       const offset = (y * width + x) * 4;
       pixels[offset] = pixels[offset + 1] = pixels[offset + 2] = value;
