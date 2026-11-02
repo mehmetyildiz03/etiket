@@ -430,7 +430,8 @@
     function nativeDetailRoi(video, pending, now) {
       if (!pending || now - pending.at > 5000 || now < pending.at ||
           !Number.isFinite(video.videoWidth) || !Number.isFinite(video.videoHeight) ||
-          video.videoWidth <= 1200 || video.videoHeight <= 0 ||
+          Math.max(video.videoWidth, video.videoHeight) <= 1200 ||
+          video.videoHeight <= 0 ||
           Math.abs((pending.width / pending.height) /
             (video.videoWidth / video.videoHeight) - 1) > .025) return null;
       const b = pending.box, vw = video.videoWidth, vh = video.videoHeight;
@@ -560,9 +561,10 @@
           // Only a failed HIGH-DETAIL full-frame OCR with one known printed
           // line may schedule one ROI pass. Never derive a crop from a prior
           // ROI, ambiguous multiple lines, or an unlocated OCR word.
-          if (detail && reading.detailNeeded && reading.detailBoxes.length === 1) {
+          if (detail && reading.detailNeeded && reading.detailBoxes.length === 1 &&
+              reading.durationMs <= 3000) {
             pendingDetailRoi = {box: reading.detailBoxes[0],
-              width, height, at: Date.now()};
+              width, height, at: started};
           }
           inconclusivePasses = reading.pairObservations.length && !reading.detailNeeded
             ? 0 : Math.min(3, inconclusivePasses + 1);
