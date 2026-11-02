@@ -48,3 +48,20 @@ Uint8List? snapshotNativeOcrBytes({
   // Do not copy trailing camera-plugin bytes into the OCR input.
   return Uint8List(needed)..setRange(0, needed, bytes);
 }
+
+
+/// Read-only-by-contract Y-plane VIEW of an already-frozen Android NV21 OCR
+/// input. This does not copy another width*height bytes per sampled frame.
+/// The caller must keep [frozenNv21] alive and must not mutate either view
+/// while ML Kit recognition and pixel-quality sampling are in flight.
+/// Invalid or incomplete NV21 inputs fail closed; this is never OCR approval.
+Uint8List? nativeOcrLumaView(Uint8List frozenNv21, {
+  required int width,
+  required int height,
+}) {
+  if (width <= 0 || height <= 0 || width.isOdd || height.isOdd ||
+      width * height > 12000000) return null;
+  final pixels = width * height;
+  if (frozenNv21.length < pixels + pixels ~/ 2) return null;
+  return Uint8List.sublistView(frozenNv21, 0, pixels);
+}
