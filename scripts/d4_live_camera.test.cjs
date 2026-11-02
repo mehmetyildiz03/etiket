@@ -1144,3 +1144,44 @@ test('exposure hints never imply OCR approval or a percentage', () => {
     assert.doesNotMatch(s.api.lineExposureAdvice(hints), /Yeşil|onaylandı|%|pamuk/);
   }
 });
+
+test('small fresh percentage-line geometry gets bounded higher-detail pixel advice', () => {
+  const s = setup();
+  const canvas = s.context.document.createElement('canvas');
+  const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
+  const line = {x0: 400, y0: 300, x1: 650, y1: 330};
+  const reading = {stale: false, sampledAt: 1000, width: 1200, height: 675,
+    pairBoxes: [line], boxes: [line]};
+  const sampled = s.api.sampleQuality(video, canvas, reading);
+  assert.equal(sampled.sampleWidth, 320, 'tiny text gets a bounded detail sample');
+  assert.equal(sampled.sampleHeight, 180);
+  assert.ok(sampled.textMetrics && sampled.textMetrics.sampleHeight >= 16,
+    'a 30px OCR line must not disappear behind the coarse ROI cutoff');
+  assert.equal('rawText' in sampled, false);
+  assert.equal('image' in sampled, false);
+  assert.equal('cues' in sampled, false, 'pixel quality cannot approve a fiber pair');
+  s.advance(1300);
+  const stale = s.api.sampleQuality(video, canvas, reading);
+  assert.equal(stale.sampleWidth, 160, 'expired OCR boxes cannot trigger extra sampling');
+  assert.equal(stale.textMetrics, null);
+  const invalid = s.api.sampleQuality(video, canvas, {...reading, sampledAt: 2300,
+    pairBoxes: [{x0: -1, y0: 300, x1: 650, y1: 330}]});
+  assert.equal(invalid.sampleWidth, 160, 'invalid geometry cannot trigger detail sampling');
+  assert.equal(invalid.textMetrics, null);
+});
+
+test('large printed lines keep low-cost sampling and extremely tiny lines fail closed', () => {
+  const s = setup();
+  const canvas = s.context.document.createElement('canvas');
+  const video = {videoWidth: 1600, videoHeight: 900, readyState: 4};
+  const base = {stale: false, sampledAt: 1000, width: 1200, height: 675};
+  const large = s.api.sampleQuality(video, canvas, {...base,
+    pairBoxes: [{x0: 400, y0: 300, x1: 650, y1: 390}]});
+  assert.equal(large.sampleWidth, 160);
+  assert.ok(large.textMetrics);
+  const microscopic = s.api.sampleQuality(video, canvas, {...base,
+    pairBoxes: [{x0: 400, y0: 300, x1: 650, y1: 301}]});
+  assert.equal(microscopic.sampleWidth, 320, 'maximum sampling remains capped');
+  assert.equal(microscopic.textMetrics, null,
+    'subpixel-thin OCR geometry must not be treated as measured readable text');
+});
