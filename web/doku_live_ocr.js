@@ -497,6 +497,8 @@
           Date.now() - lastStarted < 2000) return false;
       if (trackedVideo !== video) {
         resetFrameTracking(); // A new camera element has an independent clock.
+        pendingDetailRoi = null; // Old camera geometry cannot crop a new stream.
+        inconclusivePasses = 0;
         trackedVideo = video;
       }
       // OCR sequence numbers prove processing order, NOT independent video frames.
