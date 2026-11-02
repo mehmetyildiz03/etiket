@@ -4,6 +4,36 @@ import 'package:etiket/scan/native_ocr_byte_snapshot.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('Android live OCR and exposure share one frozen NV21 frame', () {
+    final cameraBytes = Uint8List.fromList([
+      12, 13, 14, 15, 16, 17, 18, 19, // 4x2 real Y
+      40, 41, 42, 43, 99, 99, // VU plus plugin trailer
+    ]);
+    final frozen = snapshotNativeOcrBytes(
+      bytes: cameraBytes, width: 4, height: 2,
+      rowStride: 4, bgra: false,
+    )!;
+    final luma = nativeOcrLumaView(frozen, width: 4, height: 2)!;
+    expect(luma, orderedEquals([12, 13, 14, 15, 16, 17, 18, 19]));
+    expect(luma.length, 8);
+    // The luminance view shares the independent OCR snapshot allocation.
+    expect(identical(luma.buffer, frozen.buffer), isTrue);
+    cameraBytes.fillRange(0, cameraBytes.length, 255);
+    expect(luma.first, 12);
+    expect(frozen.first, 12);
+    expect(frozen.length, 12);
+  });
+
+  test('incomplete or invalid NV21 cannot provide exposure evidence', () {
+    final bytes = Uint8List(12);
+    expect(nativeOcrLumaView(bytes, width: 4, height: 2), isNotNull);
+    expect(nativeOcrLumaView(Uint8List.sublistView(bytes, 0, 11),
+        width: 4, height: 2), isNull);
+    expect(nativeOcrLumaView(bytes, width: 3, height: 2), isNull);
+    expect(nativeOcrLumaView(bytes, width: 4, height: 0), isNull);
+    expect(nativeOcrLumaView(bytes, width: 4000, height: 3002), isNull);
+  });
+
   test('NV21 OCR reads sampled frame, not recycled camera bytes', () {
     final cameraBytes = Uint8List.fromList([
       10, 11, 12, 13, 14, 15, 16, 17, // 4x2 Y
