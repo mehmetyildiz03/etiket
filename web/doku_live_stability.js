@@ -107,7 +107,9 @@
       }
       // A later callback may describe an EARLIER frame. Do not let it replace
       // newer evidence or increase temporal stability.
-      if (sampledAt < lastTime) return view(now);
+      // A repeated capture timestamp is not a second independent video frame.
+      // Sequence IDs track callbacks, not distinct decoded camera pixels.
+      if (sampledAt <= lastTime) return view(now);
       if (sampledAt - lastTime > MAX_GAP_MS) {
         fingerprint = ''; center = null; pairGeometry = null; stableFrames = 0;
       }
