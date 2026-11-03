@@ -574,7 +574,7 @@ test('live OCR status counts independent frames, resets motion and expires stale
   s.emitOcr(observation(2));
   assert.match(status.textContent, /2 ayrı OCR karesinde/);
   assert.doesNotMatch(status.textContent, /Yeşil|onaylandı/);
-  s.emitOcr({...observation(3), freshFrame: false});
+  // Give the explicit non-fresh result a later capture time; equal timestamps\n  // are already rejected by the independent-frame guard.\n  s.advance(1);\n  s.emitOcr({...observation(3), freshFrame: false});
   assert.match(status.textContent, /bağımsız yeni kamera karesi doğrulanamadı/);
   assert.doesNotMatch(status.textContent, /3 ayrı OCR karesinde/);
   s.advance(7000);
