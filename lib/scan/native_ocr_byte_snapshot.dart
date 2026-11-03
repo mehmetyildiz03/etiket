@@ -60,7 +60,9 @@ Uint8List? nativeOcrLumaView(Uint8List frozenNv21, {
   required int height,
 }) {
   if (width <= 0 || height <= 0 || width.isOdd || height.isOdd ||
-      width * height > 12000000) return null;
+      width * height > 12000000) {
+    return null;
+  }
   final pixels = width * height;
   if (frozenNv21.length < pixels + pixels ~/ 2) {
     return null;
