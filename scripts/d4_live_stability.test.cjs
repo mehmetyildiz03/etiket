@@ -323,3 +323,13 @@ test('same-frame quality hints are bounded and expire with OCR observations', ()
   const invalid = s.observe({...sample(2), sameFrameLineHints: ['approved']}, 8000);
   assert.equal(invalid.sameFrameLineHints, null);
 });
+
+test('equal capture timestamps cannot count as independent OCR frames', () => {
+  const s = create();
+  assert.equal(s.observe({...sample(1), durationMs: 100}, 1100).stableFrames, 1);
+  // Two callbacks with different sequence IDs but the SAME captured pixels/time.
+  const duplicate = s.observe({...sample(2), durationMs: 1100}, 2100);
+  assert.equal(duplicate.sequence, 1, 'equal-time result must not replace evidence');
+  assert.equal(duplicate.stableFrames, 1, 'duplicate pixels cannot raise stability');
+  assert.equal(s.observe({...sample(3), durationMs: 100}, 3100).stableFrames, 2);
+});
