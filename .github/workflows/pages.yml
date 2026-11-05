@@ -19,7 +19,8 @@ concurrency:
 jobs:
   build-web:
     name: Build Flutter Web
-    runs-on: ubuntu-latest
+    # Playwright 1.56.1 cannot install Chromium on ubuntu-26.04 runners.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
