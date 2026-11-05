@@ -169,15 +169,14 @@
       }
       return true;
     }
-    const found = [], keys = new Set();
+    const found = [];
     for (const ratio of ratios) {
       const matches = names.filter(name => adjacent(ratio, name));
       if (matches.length !== 1) continue;
       const name = matches[0];
       if (ratios.filter(other => adjacent(other, name)).length !== 1) continue;
-      const key = ratio.percent + ':' + name.fiber;
-      if (keys.has(key)) return []; // Repeated values cannot be tracked uniquely.
-      keys.add(key);
+      // Keep repeated literal values at distinct physical locations.
+      // Temporal matching checks their geometry, not just the text key.
       const a = ratio.box, b = name.box;
       found.push({percent: ratio.percent, fiber: name.fiber,
         box: {x0: Math.min(a.x0, b.x0), y0: Math.min(a.y0, b.y0),
@@ -224,7 +223,7 @@
 
   function extract(data, width, height, sequence, durationMs) {
     const boxes = [], pairBoxes = [], cues = [], pairObservations = [], detailBoxes = [];
-    const unique = new Set(), duplicateKeys = new Set(), inlineCandidates = [];
+    const unique = new Set(), inlineCandidates = [];
     let textPresent = false, detailNeeded = false;
     const blocks = Array.isArray(data?.blocks) ? data.blocks.slice(0, 40) : [];
     // A dense care label can have composition AFTER 30 Tesseract lines or
@@ -278,14 +277,12 @@
               if (lineBox) inlineCandidates.push({percent, fiber, box: lineBox,
                 lineIndex: crossBlockLines.length - 1});
               const key = percent + ':' + fiber;
-              if (unique.has(key)) {
-                // Two lines claiming the same pair cannot be tracked uniquely.
-                duplicateKeys.add(key);
-              } else if (cues.length < 8) {
+              if (!unique.has(key) && cues.length < 8) {
                 unique.add(key);
                 cues.push({percent, fiber});
-                linePairs.push({percent, fiber});
               }
+              // Do not discard a second physical line with the same text.
+              if (unique.has(key)) linePairs.push({percent, fiber});
             }
             // Distinguish actual same-line ratio+fiber matches from unrelated
             // OCR text. This geometry is advisory and never verifies a pair.
@@ -330,13 +327,11 @@
     // accepting a candidate before inspecting competing blocks.
     for (const candidate of spatialCandidates(crossBlockLines, width, height)) {
       const key = candidate.percent + ':' + candidate.fiber;
-      if (unique.has(key)) {
-        duplicateKeys.add(key);
-        continue;
+      if (!unique.has(key)) {
+        if (cues.length >= 8) continue;
+        unique.add(key);
+        cues.push({percent: candidate.percent, fiber: candidate.fiber});
       }
-      if (cues.length >= 8) continue;
-      unique.add(key);
-      cues.push({percent: candidate.percent, fiber: candidate.fiber});
       let retained = boxes.length < 24;
       if (!retained) {
         for (let i = boxes.length - 1; i >= 0; i--) {
@@ -373,7 +368,7 @@
     if (unsafeInlineKeys.size) detailNeeded = true;
     const safeKey = p => !unsafeInlineKeys.has(p.percent + ':' + p.fiber);
     const safeObservations = pairObservations.filter(p =>
-      safeKey(p) && !duplicateKeys.has(p.percent + ':' + p.fiber));
+      safeKey(p));
     const safePairBoxes = pairBoxes.filter(b =>
       !inlineCandidates.some(p => !safeKey(p) &&
         p.box.x0 === b.x0 && p.box.y0 === b.y0 &&
