@@ -255,7 +255,9 @@ test('web live OCR never treats repeated or unboxed pair text as stable geometry
     line('80% PAMUK', same), line('80% PAMUK', other)).data,
   1200, 675, 1, 50);
   assert.equal(repeated.cues.length, 1);
-  assert.equal(repeated.pairObservations.length, 0, 'duplicate pair ambiguous');
+  assert.equal(repeated.pairObservations.length, 2, 'distinct printed rows remain separate observations');
+  assert.deepEqual(Array.from(repeated.pairObservations, p => p.box.y0), [40, 100]);
+  assert.ok(repeated.pairObservations.every(p => p.percent === 80 && p.fiber === 'pamuk'));
   const invalid = s.api.extract(result(
     line('80% PAMUK', {x0: -1, y0: 0, x1: 40, y1: 30})).data,
   1200, 675, 2, 50);
