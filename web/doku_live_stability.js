@@ -39,24 +39,44 @@
   // Compare EACH literal percent+fiber pair in OCR-image coordinates.
   // A stable overall center can hide swapped or wandering individual lines.
   // This is advisory-only; it cannot authorize green or an accepted value.
+  function boxesAgree(a, b) {
+    const aw = a.x1 - a.x0, ah = a.y1 - a.y0;
+    const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
+    if (!(aw > 0 && ah > 0 && bw > 0 && bh > 0) ||
+        bw / aw < .67 || bw / aw > 1.5 ||
+        bh / ah < .67 || bh / ah > 1.5 ||
+        Math.hypot((a.x0 + a.x1 - b.x0 - b.x1) / 2,
+          (a.y0 + a.y1 - b.y0 - b.y1) / 2) > .06) return false;
+    const overlapW = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
+    const overlapH = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
+    const intersection = overlapW * overlapH;
+    const union = aw * ah + bw * bh - intersection;
+    return union > 0 && intersection / union >= .35;
+  }
+
+  // Repeated literal values are separate physical observations. Accept only
+  // one unambiguous bijection per value between independent camera frames.
+  // Overlapping duplicates, missing rows or multiple possible assignments
+  // fail closed rather than contributing to temporal stability.
   function pairGeometryAgrees(previous, current) {
     if (!previous || !current || !previous.size ||
         previous.size !== current.size) return false;
-    for (const [key, b] of current) {
-      const a = previous.get(key);
-      if (!a) return false;
-      const aw = a.x1 - a.x0, ah = a.y1 - a.y0;
-      const bw = b.x1 - b.x0, bh = b.y1 - b.y0;
-      if (!(aw > 0 && ah > 0 && bw > 0 && bh > 0) ||
-          bw / aw < .67 || bw / aw > 1.5 ||
-          bh / ah < .67 || bh / ah > 1.5 ||
-          Math.hypot((a.x0 + a.x1 - b.x0 - b.x1) / 2,
-            (a.y0 + a.y1 - b.y0 - b.y1) / 2) > .06) return false;
-      const overlapW = Math.max(0, Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0));
-      const overlapH = Math.max(0, Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0));
-      const intersection = overlapW * overlapH;
-      const union = aw * ah + bw * bh - intersection;
-      if (!(union > 0 && intersection / union >= .35)) return false;
+    for (const [key, currentBoxes] of current) {
+      const oldBoxes = previous.get(key);
+      if (!oldBoxes || oldBoxes.length !== currentBoxes.length) return false;
+      const n = currentBoxes.length;
+      if (n > 8) return false;
+      let ways = 0;
+      function assign(i, used) {
+        if (ways > 1) return;
+        if (i === n) { ways++; return; }
+        for (let j = 0; j < n; j++) {
+          if (!(used & (1 << j)) && boxesAgree(oldBoxes[i], currentBoxes[j]))
+            assign(i + 1, used | (1 << j));
+        }
+      }
+      assign(0, 0);
+      if (ways !== 1) return false;
     }
     return true;
   }
@@ -138,6 +158,7 @@
       const observations = Array.isArray(next.pairObservations)
         ? next.pairObservations.slice(0, 16) : [];
       const currentGeometry = new Map();
+      let invalidGeometry = false;
       for (const item of observations) {
         const b = item?.box;
         const key = item?.percent + ':' + item?.fiber;
@@ -145,16 +166,24 @@
             c.fiber === item.fiber) ||
             !pairBoxes.some(p => p.x0 === b.x0 && p.y0 === b.y0 &&
               p.x1 === b.x1 && p.y1 === b.y1) ||
-            currentGeometry.has(key) ||
             !(Number.isFinite(next.width) && next.width > 0 &&
               Number.isFinite(next.height) && next.height > 0)) {
-          currentGeometry.clear(); break;
+          invalidGeometry = true; break;
         }
-        currentGeometry.set(key, {x0: b.x0 / next.width, y0: b.y0 / next.height,
-          x1: b.x1 / next.width, y1: b.y1 / next.height});
+        const normalized = {x0: b.x0 / next.width, y0: b.y0 / next.height,
+          x1: b.x1 / next.width, y1: b.y1 / next.height};
+        const group = currentGeometry.get(key) || [];
+        if (group.length >= 8 || group.some(other =>
+            boxesAgree(other, normalized))) {
+          invalidGeometry = true; break;
+        }
+        group.push(normalized);
+        currentGeometry.set(key, group);
       }
-      // All candidates need unique, retained, real OCR-line geometry.
-      const completePairs = cues.length > 0 && currentGeometry.size === cues.length;
+      if (invalidGeometry) currentGeometry.clear();
+      const completePairs = cues.length > 0 &&
+        currentGeometry.size === cues.length && observations.length > 0 &&
+        observations.length <= 8;
       const hasGeometry = Number.isFinite(next.width) && next.width > 0 &&
         Number.isFinite(next.height) && next.height > 0 && boxes.length > 0;
       const bounds = hasGeometry ? {
@@ -174,7 +203,7 @@
       // detail before counting any consecutive frames.
       const nextFingerprint = independentFrame && completePairs && bounds &&
         next.detailNeeded !== true ?
-        cues.map(c => `${c.percent}:${c.fiber.toLocaleLowerCase('tr')}`)
+        cues.map(c => `${c.percent}:${c.fiber.toLocaleLowerCase('tr')}:${currentGeometry.get(c.percent + ':' + c.fiber)?.length || 0}`)
           .sort().join('|') : '';
       const samePairGeometry = pairGeometryAgrees(pairGeometry, currentGeometry);
       moved = !!((center && bounds &&
