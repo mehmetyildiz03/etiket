@@ -181,19 +181,16 @@
         currentGeometry.set(key, group);
       }
       if (invalidGeometry) currentGeometry.clear();
-      // A literal pair may occur on multiple distinct physical label rows.
-      // Require one geometrically distinct observation per OCR cue, including
-      // multiplicity; comparing unique map keys with cue count loses repeats.
-      const cueCounts = new Map();
-      for (const cue of cues) {
-        const key = cue.percent + ':' + cue.fiber;
-        cueCounts.set(key, (cueCounts.get(key) || 0) + 1);
-      }
-      const completePairs = !invalidGeometry && cues.length > 0 &&
-        observations.length === cues.length && observations.length <= 8 &&
-        currentGeometry.size === cueCounts.size &&
-        [...cueCounts].every(([key, count]) =>
-          currentGeometry.get(key)?.length === count);
+      // OCR cues are unique literal values, while observations preserve
+      // separate physical rows. Never equate their counts: two printed rows
+      // may both say 80% PAMUK. Every cue must have physical evidence and
+      // every observation must correspond to one of those cues; overlapping
+      // or ambiguous observations were already rejected above.
+      const cueKeys = new Set(cues.map(c => c.percent + ':' + c.fiber));
+      const completePairs = !invalidGeometry && cueKeys.size > 0 &&
+        cueKeys.size === cues.length && observations.length >= cues.length &&
+        observations.length <= 8 && currentGeometry.size === cueKeys.size &&
+        [...cueKeys].every(key => (currentGeometry.get(key)?.length || 0) >= 1);
       const hasGeometry = Number.isFinite(next.width) && next.width > 0 &&
         Number.isFinite(next.height) && next.height > 0 && boxes.length > 0;
       const bounds = hasGeometry ? {
