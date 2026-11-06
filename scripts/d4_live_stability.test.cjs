@@ -333,3 +333,36 @@ test('equal capture timestamps cannot count as independent OCR frames', () => {
   assert.equal(duplicate.stableFrames, 1, 'duplicate pixels cannot raise stability');
   assert.equal(s.observe({...sample(3), durationMs: 100}, 3100).stableFrames, 2);
 });
+
+
+test('repeated literal pairs on distinct physical rows count as complete observations', () => {
+  const s = create();
+  const top = {x0: 20, y0: 40, x1: 220, y1: 100};
+  const bottom = {x0: 20, y0: 180, x1: 220, y1: 240};
+  const cues = [{percent: 50, fiber: 'pamuk'}, {percent: 50, fiber: 'pamuk'}];
+  const frame = sequence => ({
+    sequence, cues, boxes: [top, bottom], pairBoxes: [top, bottom],
+    pairObservations: [{...cues[0], box: top}, {...cues[1], box: bottom}],
+    width: 1000, height: 500, textPresent: true, freshFrame: true
+  });
+  assert.equal(s.observe(frame(1), 1000).stableFrames, 1);
+  const second = s.observe(frame(2), 3000);
+  assert.equal(second.stableFrames, 2);
+  assert.equal(second.level, 'yellow', 'repeated matches never authorize green');
+});
+
+test('missing or overlapping repeated physical pair observations fail closed', () => {
+  const s = create();
+  const top = box(20), bottom = {x0: 20, y0: 180, x1: 220, y1: 240};
+  const cues = [{percent: 50, fiber: 'pamuk'}, {percent: 50, fiber: 'pamuk'}];
+  const base = {cues, boxes: [top, bottom], pairBoxes: [top, bottom],
+    width: 1000, height: 500, freshFrame: true, textPresent: true};
+  assert.equal(s.observe({...base, sequence: 1,
+    pairObservations: [{...cues[0], box: top}]}, 1000).stableFrames, 0);
+  assert.equal(s.observe({...base, sequence: 2,
+    pairObservations: [{...cues[0], box: top}, {...cues[1], box: top}]},
+  3000).stableFrames, 0);
+  assert.equal(s.observe({...base, sequence: 3,
+    pairObservations: [{...cues[0], box: top}, {...cues[1], box: bottom}]},
+  5000).stableFrames, 1);
+});
