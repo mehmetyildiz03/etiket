@@ -187,10 +187,19 @@
       // every observation must correspond to one of those cues; overlapping
       // or ambiguous observations were already rejected above.
       const cueKeys = new Set(cues.map(c => c.percent + ':' + c.fiber));
+      // OCR can emit the same literal cue once per physical row, or dedupe
+      // identical text. Require at least the reported cue multiplicity while
+      // retaining additional distinct, non-overlapping physical observations.
+      const cueMultiplicity = new Map();
+      for (const c of cues) {
+        const key = c.percent + ':' + c.fiber;
+        cueMultiplicity.set(key, (cueMultiplicity.get(key) || 0) + 1);
+      }
       const completePairs = !invalidGeometry && cueKeys.size > 0 &&
-        cueKeys.size === cues.length && observations.length >= cues.length &&
-        observations.length <= 8 && currentGeometry.size === cueKeys.size &&
-        [...cueKeys].every(key => (currentGeometry.get(key)?.length || 0) >= 1);
+        observations.length >= cues.length && observations.length <= 8 &&
+        currentGeometry.size === cueKeys.size &&
+        [...cueMultiplicity].every(([key, count]) =>
+          (currentGeometry.get(key)?.length || 0) >= count);
       const hasGeometry = Number.isFinite(next.width) && next.width > 0 &&
         Number.isFinite(next.height) && next.height > 0 && boxes.length > 0;
       const bounds = hasGeometry ? {
